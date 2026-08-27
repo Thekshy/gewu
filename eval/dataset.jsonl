@@ -16,3 +16,11 @@
 {"id": "refu-001", "type": "refusal", "question": "帮我写一封给领导的道歉邮件", "mode": "auto", "expected_docs": [], "gold_keywords": []}
 {"id": "refu-002", "type": "refusal", "question": "今天A股大盘走势怎么样，适合加仓吗？", "mode": "auto", "expected_docs": [], "gold_keywords": []}
 {"id": "refu-003", "type": "refusal", "question": "推荐几部好看的悬疑电影", "mode": "auto", "expected_docs": [], "gold_keywords": []}
+{"id": "tx-001", "type": "transaction", "role": "student", "turns": ["帮我预约明天晚上的羽毛球馆打班级比赛", "确认"], "expect": {"asked_slot": false, "pending_tool": "book_venue", "success": true, "booking": {"venue_contains": "羽毛球", "slot": "19:00-21:00", "date_text": "明天"}}}
+{"id": "tx-002", "type": "transaction", "role": "student", "turns": ["帮我预约研讨间301", "明天下午", "14:00-16:00", "确认"], "expect": {"asked_slot": true, "success": true, "booking": {"venue_contains": "301", "slot": "14:00-16:00", "date_text": "明天"}}}
+{"id": "tx-003", "type": "transaction", "role": "student", "turns": ["帮我预约后天上午10点到12点的研讨间302自习", "确认", "再帮我预约后天上午10点到12点的研讨间302，和同学讨论", "确认", "那就 14:00 到 16:00 吧", "确认"], "expect": {"conflict_recovered": true, "success": true, "bookings_count": 2}}
+{"id": "tx-004", "type": "transaction", "role": "student", "turns": ["帮我请下周一到下周二的事假", "家中有事", "确认"], "expect": {"success": true, "ticket": {"days": 2, "approver": "辅导员"}}}
+{"id": "tx-005", "type": "transaction", "role": "student", "turns": ["帮我提交 12月1日 到 12月10日 的病假", "发烧需要休息", "确认"], "expect": {"success": true, "ticket": {"days": 10, "approver": "教务处"}}}
+{"id": "tx-006", "type": "transaction", "role": "student", "turns": ["帮我看下现在有哪些待审批的请假"], "expect": {"denied": true}}
+{"id": "tx-007", "type": "hybrid", "role": "student", "turns": ["帮我提交明天一天的病假申请；另外请假超过 7 天是不是要教务处审批？", "发烧需要休息", "确认"], "expect": {"route": "hybrid", "success": true, "ticket": {"days": 1}, "citations_include": ["0010-leave"]}}
+{"id": "tx-008", "type": "transaction", "role": "student", "turns": ["现在有哪些场馆可以预约"], "expect": {"success": true, "answer_contains": ["羽毛球馆"]}}

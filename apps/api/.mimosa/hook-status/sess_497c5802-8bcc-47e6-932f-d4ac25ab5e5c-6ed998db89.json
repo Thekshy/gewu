@@ -1,14 +1,14 @@
 {
   "schemaVersion": "mimosa-hook-status/v1",
-  "recordedAt": "2026-08-27T03:21:41.322Z",
+  "recordedAt": "2026-08-27T15:13:54.152Z",
   "sessionId": "sess_497c5802-8bcc-47e6-932f-d4ac25ab5e5c",
   "event": "PostToolUse",
   "toolName": "Edit",
-  "file": "tests/test_store.py",
+  "file": "/Users/mrpwn/Project/mine/gewu/.gitignore",
   "outcome": "clear",
   "coverage": "complete",
   "findingCount": 0,
-  "durationMs": 4,
+  "durationMs": 2,
   "hostState": "hook_complete",
   "reportHint": ".mimosa/reports/"
 }

@@ -10,6 +10,7 @@ from fastapi.responses import StreamingResponse
 
 from . import __version__, llm
 from .agent.pipeline import get_retriever, run_chat
+from .agent.tools import business
 from .budget import BudgetExceeded, budget
 from .config import get_settings
 from .rate_limit import RateLimitMiddleware
@@ -77,7 +78,7 @@ def chat(req: ChatRequest):
         raise HTTPException(429, str(exc)) from exc
 
     def gen():
-        for event in run_chat(req.question, req.mode):
+        for event in run_chat(req.question, req.mode, req.session_id, req.role):
             yield f"data: {json.dumps(event, ensure_ascii=False)}\n\n"
 
     return StreamingResponse(
@@ -85,3 +86,16 @@ def chat(req: ChatRequest):
         media_type="text/event-stream",
         headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
     )
+
+
+@app.post("/api/business/reset")
+def business_reset():
+    """清空 mock 业务数据（演示/评测用）。"""
+    business.reset()
+    return {"status": "ok"}
+
+
+@app.get("/api/business/overview")
+def business_overview():
+    """调试：查看当前预约与请假单。"""
+    return {"bookings": business.all_bookings(), "tickets": business.all_tickets()}

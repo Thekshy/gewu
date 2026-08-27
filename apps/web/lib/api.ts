@@ -11,6 +11,19 @@ export interface Step {
   sources: string[];
 }
 
+export interface PendingAction {
+  tool: string;
+  label: string;
+  args: Record<string, string>;
+}
+
+export interface ActionResult {
+  tool: string;
+  success: boolean;
+  message: string;
+  receipt?: string | null;
+}
+
 export interface ChatEvent {
   type: string;
   [key: string]: unknown;
@@ -26,6 +39,8 @@ export interface HealthInfo {
   budget: { used: number; limit: number };
 }
 
+export type Role = "student" | "counselor";
+
 export const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://127.0.0.1:8000";
 
 export async function fetchHealth(): Promise<HealthInfo | null> {
@@ -38,16 +53,27 @@ export async function fetchHealth(): Promise<HealthInfo | null> {
   }
 }
 
+export interface ChatOpts {
+  sessionId?: string;
+  role?: Role;
+}
+
 /** 调用 /api/chat 的 SSE 流，逐事件回调。 */
 export async function streamChat(
   question: string,
   mode: "auto" | "direct" | "research",
   onEvent: (ev: ChatEvent) => void,
+  opts: ChatOpts = {},
 ): Promise<void> {
   const res = await fetch(`${API_BASE}/api/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ question, mode }),
+    body: JSON.stringify({
+      question,
+      mode,
+      session_id: opts.sessionId ?? "default",
+      role: opts.role ?? "student",
+    }),
   });
   if (!res.ok || !res.body) {
     throw new Error(`请求失败（HTTP ${res.status}）`);

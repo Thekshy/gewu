@@ -5,9 +5,12 @@ import {
   API_BASE,
   fetchHealth,
   streamChat,
+  type ActionResult,
   type ChatEvent,
   type Citation,
   type HealthInfo,
+  type PendingAction,
+  type Role,
   type Step,
 } from "@/lib/api";
 
@@ -21,6 +24,8 @@ interface Msg {
   status?: string;
   steps: Step[];
   citations: Citation[];
+  pendingAction?: PendingAction;
+  actionResult?: ActionResult;
   latency?: number;
   error?: string;
   done: boolean;
@@ -30,21 +35,27 @@ const ROUTE_LABEL: Record<string, string> = {
   factual: "直答",
   research: "深度研究",
   refusal: "范围外",
+  transaction: "办理",
+  hybrid: "问答 + 办理",
 };
 
 const SUGGESTIONS = [
+  "帮我预约明天晚上的羽毛球馆打班级比赛",
+  "帮我请下周一到下周二的事假，另外超过 7 天是不是要教务处批？",
   "转专业之后原课程绩点还算吗？会影响保研吗？",
-  "想申请国奖但体测没过，有补救办法吗？",
-  "图书馆一次能借几本书、借多久？",
 ];
 
 export default function Home() {
   const [messages, setMessages] = useState<Msg[]>([]);
   const [input, setInput] = useState("");
   const [mode, setMode] = useState<Mode>("auto");
+  const [role, setRole] = useState<Role>("student");
   const [sending, setSending] = useState(false);
   const [health, setHealth] = useState<HealthInfo | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const sessionId = useRef<string>(
+    typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `s-${Date.now()}`,
+  );
 
   useEffect(() => {
     fetchHealth().then(setHealth);
@@ -75,31 +86,55 @@ export default function Home() {
       { role: "assistant", text: "", steps: [], citations: [], done: false },
     ]);
     try {
-      await streamChat(question, mode, (ev: ChatEvent) => {
-        switch (ev.type) {
-          case "route":
-            patchLast({ route: String(ev.route), reason: String(ev.reason ?? "") });
-            break;
-          case "status":
-            patchLast({ status: String(ev.text ?? "") });
-            break;
-          case "step":
-            patchLast((m) => ({ ...m, steps: [...m.steps, ev as unknown as Step] }));
-            break;
-          case "answer_delta":
-            patchLast((m) => ({ ...m, text: m.text + String(ev.text ?? "") }));
-            break;
-          case "citations":
-            patchLast({ citations: (ev.items as Citation[]) ?? [] });
-            break;
-          case "error":
-            patchLast({ error: String(ev.message ?? "未知错误") });
-            break;
-          case "done":
-            patchLast({ done: true, latency: Number(ev.latency_ms ?? 0), status: undefined });
-            break;
-        }
-      });
+      await streamChat(
+        question,
+        mode,
+        (ev: ChatEvent) => {
+          switch (ev.type) {
+            case "route":
+              patchLast({ route: String(ev.route), reason: String(ev.reason ?? "") });
+              break;
+            case "status":
+              patchLast({ status: String(ev.text ?? "") });
+              break;
+            case "step":
+              patchLast((m) => ({ ...m, steps: [...m.steps, ev as unknown as Step] }));
+              break;
+            case "answer_delta":
+              patchLast((m) => ({ ...m, text: m.text + String(ev.text ?? "") }));
+              break;
+            case "citations":
+              patchLast({ citations: (ev.items as Citation[]) ?? [] });
+              break;
+            case "pending_action":
+              patchLast({
+                pendingAction: {
+                  tool: String(ev.tool),
+                  label: String(ev.label),
+                  args: (ev.args as Record<string, string>) ?? {},
+                },
+              });
+              break;
+            case "action_result":
+              patchLast({
+                actionResult: {
+                  tool: String(ev.tool),
+                  success: Boolean(ev.success),
+                  message: String(ev.message ?? ""),
+                  receipt: (ev.receipt as string | null) ?? null,
+                },
+              });
+              break;
+            case "error":
+              patchLast({ error: String(ev.message ?? "未知错误") });
+              break;
+            case "done":
+              patchLast({ done: true, latency: Number(ev.latency_ms ?? 0), status: undefined });
+              break;
+          }
+        },
+        { sessionId: sessionId.current, role },
+      );
     } catch (err) {
       patchLast({ error: err instanceof Error ? err.message : String(err), done: true });
     } finally {
@@ -113,10 +148,10 @@ export default function Home() {
         <div className="logo" aria-hidden>
           格
         </div>
-        <div>
+        <div className="header-main">
           <h1>格物</h1>
           <p className="tagline">
-            钱塘大学校园智能问答 · RAG 直答 × Deep Research
+            钱塘大学校园智能问答 · RAG 直答 × Deep Research × 业务办理
             {health && (
               <span className="stat">
                 {health.docs} 篇文档 / {health.chunks} chunks
@@ -124,11 +159,20 @@ export default function Home() {
             )}
           </p>
         </div>
+        <select
+          className="role-select"
+          value={role}
+          onChange={(e) => setRole(e.target.value as Role)}
+          title="演示身份（权限不同）"
+        >
+          <option value="student">学生身份</option>
+          <option value="counselor">辅导员身份</option>
+        </select>
       </header>
 
       {health && !health.llm && (
         <div className="banner">
-          检索演示模式：未配置 LLM_API_KEY，回答为知识库检索节选，配置后即可体验完整问答。
+          检索演示模式：未配置 LLM_API_KEY。知识问答展示检索节选；业务办理走完整流程（槽位收集 → 确认 → 回执）。
         </div>
       )}
       {!health && <div className="banner warn">连不上后端（{API_BASE}），请先启动 API 服务。</div>}
@@ -136,8 +180,10 @@ export default function Home() {
       <section className="chat" aria-label="对话区">
         {messages.length === 0 && (
           <div className="empty">
-            <p>问问校园里的事，比如转专业、保研、奖学金、图书馆、校历……</p>
-            <p className="hint">复合问题会自动进入深度研究链路：拆解 → 多路检索 → 交叉综合。</p>
+            <p>问校园政策，或者直接办事——预约场馆、提交请假。</p>
+            <p className="hint">
+              办理类请求会经过：槽位收集 → 确认摘要 → 执行 → 回执；写操作必须确认后才会执行。
+            </p>
           </div>
         )}
 
@@ -174,6 +220,41 @@ export default function Home() {
                 {!msg.text && !msg.status && msg.steps.length === 0 && !msg.done && (
                   <p className="status">思考中…</p>
                 )}
+
+                {msg.pendingAction && !msg.actionResult && msg.done && (
+                  <div className="confirm-card">
+                    <div className="confirm-title">待确认 · {msg.pendingAction.label}</div>
+                    <dl className="args">
+                      {Object.entries(msg.pendingAction.args).map(([k, v]) => (
+                        <div key={k}>
+                          <dt>{k}</dt>
+                          <dd>{v}</dd>
+                        </div>
+                      ))}
+                    </dl>
+                    <div className="confirm-buttons">
+                      <button className="primary" onClick={() => send("确认")} disabled={sending}>
+                        确认办理
+                      </button>
+                      <button onClick={() => send("取消")} disabled={sending}>
+                        取消
+                      </button>
+                    </div>
+                  </div>
+                )}
+
+                {msg.actionResult && (
+                  <div className={`receipt ${msg.actionResult.success ? "ok" : "fail"}`}>
+                    <span>{msg.actionResult.success ? "✔" : "✖"}</span>
+                    <span>
+                      {msg.actionResult.message}
+                      {msg.actionResult.success && msg.actionResult.receipt
+                        ? `（凭证号 ${msg.actionResult.receipt}）`
+                        : ""}
+                    </span>
+                  </div>
+                )}
+
                 {msg.citations.length > 0 && (
                   <div className="citations">
                     <span className="cite-title">引用来源</span>
@@ -202,11 +283,7 @@ export default function Home() {
           ))}
         </div>
         <div className="inputbar">
-          <select
-            value={mode}
-            onChange={(e) => setMode(e.target.value as Mode)}
-            aria-label="回答模式"
-          >
+          <select value={mode} onChange={(e) => setMode(e.target.value as Mode)} aria-label="回答模式">
             <option value="auto">自动路由</option>
             <option value="direct">强制直答</option>
             <option value="research">强制研究</option>
@@ -224,13 +301,13 @@ export default function Home() {
             }}
           />
           <button onClick={() => send()} disabled={sending || !input.trim()}>
-            {sending ? "回答中…" : "发送"}
+            {sending ? "处理中…" : "发送"}
           </button>
         </div>
       </div>
 
       <footer className="footer">
-        演示语料为虚构的「钱塘大学」合成数据，与任何真实高校无关 ·
+        演示语料与业务系统均为虚构的「钱塘大学」合成数据，与任何真实高校无关 ·
         格物 Gewu 是开源的个人求职展示项目
       </footer>
     </main>

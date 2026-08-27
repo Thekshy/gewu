@@ -13,6 +13,7 @@ node_modules/
 
 # 运行时产物（语料在 data/corpus 下是受版本管理的）
 data/index.db
+data/business.db
 data/usage.json
 eval/reports/
 
