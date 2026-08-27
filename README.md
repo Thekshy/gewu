@@ -3,7 +3,7 @@
 > 高校场景的 Deep Research 智能问答系统：**问题路由 × 混合检索 × 多步研究 × 可评测**。
 > 简单事实问题走 RAG 直答；复合政策问题自动进入深度研究链路（拆解 → 多路检索 → 交叉综合）；范围外问题礼貌拒答。
 
-[![CI](https://github.com/OWNER/gewu/actions/workflows/ci.yml/badge.svg)](./.github/workflows/ci.yml)
+[![CI](https://github.com/Thekshy/gewu/actions/workflows/ci.yml/badge.svg)](./.github/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
 
 **声明**：本项目为个人开源展示项目，采用 **clean-room** 方式独立实现；演示语料为完全虚构的「钱塘大学」合成数据，与任何真实高校、任何闭源商业项目无关。
