@@ -1,0 +1,18 @@
+{"id": "fact-001", "type": "factual", "question": "图书馆工作日几点开门几点闭馆？", "mode": "auto", "expected_docs": ["0007-library"], "gold_keywords": ["7:30", "22:30"]}
+{"id": "fact-002", "type": "factual", "question": "校园卡丢了怎么挂失？补办要多少钱？", "mode": "auto", "expected_docs": ["0009-campus-card"], "gold_keywords": ["15元"]}
+{"id": "fact-003", "type": "factual", "question": "我请假一周需要找谁审批？", "mode": "auto", "expected_docs": ["0010-leave"], "gold_keywords": ["教务处"]}
+{"id": "fact-004", "type": "factual", "question": "本科生一次最多能借几本书？借多久？", "mode": "auto", "expected_docs": ["0007-library"], "gold_keywords": ["10", "30"]}
+{"id": "fact-005", "type": "factual", "question": "春季学期什么时候开学？", "mode": "auto", "expected_docs": ["0006-calendar"], "gold_keywords": ["2月22"]}
+{"id": "fact-006", "type": "factual", "question": "在校医院看病门诊报销比例是多少？", "mode": "auto", "expected_docs": ["0015-medical"], "gold_keywords": ["80"]}
+{"id": "fact-007", "type": "factual", "question": "宿舍门禁是几点？晚归会怎么样？", "mode": "auto", "expected_docs": ["0008-dormitory"], "gold_keywords": ["23:00"]}
+{"id": "multi-001", "type": "multi_hop", "question": "我大一有一门课不及格，还能申请转专业吗？", "mode": "auto", "expected_docs": ["0001-transfer"], "gold_keywords": ["不能", "不得", "无不及格"]}
+{"id": "multi-002", "type": "multi_hop", "question": "转专业之后原来修的课程成绩会算进新专业绩点吗？会不会影响之后保研排名？", "mode": "auto", "expected_docs": ["0001-transfer", "0002-credit-recognition"], "gold_keywords": ["通过/不通过", "不计入"]}
+{"id": "multi-003", "type": "multi_hop", "question": "想申请国家奖学金但去年体测没合格，有影响吗？有什么补救办法？", "mode": "auto", "expected_docs": ["0004-scholarship", "0005-fitness-test"], "gold_keywords": ["补测"]}
+{"id": "multi-004", "type": "multi_hop", "question": "申请国际交换需要什么条件？去交换修的学分能转回来多少？", "mode": "auto", "expected_docs": ["0011-exchange"], "gold_keywords": ["3.2", "25"]}
+{"id": "multi-005", "type": "multi_hop", "question": "保研对英语成绩有什么要求？六级没过的话托福雅思可以替代吗？", "mode": "auto", "expected_docs": ["0003-postgraduate-recommendation"], "gold_keywords": ["425", "80", "6.0"]}
+{"id": "multi-006", "type": "multi_hop", "question": "一学期修不够多少学分会被学业预警？什么情况会被退学？", "mode": "auto", "expected_docs": ["0014-academic-warning"], "gold_keywords": ["12"]}
+{"id": "multi-007", "type": "multi_hop", "question": "修辅修专业需要什么绩点条件？总共要修多少学分、大概花多少钱？", "mode": "auto", "expected_docs": ["0012-minor"], "gold_keywords": ["2.8", "25", "100"]}
+{"id": "multi-008", "type": "multi_hop", "question": "毕业论文什么时候开题？查重率要求是多少？超了会怎样？", "mode": "auto", "expected_docs": ["0013-thesis"], "gold_keywords": ["15%", "15%以内", "取消"]}
+{"id": "refu-001", "type": "refusal", "question": "帮我写一封给领导的道歉邮件", "mode": "auto", "expected_docs": [], "gold_keywords": []}
+{"id": "refu-002", "type": "refusal", "question": "今天A股大盘走势怎么样，适合加仓吗？", "mode": "auto", "expected_docs": [], "gold_keywords": []}
+{"id": "refu-003", "type": "refusal", "question": "推荐几部好看的悬疑电影", "mode": "auto", "expected_docs": [], "gold_keywords": []}

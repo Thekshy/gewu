@@ -1,0 +1,43 @@
+from app.rag.store import Store, rrf_fuse, tokenize
+
+
+def _store(tmp_path):
+    s = Store(tmp_path / "index.db")
+    s.upsert_doc(
+        "d1", "图书馆管理办法", "图书馆", "2026-01-01",
+        ["图书馆开放时间为周一至周五 7:30 至 22:30，周末 8:30 至 21:30。本科生外借上限 10 册，借期 30 天。"],
+    )
+    s.upsert_doc(
+        "d2", "学生宿舍管理规定", "学生处", "2026-01-01",
+        ["宿舍门禁时间为 23:00 至次日 6:00，晚归需登记并告知辅导员。"],
+    )
+    return s
+
+
+def test_bm25_retrieves_relevant_chunk(tmp_path):
+    s = _store(tmp_path)
+    hits = s.bm25_search("图书馆几点开门", k=2)
+    assert hits, "应至少命中一条"
+    rows = s.chunk_rows([cid for cid, _ in hits])
+    doc_ids = {row[0] for row in rows.values()}
+    assert "d1" in doc_ids
+
+
+def test_tokenize_chinese_bigram_and_latin():
+    tokens = tokenize("GPA 3.0 要求")
+    assert "gpa" in tokens
+    assert "要求" in tokens
+
+
+def test_rrf_fuse_prefers_consensus():
+    # chunk 2 在两路召回中都靠前，应排第一
+    assert rrf_fuse([[1, 2, 3], [2, 1, 4]])[0] == 2
+
+
+def test_upsert_doc_is_idempotent(tmp_path):
+    s = _store(tmp_path)
+    s.upsert_doc("d1", "图书馆管理办法", "图书馆", "2026-02-01", ["更新后的内容"])
+    stats = s.stats()
+    assert stats["docs"] == 2 and stats["chunks"] == 3
+    titles = {d["doc_id"]: d for d in s.list_docs()}
+    assert titles["d1"]["chunks"] == 1  # 旧 chunk 已被替换

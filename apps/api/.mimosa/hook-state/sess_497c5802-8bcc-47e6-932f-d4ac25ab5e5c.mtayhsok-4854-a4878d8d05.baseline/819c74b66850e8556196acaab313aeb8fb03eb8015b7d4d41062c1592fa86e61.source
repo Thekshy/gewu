@@ -1,0 +1,62 @@
+"""问题路由：优先 LLM 分类，无 key 或调用失败时降级为启发式规则。"""
+
+from __future__ import annotations
+
+import json
+from dataclasses import dataclass
+
+from .. import llm
+from .prompts import ROUTER_SYSTEM
+
+# 复合问题的信号词：出现并列/递进/多条件时倾向于研究链路
+_RESEARCH_HINTS = (
+    "并且",
+    "同时",
+    "以及",
+    "分别",
+    "然后",
+    "还要",
+    "再加上",
+    "又想",
+    "还能",
+    "会不会",
+    "能不能",
+    "影响",
+)
+
+
+@dataclass
+class RouteResult:
+    route: str  # factual | research | refusal
+    reason: str
+    by_llm: bool
+
+
+def heuristic_route(question: str) -> RouteResult:
+    """免 LLM 的降级路由：长问题或含并列条件走研究链路，其余走直答。"""
+    q = question.strip()
+    if len(q) > 32 or any(h in q for h in _RESEARCH_HINTS):
+        return RouteResult("research", "启发式：长问题或含并列/多条件信号", False)
+    return RouteResult("factual", "启发式：短事实型问题", False)
+
+
+def route_question(question: str) -> RouteResult:
+    if not llm.has_key():
+        return heuristic_route(question)
+    try:
+        raw = llm.chat(
+            [
+                {"role": "system", "content": ROUTER_SYSTEM},
+                {"role": "user", "content": question},
+            ],
+            json_mode=True,
+            temperature=0.0,
+            max_tokens=200,
+        )
+        data = json.loads(raw)
+        route = data.get("route")
+        if route in ("factual", "research", "refusal"):
+            return RouteResult(route, str(data.get("reason", ""))[:100], True)
+    except Exception:  # noqa: BLE001
+        pass
+    return heuristic_route(question)

@@ -1,0 +1,24 @@
+# Python
+.venv/
+__pycache__/
+*.pyc
+*.egg-info/
+.ruff_cache/
+.pytest_cache/
+
+# Node
+node_modules/
+.next/
+*.tsbuildinfo
+
+# 运行时产物（语料在 data/corpus 下是受版本管理的）
+data/index.db
+data/usage.json
+eval/reports/
+
+# 环境与系统文件
+.env
+.DS_Store
+
+# 本地安全扫描工具状态
+.mimosa/

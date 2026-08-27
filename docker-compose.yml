@@ -1,0 +1,29 @@
+services:
+  api:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.api
+    environment:
+      - DATA_DIR=/srv/data
+      - LLM_API_KEY=${LLM_API_KEY:-}
+      - LLM_BASE_URL=${LLM_BASE_URL:-https://open.bigmodel.cn/api/paas/v4/}
+      - LLM_MODEL=${LLM_MODEL:-glm-4.6}
+      - EMBED_MODEL=${EMBED_MODEL:-embedding-3}
+      - RATE_LIMIT_PER_MINUTE=${RATE_LIMIT_PER_MINUTE:-20}
+      - DAILY_TOKEN_BUDGET=${DAILY_TOKEN_BUDGET:-2000000}
+    volumes:
+      - ./data:/srv/data
+    ports:
+      - "8000:8000"
+
+  web:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.web
+      args:
+        # 浏览器直连 API 时的地址，按部署环境修改
+        NEXT_PUBLIC_API_BASE: ${NEXT_PUBLIC_API_BASE:-http://localhost:8000}
+    ports:
+      - "3100:3100"
+    depends_on:
+      - api
