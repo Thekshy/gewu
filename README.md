@@ -90,6 +90,18 @@ make eval     # 跑 eval/dataset.jsonl，报告写入 eval/reports/
 
 指标：通过率 / 关键词命中 / 引用召回 / 分类型延迟；交易型用例为多轮对话，断言业务库真实状态（预约与请假单、审批层级、冲突恢复、权限拦截）。种子集 26 题（factual 7 / multi_hop 8 / refusal 3 / transaction 7 / hybrid 1），数据在 [eval/dataset.jsonl](./eval/dataset.jsonl)，欢迎扩充。
 
+### 基线指标（glm-5.3 · BM25 + 查询改写，无向量 · 2026-08）
+
+| 类型 | 通过率 | 平均延迟 |
+| --- | --- | --- |
+| factual（直答） | 7/7 | ~9s |
+| multi_hop（深度研究） | 8/8 | ~17s |
+| refusal（拒答） | 3/3 | ~3s |
+| transaction（办理） | 7/7 | ~11s |
+| hybrid（问答 + 办理） | 1/1 | ~21s |
+
+离线模式（无 LLM key，确定性链路）同一套用例可跑：factual 4/7（演示模式仅返回检索节选）、multi_hop 7/8、refusal 0/3（启发式路由不拒答，反衬 LLM 路由价值）、办理类 8/8。
+
 ## 语料替换
 
 `data/corpus/*.md` 为虚构「钱塘大学」的政策文档（带 `title/source/updated` frontmatter）。把文件换成任意公开语料（如某校官网通知）后 `make ingest` 即完成知识库切换，其余部分零改动。

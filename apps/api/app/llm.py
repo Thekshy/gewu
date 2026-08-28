@@ -39,6 +39,8 @@ def chat(
     kwargs = {}
     if json_mode:
         kwargs["response_format"] = {"type": "json_object"}
+    if s.llm_disable_thinking:
+        kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
     resp = client().chat.completions.create(
         model=s.llm_model,
         messages=messages,
@@ -63,12 +65,16 @@ def chat_stream(
     """
     s = get_settings()
     budget.ensure()
+    kwargs = {}
+    if s.llm_disable_thinking:
+        kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
     stream = client().chat.completions.create(
         model=s.llm_model,
         messages=messages,
         temperature=temperature,
         max_tokens=max_tokens,
         stream=True,
+        **kwargs,
     )
     chars = 0
     for chunk in stream:

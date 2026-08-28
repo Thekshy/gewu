@@ -89,7 +89,13 @@ def main(argv: list[str] | None = None) -> int:
     for f in files:
         meta, text = parse_doc(f)
         chunks = chunk_text(text)
-        vectors = embed_batched(chunks) if (use_embed and chunks) else None
+        vectors = None
+        if use_embed and chunks:
+            try:
+                vectors = embed_batched(chunks)
+            except Exception as exc:  # noqa: BLE001
+                print(f"  !! 向量化不可用（{exc}），自动降级为仅 BM25 索引")
+                use_embed = False  # 端点不支持/无额度时，后续文档不再重试
         store.upsert_doc(
             doc_id=f.stem,
             title=str(meta.get("title", f.stem)),

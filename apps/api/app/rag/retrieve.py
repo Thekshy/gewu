@@ -7,6 +7,7 @@ import logging
 import numpy as np
 
 from ..llm import embed, has_key
+from .query_rewrite import expand
 from .store import Hit, Store, rrf_fuse
 
 logger = logging.getLogger(__name__)
@@ -19,6 +20,7 @@ class Retriever:
 
     def search(self, query: str, k: int | None = None) -> list[Hit]:
         k = k or self.k
+        query = expand(query)  # 口语 → 政策术语（无 key 时原样返回）
         bm_ids = [cid for cid, _ in self.store.bm25_search(query, k=k * 2)]
 
         vec_ids: list[int] = []

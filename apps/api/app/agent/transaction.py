@@ -188,10 +188,10 @@ def _normalize(tool: str, slot: str, value) -> str | None:
 
 def start_flow(question: str, role: str, user: str, session_id: str) -> Iterator[dict]:
     """路由判定为 transaction 后的入口。"""
+    # 启发式优先（确定性强），LLM 只兜底启发式没识别出口语化表述的情况
     tool = detect_tool(question)
-    if has_key():
-        guess = _llm_extract_tool(question, role)
-        tool = guess or tool
+    if tool is None and has_key():
+        tool = _llm_extract_tool(question, role)
     if tool is None or tool not in tools.TOOLS:
         yield from _fallback_knowledge(question)
         return

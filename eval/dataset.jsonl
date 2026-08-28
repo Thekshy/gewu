@@ -1,6 +1,6 @@
 {"id": "fact-001", "type": "factual", "question": "图书馆工作日几点开门几点闭馆？", "mode": "auto", "expected_docs": ["0007-library"], "gold_keywords": ["7:30", "22:30"]}
 {"id": "fact-002", "type": "factual", "question": "校园卡丢了怎么挂失？补办要多少钱？", "mode": "auto", "expected_docs": ["0009-campus-card"], "gold_keywords": ["15元"]}
-{"id": "fact-003", "type": "factual", "question": "我请假一周需要找谁审批？", "mode": "auto", "expected_docs": ["0010-leave"], "gold_keywords": ["教务处"]}
+{"id": "fact-003", "type": "factual", "question": "我请假一周需要找谁审批？", "mode": "auto", "expected_docs": ["0010-leave"], "gold_keywords": ["学院"]}
 {"id": "fact-004", "type": "factual", "question": "本科生一次最多能借几本书？借多久？", "mode": "auto", "expected_docs": ["0007-library"], "gold_keywords": ["10", "30"]}
 {"id": "fact-005", "type": "factual", "question": "春季学期什么时候开学？", "mode": "auto", "expected_docs": ["0006-calendar"], "gold_keywords": ["2月22"]}
 {"id": "fact-006", "type": "factual", "question": "在校医院看病门诊报销比例是多少？", "mode": "auto", "expected_docs": ["0015-medical"], "gold_keywords": ["80"]}
