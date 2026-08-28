@@ -31,6 +31,7 @@ def _plan(question: str) -> list[str]:
             json_mode=True,
             temperature=0.0,
             max_tokens=400,
+            small=True,
         )
         subs = json.loads(raw).get("subquestions")
         if isinstance(subs, list) and subs:

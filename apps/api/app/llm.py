@@ -32,8 +32,12 @@ def chat(
     json_mode: bool = False,
     temperature: float = 0.2,
     max_tokens: int = 2048,
+    small: bool = False,
 ) -> str:
-    """同步补全，返回完整文本；实际用量计入每日预算。"""
+    """同步补全，返回完整文本；实际用量计入每日预算。
+
+    small=True 使用轻量模型（路由/抽取/改写等辅助调用），主答案生成用主模型。
+    """
     s = get_settings()
     budget.ensure()
     kwargs = {}
@@ -42,7 +46,7 @@ def chat(
     if s.llm_disable_thinking:
         kwargs["extra_body"] = {"thinking": {"type": "disabled"}}
     resp = client().chat.completions.create(
-        model=s.llm_model,
+        model=s.llm_small_model if small else s.llm_model,
         messages=messages,
         temperature=temperature,
         max_tokens=max_tokens,

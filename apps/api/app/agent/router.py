@@ -69,6 +69,7 @@ def route_question(question: str) -> RouteResult:
             json_mode=True,
             temperature=0.0,
             max_tokens=200,
+            small=True,
         )
         data = json.loads(raw)
         route = data.get("route")

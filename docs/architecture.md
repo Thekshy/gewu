@@ -72,7 +72,9 @@ flowchart TB
 
 ### 模型如何切换？
 
-所有模型调用收敛在 `app/llm.py`，走 OpenAI 兼容协议。改 `LLM_BASE_URL / LLM_MODEL / EMBED_MODEL` 三个环境变量即可在智谱、DeepSeek、OpenAI、本地 vLLM 之间切换；评测报告会记录当次使用的模型，保证指标可比。
+所有模型调用收敛在 `app/llm.py`，走 OpenAI 兼容协议。改 `LLM_BASE_URL / LLM_MODEL / LLM_SMALL_MODEL / EMBED_MODEL` 环境变量即可在智谱、DeepSeek、OpenAI、本地 vLLM 之间切换；评测报告会记录当次使用的模型，保证指标可比。
+
+**模型分层**：辅助调用（问题路由、子问题拆解、槽位抽取、续轮意图、查询改写）都是小输入小输出的分类/抽取任务，走 `LLM_SMALL_MODEL`（glm-5.3-flash，单次 ~1s）；只有最终答案生成走主模型。分层后直答链路延迟从 28s 降到 5s，且辅助调用占比高，token 成本同步大幅下降。
 
 ---
 

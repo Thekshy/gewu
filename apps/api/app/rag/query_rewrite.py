@@ -38,6 +38,7 @@ def expand(query: str) -> str:
                 ],
                 temperature=0.0,
                 max_tokens=80,
+                small=True,
             )
             .strip()
             .strip('"“”')

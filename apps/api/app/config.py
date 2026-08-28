@@ -13,6 +13,8 @@ class Settings(BaseSettings):
     llm_api_key: str = ""
     llm_base_url: str = "https://open.bigmodel.cn/api/paas/v4/"
     llm_model: str = "glm-5.3"
+    # 辅助调用（路由/拆解/槽位抽取/查询改写/意图判定）走小模型：更快更省，质量足够
+    llm_small_model: str = "glm-5.3-flash"
     embed_model: str = "embedding-3"
     # 推理型模型（如 glm-5.3）关闭思考直出答案：分类/抽取/作答更快更省。
     # thinking 为智谱私有参数，OpenAI 等端点不识别会报错，故默认关闭、按需开启。

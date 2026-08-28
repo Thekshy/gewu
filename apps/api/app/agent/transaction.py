@@ -165,6 +165,7 @@ def _llm_extract(tool: str, text: str, collected: dict) -> dict:
             json_mode=True,
             temperature=0.0,
             max_tokens=300,
+            small=True,
         )
         slots = json.loads(raw).get("slots", {})
         return slots if isinstance(slots, dict) else {}
@@ -224,7 +225,7 @@ def _llm_extract_tool(question: str, role: str) -> str | None:
                  "content": f"根据用户消息选择最匹配的工具，只输出工具名 JSON：{{\"tool\": \"...\"}}。可选工具：\n{tools.tool_descriptions(role)}"},
                 {"role": "user", "content": question},
             ],
-            json_mode=True, temperature=0.0, max_tokens=100,
+            json_mode=True, temperature=0.0, max_tokens=100, small=True,
         )
         name = json.loads(raw).get("tool")
         return name if name in tools.TOOLS else None
@@ -414,7 +415,7 @@ def classify_reply(user_text: str, sess: TxSession) -> str:
                      )},
                     {"role": "user", "content": user_text},
                 ],
-                json_mode=True, temperature=0.0, max_tokens=60,
+                json_mode=True, temperature=0.0, max_tokens=60, small=True,
             )
             intent = json.loads(raw).get("intent")
             if intent in ("continue", "cancel", "new_topic"):

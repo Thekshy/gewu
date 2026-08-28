@@ -30,6 +30,7 @@
 | 离线评测 | 26 题种子集：单轮（事实/多跳/拒答）+ **多轮交易型**（断言业务库真实状态），一键产出 Markdown 指标报告 |
 | 成本防线 | 按 IP 令牌桶限流 + 每日 token 预算（持久化、跨重启） |
 | 零依赖启动 | 无 API key 也能跑：知识问答走 BM25 检索演示，业务办理走完整确定性链路 |
+| 模型分层 | 主答案 glm-5.3；路由/拆解/槽位抽取/查询改写等辅助调用走 glm-5.3-flash（直答延迟 28s→5s） |
 | 模型无关 | 任意 OpenAI 兼容端点（智谱 / DeepSeek / OpenAI / vLLM），改环境变量即切换 |
 
 ## 架构
@@ -90,15 +91,15 @@ make eval     # 跑 eval/dataset.jsonl，报告写入 eval/reports/
 
 指标：通过率 / 关键词命中 / 引用召回 / 分类型延迟；交易型用例为多轮对话，断言业务库真实状态（预约与请假单、审批层级、冲突恢复、权限拦截）。种子集 26 题（factual 7 / multi_hop 8 / refusal 3 / transaction 7 / hybrid 1），数据在 [eval/dataset.jsonl](./eval/dataset.jsonl)，欢迎扩充。
 
-### 基线指标（glm-5.3 · BM25 + 查询改写，无向量 · 2026-08）
+### 基线指标（主答案 glm-5.3 + 辅助调用 glm-5.3-flash · BM25 + 查询改写 · 2026-08）
 
-| 类型 | 通过率 | 平均延迟 |
+| 类型 | 通过率 | 中位延迟 |
 | --- | --- | --- |
-| factual（直答） | 7/7 | ~9s |
+| factual（直答） | 7/7 | ~7s |
 | multi_hop（深度研究） | 8/8 | ~17s |
-| refusal（拒答） | 3/3 | ~3s |
-| transaction（办理） | 7/7 | ~11s |
-| hybrid（问答 + 办理） | 1/1 | ~21s |
+| refusal（拒答） | 3/3 | ~1.2s |
+| transaction（办理） | 7/7 | ~7s |
+| hybrid（问答 + 办理） | 1/1 | ~13s |
 
 离线模式（无 LLM key，确定性链路）同一套用例可跑：factual 4/7（演示模式仅返回检索节选）、multi_hop 7/8、refusal 0/3（启发式路由不拒答，反衬 LLM 路由价值）、办理类 8/8。
 
