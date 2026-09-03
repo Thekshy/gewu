@@ -11,11 +11,14 @@ node_modules/
 .next/
 *.tsbuildinfo
 
-# 运行时产物（语料在 data/corpus 下是受版本管理的）
+# 运行产物（语料在 data/corpus 下是受版本管理的）
 data/index.db
 data/business.db
 data/usage.json
-eval/reports/
+# 评测报告默认忽略，但两份对照基线是交付物，需入库
+eval/reports/*
+!eval/reports/baseline-python.md
+!eval/reports/rewrite-go-vs-python.md
 
 # 环境与系统文件
 .env
