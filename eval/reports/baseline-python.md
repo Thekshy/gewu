@@ -3,8 +3,10 @@
 > 由 `tag: python-final`(commit `01dea6a`)的 Python(FastAPI) 实现进程内直跑产出。
 > 本文件是 Go 重构版的行为对照基线；Go 版同数据集结果见
 > [rewrite-go-vs-python.md](./rewrite-go-vs-python.md)。
-> 运行环境:macOS arm64,glm-5.3(主答案)+ glm-5.3-flash(辅助调用),索引为
-> BM25+向量混合(data/index.db,embedding-3)。
+> 运行环境:macOS arm64,glm-5.3(主答案)+ glm-5.3-flash(辅助调用)。
+> 索引:data/index.db 为 **仅 BM25**(15 篇 / 22 chunk,2026-08-28 以 no-embed 方式入库,
+> 向量表为空)——检索条件与 2026-08-28 首次 26/26 基线完全一致;Go 对照跑使用同一索引文件,
+> 检索侧变量受控。
 
 - 时间：2026-09-03 09:14
 - 模型：glm-5.3（LLM 启用）

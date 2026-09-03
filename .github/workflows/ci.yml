@@ -10,13 +10,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-go@v5
         with:
-          python-version: "3.12"
-      - run: pip install -e "./apps/api[dev]"
-      - run: ruff check apps/api
-      - run: pytest -q
-        working-directory: apps/api
+          go-version: "1.25"
+      - run: gofmt -l cmd internal | tee /dev/stderr | (! read)
+      - run: go vet ./...
+      - run: go test ./... -race
+      - run: go build ./...
 
   web:
     runs-on: ubuntu-latest

@@ -26,3 +26,6 @@ eval/reports/*
 
 # 本地安全扫描工具状态
 .mimosa/
+
+# Go 构建产物
+bin/
