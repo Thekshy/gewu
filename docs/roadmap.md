@@ -8,7 +8,7 @@
 - [x] 引用与拒答机制
 - [x] 限流 + 每日 token 预算
 - [x] 合成语料（15 篇）与种子评测集（18 题）
-- [x] CI（ruff + pytest + next build）
+- [x] CI（gofmt + go vet + go test + next build；Python 版历史见 tag python-final）
 
 ## M1 · 检索质量
 

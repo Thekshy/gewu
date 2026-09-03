@@ -207,6 +207,7 @@ func (c *Client) ChatStream(ctx context.Context, messages []Message, o Options, 
 	}
 
 	var runes int64
+	account := func() { c.budget.Add(max64(1, runes/2)) }
 	err = scanSSE(resp.Body, func(data []byte) error {
 		if string(data) == "[DONE]" {
 			return io.EOF // 约定：scanSSE 把它当作干净终止
@@ -226,10 +227,12 @@ func (c *Client) ChatStream(ctx context.Context, messages []Message, o Options, 
 		}
 		return nil
 	})
+	// 无论正常结束还是中途断开（客户端取消/回调报错），已产出的增量都要入账，
+	// 否则长回答被中断时这部分真实消耗会漏计。
+	account()
 	if err != nil && !errors.Is(err, io.EOF) {
 		return err
 	}
-	c.budget.Add(max64(1, runes/2))
 	return nil
 }
 

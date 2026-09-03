@@ -1,49 +1,155 @@
 #!/usr/bin/env python3
 """离线评测：在 eval/dataset.jsonl 上跑问答管线，产出 Markdown 报告。
 
+评测客户端为**纯 HTTP 实现**（仅标准库）：通过 BASE_URL 调用运行中的格物 API
+（Go 实现或任意满足 docs/PARITY.md 契约的实现），解析 /api/chat 的 SSE 事件流，
+按事件聚合指标；多轮用例经 /api/business/* 断言业务库真实状态。
+
 两类题型：
 - 单轮（factual / multi_hop / refusal）：关键词命中、引用召回、拒答正确性
 - 多轮（transaction / hybrid）：驱动完整对话，断言业务库真实状态
   （预约/请假单是否生成、冲突是否恢复、权限是否拦截）
 
 用法：python eval/run_eval.py [--type ...] [--limit N]
-不配置 LLM_API_KEY 时以检索演示模式运行，交易链路走确定性解析，全部可跑。
+BASE_URL 缺省 http://127.0.0.1:8000；服务端不配 LLM_API_KEY 时以检索演示模式运行，
+交易链路走确定性解析，全部可跑。
 """
 
 from __future__ import annotations
 
 import argparse
 import datetime as dt
+import http.client
+import ipaddress
 import json
 import os
+import re
+import socket
+import ssl
 import sys
 import time
 from dataclasses import dataclass, field
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
+BASE_URL = os.environ.get("BASE_URL", "http://127.0.0.1:8000")
 
 
-def _load_dotenv() -> None:
-    env = ROOT / ".env"
-    if not env.exists():
-        return
-    for line in env.read_text("utf-8").splitlines():
-        line = line.strip()
-        if line and not line.startswith("#") and "=" in line:
-            key, _, val = line.partition("=")
-            os.environ.setdefault(key.strip(), val.strip())
+# ---------- 客户端内置的确定性日期解析（与 PARITY §11 同规则，评测侧换算 date_text） ----------
+
+CN_TZ = dt.timezone(dt.timedelta(hours=8))
+_FULL_RE = re.compile(r"(\d{4})[-/年.](\d{1,2})[-/月.](\d{1,2})[日号]?")
+_MD_RE = re.compile(r"(\d{1,2})月(\d{1,2})[日号]?")
+_WEEK_RE = re.compile(r"(下?)(?:周|星期)([一二三四五六日天])")
+_DAYS_WORDS = ("今天", "今日", "明天", "明日", "后天")
+_WEEKDAYS = "一二三四五六日"
 
 
-_load_dotenv()
-sys.path.insert(0, str(ROOT / "apps" / "api"))
+def _today_cn() -> dt.date:
+    return dt.datetime.now(tz=CN_TZ).date()
 
-from app import llm  # noqa: E402
-from app.agent.pipeline import run_chat  # noqa: E402
-from app.agent.session import sessions  # noqa: E402
-from app.agent.tools import business  # noqa: E402
-from app.config import get_settings  # noqa: E402
-from app.dates import parse as parse_date  # noqa: E402
+
+def parse_date(text: str, today: dt.date | None = None) -> dt.date | None:
+    """返回文本中第一个可识别的日期（与被测服务同一套确定性规则）。"""
+    today = today or _today_cn()
+    found: list[tuple[int, dt.date]] = []
+    for m in _FULL_RE.finditer(text):
+        try:
+            found.append((m.start(), dt.date(int(m.group(1)), int(m.group(2)), int(m.group(3)))))
+        except ValueError:
+            pass
+    for m in _MD_RE.finditer(text):
+        try:
+            d = dt.date(today.year, int(m.group(1)), int(m.group(2)))
+            if d < today:
+                d = dt.date(today.year + 1, int(m.group(1)), int(m.group(2)))
+            found.append((m.start(), d))
+        except ValueError:
+            pass
+    cur = today.weekday()
+    for m in _WEEK_RE.finditer(text):
+        target = _WEEKDAYS.index(m.group(2))
+        delta = (7 - cur) % 7 + target if m.group(1) == "下" else (target - cur) % 7
+        found.append((m.start(), today + dt.timedelta(days=delta)))
+    for word in _DAYS_WORDS:
+        pos = text.find(word)
+        while pos != -1:
+            offset = 0 if word in ("今天", "今日") else (1 if word in ("明天", "明日") else 2)
+            found.append((pos, today + dt.timedelta(days=offset)))
+            pos = text.find(word, pos + len(word))
+    found.sort(key=lambda x: x[0])
+    return found[0][1] if found else None
+
+
+# ---------- HTTP / SSE 客户端（http.client 直连，路径全部为字面量） ----------
+
+
+def _connect() -> http.client.HTTPConnection:
+    """按 BASE_URL 建立 HTTP(S) 连接。
+
+    校验：仅 http/https；主机可解析；拒绝链路本地（169.254.0.0/16，云元数据所在）
+    与未指定地址。本脚本是本地评测客户端，BASE_URL 指向被测服务（缺省
+    127.0.0.1:8000），环回/私网地址是合法目标。
+    """
+    from urllib.parse import urlsplit
+
+    parts = urlsplit(BASE_URL if "://" in BASE_URL else "http://" + BASE_URL)
+    if parts.scheme not in ("http", "https"):
+        raise ValueError(f"BASE_URL 仅支持 http/https：{BASE_URL}")
+    host = parts.hostname
+    if not host:
+        raise ValueError(f"BASE_URL 缺少主机名：{BASE_URL}")
+    if host.lower().startswith("metadata."):
+        raise ValueError("拒绝访问云元数据主机名")
+    for info in socket.getaddrinfo(host, None):
+        ip = ipaddress.ip_address(info[4][0])
+        if ip.is_link_local or ip.is_unspecified:
+            raise ValueError(f"拒绝访问链路本地/未指定地址：{ip}")
+    port = parts.port or (443 if parts.scheme == "https" else 80)
+    if parts.scheme == "https":
+        return http.client.HTTPSConnection(host, port, timeout=300, context=ssl.create_default_context())
+    return http.client.HTTPConnection(host, port, timeout=300)
+
+
+def _request(method: str, path: str, body: dict | None = None) -> http.client.HTTPResponse:
+    """对被测服务发一次请求；path 为本文件内的固定字面量。"""
+    conn = _connect()
+    payload = json.dumps(body, ensure_ascii=False).encode("utf-8") if body is not None else None
+    headers = {"Content-Type": "application/json"} if body is not None else {}
+    conn.request(method, path, body=payload, headers=headers)
+    return conn.getresponse()
+
+
+def chat_events(question: str, session_id: str, role: str) -> list[dict]:
+    """POST /api/chat 并解析全部 SSE 事件。"""
+    resp = _request("POST", "/api/chat", {"question": question, "session_id": session_id, "role": role})
+    events: list[dict] = []
+    for raw in resp:
+        line = raw.decode("utf-8").strip()
+        if line.startswith("data: "):
+            events.append(json.loads(line[6:]))
+    resp.close()
+    return events
+
+
+def business_reset() -> None:
+    resp = _request("POST", "/api/business/reset")
+    resp.read()
+    resp.close()
+
+
+def business_overview() -> dict:
+    resp = _request("GET", "/api/business/overview")
+    data = json.loads(resp.read().decode("utf-8"))
+    resp.close()
+    return data
+
+
+def health() -> dict:
+    resp = _request("GET", "/api/health")
+    data = json.loads(resp.read().decode("utf-8"))
+    resp.close()
+    return data
 
 
 def _norm(s: str) -> str:
@@ -67,10 +173,10 @@ def _run_turns(sid: str, turns: list[str], role: str) -> RunAgg:
     agg = RunAgg()
     t0 = time.perf_counter()
     for turn in turns:
-        for ev in run_chat(turn, "auto", session_id=sid, role=role, user="eval-user"):
-            et = ev["type"]
+        for ev in chat_events(turn, sid, role):
+            et = ev.get("type")
             if et == "route":
-                agg.routes.add(ev["route"])
+                agg.routes.add(ev.get("route"))
             elif et == "answer_delta":
                 agg.answer += ev.get("text", "")
             elif et == "citations":
@@ -78,7 +184,7 @@ def _run_turns(sid: str, turns: list[str], role: str) -> RunAgg:
             elif et == "slot_question":
                 agg.asked_slot = True
             elif et == "pending_action":
-                agg.pending_tools.add(ev["tool"])
+                agg.pending_tools.add(ev.get("tool"))
             elif et == "action_result":
                 agg.results.append(ev)
             elif et == "error":
@@ -110,23 +216,24 @@ def _expect_ok(exp: dict, agg: RunAgg) -> bool:
             any(not r["success"] for r in agg.results) and any(r["success"] for r in agg.results)
         )
 
+    overview = business_overview()
     if "booking" in exp:
         want = exp["booking"]
         date = parse_date(want["date_text"]).isoformat() if want.get("date_text") else want.get("date")
         matches = [
             b
-            for b in business.all_bookings()
+            for b in overview["bookings"]
             if want.get("venue_contains", "") in b["venue"]
             and (not date or b["date"] == date)
             and (not want.get("slot") or b["slot"] == want["slot"])
         ]
         checks.append(bool(matches))
     if "bookings_count" in exp:
-        checks.append(len(business.all_bookings()) == exp["bookings_count"])
+        checks.append(len(overview["bookings"]) == exp["bookings_count"])
 
     if "ticket" in exp:
         want = exp["ticket"]
-        tickets = business.all_tickets()
+        tickets = overview["tickets"]
         last = tickets[-1] if tickets else None
         checks.append(
             last is not None
@@ -155,12 +262,12 @@ def score_single(item: dict, agg: RunAgg) -> dict:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="格物离线评测")
+    parser = argparse.ArgumentParser(description="格物离线评测（HTTP 客户端）")
     parser.add_argument("--type", dest="type_", choices=["factual", "multi_hop", "refusal", "transaction", "hybrid"])
     parser.add_argument("--limit", type=int)
     args = parser.parse_args()
 
-    settings = get_settings()
+    h = health()
     dataset_path = ROOT / "eval" / "dataset.jsonl"
     items = [json.loads(line) for line in dataset_path.read_text("utf-8").splitlines() if line.strip()]
     if args.type_:
@@ -171,15 +278,18 @@ def main() -> int:
     rows = []
     for item in items:
         sid = f"eval-{item['id']}"
-        sessions.clear(sid)
         multi = "turns" in item
-        if multi:
-            business.reset()
-            agg = _run_turns(sid, item["turns"], item.get("role", "student"))
-            s = {"pass": _expect_ok(item.get("expect", {}), agg) and not agg.errors, "kw": None, "cite": None}
-        else:
-            agg = _run_turns(sid, [item["question"]], "student")
-            s = score_single(item, agg)
+        try:
+            if multi:
+                business_reset()
+                agg = _run_turns(sid, item["turns"], item.get("role", "student"))
+                s = {"pass": _expect_ok(item.get("expect", {}), agg) and not agg.errors, "kw": None, "cite": None}
+            else:
+                agg = _run_turns(sid, [item["question"]], "student")
+                s = score_single(item, agg)
+        except Exception as exc:  # noqa: BLE001
+            agg = RunAgg(errors=[f"{type(exc).__name__}: {exc}"])
+            s = {"pass": False, "kw": None, "cite": None}
 
         rows.append({"item": item, "agg": agg, "score": s, "multi": multi})
         flag = "✓" if s["pass"] else "✗"
@@ -208,7 +318,7 @@ def main() -> int:
         "# 评测报告",
         "",
         f"- 时间：{dt.datetime.now().strftime('%Y-%m-%d %H:%M')}",
-        f"- 模型：{settings.llm_model}（LLM {'启用' if llm.has_key() else '未启用（离线确定性链路）'}）",
+        f"- 端点：{BASE_URL}（版本 {h.get('version')}，LLM {'启用' if h.get('llm') else '未启用（离线确定性链路）'}）",
         f"- 数据集：{len(rows)} 题（" + "，".join(f"{t} {len(sel(t))}" for t in types if sel(t)) + "）",
         "",
         "| 类型 | 通过率 | 关键词命中 | 引用召回 | 平均延迟 |",
@@ -244,4 +354,4 @@ def main() -> int:
 
 
 if __name__ == "__main__":
-    raise SystemExit(main())
+    sys.exit(main())

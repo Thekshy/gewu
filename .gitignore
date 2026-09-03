@@ -1,10 +1,9 @@
-# Python
-.venv/
+# Python（仅 eval/run_eval.py 评测客户端）
 __pycache__/
 *.pyc
-*.egg-info/
-.ruff_cache/
-.pytest_cache/
+
+# Go 构建产物
+bin/
 
 # Node
 node_modules/
@@ -26,6 +25,6 @@ eval/reports/*
 
 # 本地安全扫描工具状态
 .mimosa/
-
-# Go 构建产物
-bin/
+.idea/
+.mentor/
+.video_agent/

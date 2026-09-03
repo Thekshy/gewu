@@ -7,16 +7,16 @@ flowchart TB
     subgraph Web[apps/web · Next.js]
         UI[聊天界面<br/>路由徽章 / 研究过程 / 引用]
     end
-    subgraph API[apps/api · FastAPI]
+    subgraph API[API · Go(gin)]
         RL[限流中间件<br/>令牌桶/IP]
         EP[API 层<br/>chat / search / docs / health]
-        PIPE[编排管线 run_chat]
+        PIPE[编排管线 RunChat]
         ROUTE[问题路由]
         DIRECT[RAG 直答]
         RES[Deep Research]
         BUD[每日 token 预算]
     end
-    subgraph RAG[检索层]
+    subgraph RAG[internal/rag]
         RET[Retriever 混合检索]
         ST[(SQLite<br/>docs/chunks/vectors)]
         BM25[BM25 内存索引]
@@ -32,7 +32,7 @@ flowchart TB
     CORPUS -->|ingest CLI| ST
 
     subgraph EVAL[eval/]
-        DS[(dataset.jsonl)] --> RUN[run_eval.py] -->|复用| PIPE
+        DS[(dataset.jsonl)] --> RUN[run_eval.py<br/>HTTP 客户端] -->|SSE| EP
         RUN --> REP[Markdown 报告]
     end
 ```

@@ -507,7 +507,11 @@ tool_descriptions(role) 只列该角色工具:`- {name}：{description}` 换行�
    `{"detail":"<中文原因>"}`(与手写 HTTPException 的 422/429 格式一致)。评测不依赖此差异。
 2. **内部异常文案**:Python `error` 事件 message 形如 `ValueError: xxx`(类名:消息);
    Go 版为 Go 错误字符串。语义等价,仅调试可见。
-3. **流式预算计量**:两侧都按"字符数/2"估算,但 Unicode 拆分差异可忽略不计。
+3. **流式预算计量**:两侧都按"字符数/2"估算,但 Unicode 拆分差异可忽略不计;
+   Go 版在流式中途断开时也会对已产出部分入账(Python 版中断不记账,属修复,见 go-notes §10-4)。
 4. **sqlite 驱动**:Python stdlib sqlite3 → modernc.org/sqlite(纯 Go)。数据文件格式兼容
    (同一 index.db/business.db 可互读);并发写策略 Go 侧单写连接 + 锁,见 go-notes。
 5. **请求日志**:uvicorn access log 不在契约内;Go 版 gin 默认日志保留,不影响行为。
+6. **leave_status 读工具返回**:Python 版业务层返回的 dict 无 `message` 键,tools 层
+   `result["message"]` 抛 KeyError → 整轮变 error 事件(用户问「我的请假单批了吗」
+   必然报错,属原设计缺陷;评测集未覆盖)。Go 版返回可读的请假单状态摘要。

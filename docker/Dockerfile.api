@@ -1,5 +1,7 @@
 # 多阶段构建：builder 编译，runner 只带二进制 + 语料 + CA 证书（LLM 调用需要）
 FROM golang:1.25-alpine AS builder
+# 模块代理：构建环境可达 goproxy.cn（默认 proxy.golang.org 在部分网络不可达）
+ENV GOPROXY=https://goproxy.cn,direct
 WORKDIR /src
 COPY go.mod go.sum ./
 RUN go mod download
@@ -12,6 +14,8 @@ RUN apk add --no-cache ca-certificates && adduser -D -u 10001 gewu
 WORKDIR /srv
 COPY --from=builder /out/gewu-api /usr/local/bin/gewu-api
 COPY data ./data
+# 运行用户对数据目录可写（入库/业务库/预算文件都落在 /srv/data）
+RUN chown -R gewu:gewu /srv/data
 ENV DATA_DIR=/srv/data
 USER gewu
 EXPOSE 8000
