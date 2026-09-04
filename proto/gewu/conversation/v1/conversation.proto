@@ -1,0 +1,69 @@
+// 会话服务：办理流程跨轮状态（PARITY §12.3）+ 消息落库（新增，仅审计/前端展示）。
+// TTL 30 分钟 get/ensure 惰性清理；ensure 刷新 role/user；clear 移除。
+syntax = "proto3";
+
+package gewu.conversation.v1;
+
+option go_package = "gewu/pkg/gen/gewu/conversation/v1;conversationv1";
+
+// SessionState 办理会话状态（对齐冻结单体 agent.TxSession）。
+message SessionState {
+  string session_id = 1;
+  string role = 2;
+  string user = 3;
+  string phase = 4; // idle | collect | confirm
+  string tool = 5;
+  map<string, string> slots = 6;
+  string last_asked = 7;
+  int64 updated_unix = 8; // 最后活动时间（TTL 判定用）
+}
+
+message GetSessionRequest {
+  string session_id = 1;
+}
+
+message GetSessionResponse {
+  SessionState session = 1; // nil = 不存在或已过期
+}
+
+message EnsureSessionRequest {
+  string session_id = 1;
+  string role = 2;
+  string user = 3;
+}
+
+message EnsureSessionResponse {
+  SessionState session = 1;
+}
+
+message SaveSessionRequest {
+  SessionState session = 1; // 编排侧变更后的全量状态
+}
+
+message SaveSessionResponse {}
+
+message ClearSessionRequest {
+  string session_id = 1;
+}
+
+message ClearSessionResponse {}
+
+// AppendMessageRequest 审计日志型消息落库（不参与答案生成——各轮独立作答是 26/26 前提）。
+message AppendMessageRequest {
+  string session_id = 1;
+  string role = 2;    // user | assistant | system
+  string content = 3;
+}
+
+message AppendMessageResponse {
+  int64 id = 1;
+}
+
+// ConversationService 会话状态与消息。
+service ConversationService {
+  rpc GetSession(GetSessionRequest) returns (GetSessionResponse);
+  rpc EnsureSession(EnsureSessionRequest) returns (EnsureSessionResponse);
+  rpc SaveSession(SaveSessionRequest) returns (SaveSessionResponse);
+  rpc ClearSession(ClearSessionRequest) returns (ClearSessionResponse);
+  rpc AppendMessage(AppendMessageRequest) returns (AppendMessageResponse);
+}

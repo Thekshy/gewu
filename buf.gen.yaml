@@ -1,0 +1,10 @@
+version: v2
+# 生成到 pkg/gen（go_package 在各 proto 中显式声明，源码相对路径输出）。
+# 插件版本与本仓库 go.mod 对齐：protoc-gen-go v1.36.x / protoc-gen-go-grpc v1.5.1。
+plugins:
+  - local: protoc-gen-go
+    out: pkg/gen
+    opt: paths=source_relative
+  - local: protoc-gen-go-grpc
+    out: pkg/gen
+    opt: paths=source_relative

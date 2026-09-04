@@ -1,0 +1,14 @@
+# 构建上下文瘦身：只送 Go 源码与必要文件进 daemon
+.git
+.venv
+.github
+.mentor
+bin
+data
+docs
+eval/reports
+apps/web/node_modules
+apps/web/.next
+**/*.db
+**/*.db.tmp
+usage.json

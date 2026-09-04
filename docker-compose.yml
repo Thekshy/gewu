@@ -1,5 +1,247 @@
+# 微服务编排：1 网关 + 5 gRPC 服务 + 基础设施。
+#
+# 常用：
+#   docker compose up -d --wait            # 六服务 + pg/redis（零 key 模式可跑）
+#   docker compose --profile milvus up -d  # 追加向量栈（etcd/minio/milvus，P3 起需要）
+#   docker compose --profile monolith up -d # 冻结单体 A/B 对照（宿主 8001）
+#
+# 服务端口：gateway 8000（对外 HTTP/SSE）；内部 gRPC 9001~9005，
+# 管理端口（/healthz 探针）9100~9105。
+
+x-svc: &svc
+  build:
+    context: .
+    dockerfile: docker/Dockerfile.svc
+  restart: unless-stopped
+
 services:
+  gateway:
+    <<: *svc
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.svc
+      args: { SERVICE: gateway, GOPROXY: "${GOPROXY:-}" }
+    environment:
+      GATEWAY_ADDR: ":8000"
+      GATEWAY_ADMIN_ADDR: ":9100"
+      ORCHESTRATOR_ADDR: "orchestrator:9001"
+      CONVERSATION_ADDR: "conversation:9002"
+      GENERATE_ADDR: "generate:9003"
+      TOOL_ADDR: "tool:9004"
+      RAG_ADDR: "rag:9005"
+      RATE_LIMIT_PER_MINUTE: ${RATE_LIMIT_PER_MINUTE:-20}
+    ports:
+      - "8000:8000"
+    healthcheck: &healthz
+      test: ["CMD", "wget", "-qO-", "http://localhost:9100/healthz"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    depends_on:
+      orchestrator: { condition: service_healthy }
+      rag: { condition: service_healthy }
+      generate: { condition: service_healthy }
+
+  orchestrator:
+    <<: *svc
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.svc
+      args: { SERVICE: orchestrator, GOPROXY: "${GOPROXY:-}" }
+    environment:
+      ORCHESTRATOR_ADDR: ":9001"
+      ORCHESTRATOR_ADMIN_ADDR: ":9101"
+      CONVERSATION_ADDR: "conversation:9002"
+      GENERATE_ADDR: "generate:9003"
+      TOOL_ADDR: "tool:9004"
+      RAG_ADDR: "rag:9005"
+      POSTGRES_DSN: ${POSTGRES_DSN:-postgres://gewu:gewu@postgres:5432/gewu?sslmode=disable}
+      REDIS_ADDR: "redis:6379"
+    healthcheck:
+      <<: *healthz
+      test: ["CMD", "wget", "-qO-", "http://localhost:9101/healthz"]
+    depends_on:
+      conversation: { condition: service_healthy }
+      generate: { condition: service_healthy }
+      tool: { condition: service_healthy }
+      rag: { condition: service_healthy }
+
+  conversation:
+    <<: *svc
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.svc
+      args: { SERVICE: conversation, GOPROXY: "${GOPROXY:-}" }
+    environment:
+      CONVERSATION_ADDR: ":9002"
+      CONVERSATION_ADMIN_ADDR: ":9102"
+      POSTGRES_DSN: ${POSTGRES_DSN:-postgres://gewu:gewu@postgres:5432/gewu?sslmode=disable}
+    healthcheck:
+      <<: *healthz
+      test: ["CMD", "wget", "-qO-", "http://localhost:9102/healthz"]
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  generate:
+    <<: *svc
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.svc
+      args: { SERVICE: generate, GOPROXY: "${GOPROXY:-}" }
+    environment:
+      GENERATE_ADDR: ":9003"
+      GENERATE_ADMIN_ADDR: ":9103"
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_BASE_URL: ${LLM_BASE_URL:-https://open.bigmodel.cn/api/paas/v4/}
+      LLM_MODEL: ${LLM_MODEL:-glm-5.3}
+      LLM_SMALL_MODEL: ${LLM_SMALL_MODEL:-glm-5.3-flash}
+      EMBED_MODEL: ${EMBED_MODEL:-embedding-3}
+      LLM_DISABLE_THINKING: ${LLM_DISABLE_THINKING:-false}
+      DAILY_TOKEN_BUDGET: ${DAILY_TOKEN_BUDGET:-2000000}
+      POSTGRES_DSN: ${POSTGRES_DSN:-postgres://gewu:gewu@postgres:5432/gewu?sslmode=disable}
+      REDIS_ADDR: "redis:6379"
+    healthcheck:
+      <<: *healthz
+      test: ["CMD", "wget", "-qO-", "http://localhost:9103/healthz"]
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+
+  tool:
+    <<: *svc
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.svc
+      args: { SERVICE: tool, GOPROXY: "${GOPROXY:-}" }
+    environment:
+      TOOL_ADDR: ":9004"
+      TOOL_ADMIN_ADDR: ":9104"
+      POSTGRES_DSN: ${POSTGRES_DSN:-postgres://gewu:gewu@postgres:5432/gewu?sslmode=disable}
+    healthcheck:
+      <<: *healthz
+      test: ["CMD", "wget", "-qO-", "http://localhost:9104/healthz"]
+    depends_on:
+      postgres: { condition: service_healthy }
+
+  rag:
+    <<: *svc
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.svc
+      args: { SERVICE: rag, GOPROXY: "${GOPROXY:-}" }
+    environment:
+      RAG_ADDR: ":9005"
+      RAG_ADMIN_ADDR: ":9105"
+      GENERATE_ADDR: "generate:9003"
+      POSTGRES_DSN: ${POSTGRES_DSN:-postgres://gewu:gewu@postgres:5432/gewu?sslmode=disable}
+      REDIS_ADDR: "redis:6379"
+      MILVUS_ADDR: "milvus:19530"
+    healthcheck:
+      <<: *healthz
+      test: ["CMD", "wget", "-qO-", "http://localhost:9105/healthz"]
+    depends_on:
+      generate: { condition: service_healthy }
+      postgres: { condition: service_healthy }
+      redis: { condition: service_healthy }
+
+  # ---------- 基础设施 ----------
+
+  postgres:
+    image: postgres:16-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: gewu
+      POSTGRES_PASSWORD: gewu
+      POSTGRES_DB: gewu
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    ports:
+      - "5432:5432"
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gewu -d gewu"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    volumes:
+      - redisdata:/data
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+
+  # ---------- 向量栈（--profile milvus；rag 零 key/BM25-only 模式不依赖它） ----------
+
+  etcd:
+    image: quay.io/coreos/etcd:v3.5.16
+    profiles: ["milvus"]
+    restart: unless-stopped
+    environment:
+      ETCD_AUTO_COMPACTION_MODE: revision
+      ETCD_AUTO_COMPACTION_RETENTION: "1000"
+      ETCD_QUOTA_BACKEND_BYTES: "4294967296"
+    command: etcd -advertise-client-urls=http://etcd:2379 -listen-client-urls=http://0.0.0.0:2379 --data-dir /etcd
+    volumes:
+      - etcddata:/etcd
+
+  minio:
+    image: minio/minio:RELEASE.2023-03-20T20-16-18Z
+    profiles: ["milvus"]
+    restart: unless-stopped
+    environment:
+      MINIO_ACCESS_KEY: minioadmin
+      MINIO_SECRET_KEY: minioadmin
+    command: minio server /minio_data
+    volumes:
+      - miniodata:/minio_data
+
+  milvus:
+    image: milvusdb/milvus:v2.4.17
+    profiles: ["milvus"]
+    restart: unless-stopped
+    command: ["milvus", "run", "standalone"]
+    security_opt: ["seccomp:unconfined"]
+    environment:
+      ETCD_ENDPOINTS: etcd:2379
+      MINIO_ADDRESS: minio:9000
+    volumes:
+      - milvusdata:/var/lib/milvus
+    ports:
+      - "19530:19530"
+      - "9091:9091"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9091/healthz"]
+      interval: 30s
+      start_period: 90s
+      timeout: 20s
+      retries: 5
+    depends_on:
+      - etcd
+      - minio
+
+  # ---------- 前端与单体对照 ----------
+
+  web:
+    build:
+      context: .
+      dockerfile: docker/Dockerfile.web
+      args:
+        # 浏览器直连 API 时的地址：微服务网关与单体同为 :8000
+        NEXT_PUBLIC_API_BASE: ${NEXT_PUBLIC_API_BASE:-http://localhost:8000}
+    ports:
+      - "3100:3100"
+    depends_on:
+      gateway: { condition: service_healthy }
+
+  # 冻结单体（tag go-monolith 行为）：A/B 对照与回退，宿主端口 8001 避让网关
   api:
+    profiles: ["monolith"]
     build:
       context: .
       dockerfile: docker/Dockerfile.api
@@ -16,16 +258,11 @@ services:
     volumes:
       - ./data:/srv/data
     ports:
-      - "8000:8000"
+      - "8001:8000"
 
-  web:
-    build:
-      context: .
-      dockerfile: docker/Dockerfile.web
-      args:
-        # 浏览器直连 API 时的地址，按部署环境修改
-        NEXT_PUBLIC_API_BASE: ${NEXT_PUBLIC_API_BASE:-http://localhost:8000}
-    ports:
-      - "3100:3100"
-    depends_on:
-      - api
+volumes:
+  pgdata:
+  redisdata:
+  etcddata:
+  miniodata:
+  milvusdata:

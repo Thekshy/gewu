@@ -13,10 +13,44 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.25"
-      - run: test -z "$(gofmt -l cmd internal)"
+      - run: test -z "$(gofmt -l cmd internal pkg)"
       - run: go vet ./...
       - run: go test ./... -race
-      - run: go build ./...
+      - run: go build ./...   # 单体 + 六微服务入口全部可构建
+
+  proto:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+      - uses: bufbuild/buf-setup-action@v1
+      - run: buf lint
+      # 生成产物必须与仓库内 pkg/gen 一致（防止 proto 演进未重新生成）
+      - run: go install google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.9
+      - run: go install google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.5.1
+      - run: buf generate
+      - run: git diff --exit-code -- pkg/gen
+
+  compose-smoke:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: 构建六个服务镜像
+        run: docker compose build gateway orchestrator conversation generate tool rag
+      - name: 起全链路（六服务 + pg/redis，零 key 模式）
+        run: docker compose up -d --wait gateway
+      - name: 网关 health 聚合可用
+        run: |
+          set -e
+          body=$(curl -fsS http://localhost:8000/api/health)
+          echo "$body"
+          echo "$body" | grep -q '"status":"ok"'
+          echo "$body" | grep -q '"llm":false'
+      - name: 下线
+        if: always()
+        run: docker compose down -v --remove-orphans
 
   web:
     runs-on: ubuntu-latest

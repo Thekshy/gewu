@@ -1,0 +1,55 @@
+// 检索服务：混合检索（BM25 + 向量 RRF，PARITY §7.5~7.7）+ 摄入流水线（P3）+ 长期记忆（P5）。
+// 检索实现复用冻结库 internal/rag（tokenize/BM25/RRF 原样）；查询改写与 embed 走 generate RPC。
+syntax = "proto3";
+
+package gewu.rag.v1;
+
+option go_package = "gewu/pkg/gen/gewu/rag/v1;ragv1";
+
+// Hit 一条检索命中（对齐冻结单体 rag.Hit；doc 元信息缺失时 title=doc_id、source=""）。
+message Hit {
+  int32 chunk_id = 1;
+  string doc_id = 2;
+  int32 seq = 3;
+  string text = 4;
+  string title = 5;
+  string source = 6;
+}
+
+message SearchRequest {
+  string query = 1;
+  int32 k = 2; // <=0 时服务端取缺省 RETRIEVAL_K=6
+}
+
+message SearchResponse {
+  repeated Hit hits = 1; // 已按融合排序
+}
+
+message DocInfo {
+  string doc_id = 1;
+  string title = 2;
+  string source = 3;
+  string updated = 4;
+  int32 chunks = 5;
+}
+
+message ListDocsRequest {}
+
+message ListDocsResponse {
+  repeated DocInfo docs = 1; // 按 doc_id 升序
+}
+
+message StatsRequest {}
+
+message StatsResponse {
+  int32 docs = 1;
+  int32 chunks = 2;
+  bool embedded = 3; // 库中是否有向量
+}
+
+// RagService 知识检索。
+service RagService {
+  rpc Search(SearchRequest) returns (SearchResponse);
+  rpc ListDocs(ListDocsRequest) returns (ListDocsResponse);
+  rpc Stats(StatsRequest) returns (StatsResponse);
+}

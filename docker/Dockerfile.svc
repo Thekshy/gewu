@@ -1,0 +1,19 @@
+# 六个微服务共用的构建模板：build-arg SERVICE 选择 cmd/ 下的入口。
+# 运行时 alpine（含 busybox wget，供 compose healthcheck 探测管理端口 /healthz）。
+FROM golang:1.25-alpine AS build
+WORKDIR /src
+# GOPROXY 可经 build-arg 覆盖（受限网络环境传镜像源，如 https://goproxy.cn,direct）
+ARG GOPROXY=
+ENV GOPROXY=${GOPROXY:-https://proxy.golang.org,direct}
+COPY go.mod go.sum ./
+RUN go mod download
+COPY . .
+ARG SERVICE
+RUN CGO_ENABLED=0 go build -trimpath -ldflags="-s -w" -o /out/svc ./cmd/${SERVICE}
+
+FROM alpine:3.20
+RUN addgroup -S app && adduser -S app -G app
+COPY --from=build /out/svc /usr/local/bin/svc
+USER app
+EXPOSE 8000 9000-9105
+ENTRYPOINT ["svc"]
