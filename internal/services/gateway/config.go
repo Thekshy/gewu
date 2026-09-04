@@ -22,6 +22,8 @@ type Config struct {
 	RagAddr          string
 
 	RateLimitPerMinute int
+
+	MaxQuestionChars int // 问题长度上限（PARITY §2.4，缺省 500）
 }
 
 // LoadConfig 从环境变量装配。
@@ -41,5 +43,6 @@ func LoadConfig() Config {
 		RagAddr:          svcbase.NormalizeTarget(svcbase.EnvOr("RAG_ADDR", ":9005")),
 
 		RateLimitPerMinute: rate,
+		MaxQuestionChars:   parseMaxQuestionChars(svcbase.EnvOr("MAX_QUESTION_CHARS", "")),
 	}
 }

@@ -26,6 +26,7 @@ const (
 	GenerateService_ChatStream_FullMethodName   = "/gewu.generate.v1.GenerateService/ChatStream"
 	GenerateService_Embed_FullMethodName        = "/gewu.generate.v1.GenerateService/Embed"
 	GenerateService_BudgetStatus_FullMethodName = "/gewu.generate.v1.GenerateService/BudgetStatus"
+	GenerateService_EnsureBudget_FullMethodName = "/gewu.generate.v1.GenerateService/EnsureBudget"
 )
 
 // GenerateServiceClient is the client API for GenerateService service.
@@ -36,7 +37,7 @@ const (
 //
 // 错误约定：
 //   - 未配 key 直接调用 → FAILED_PRECONDITION，message「未配置 LLM_API_KEY，无法调用模型」；
-//   - 预算耗尽（调用前预检）→ RESOURCE_EXHAUSTED，message 为逐字中文文案
+//   - 预算耗尽（EnsureBudget 与每次调用前预检）→ RESOURCE_EXHAUSTED，message 为逐字中文文案
 //     「今日 token 预算已用尽（上限 {limit}），请明天再试」（调用方按现状语义降级/透传）；
 //   - 超时/网络错误向上抛（INTERNAL/DEADLINE_EXCEEDED 等），降级决策留在调用方；
 //   - 重试策略：仅连接失败且请求未发出重试 1 次，流式不自动重试（ADR）。
@@ -45,6 +46,9 @@ type GenerateServiceClient interface {
 	ChatStream(ctx context.Context, in *ChatStreamRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[ChatStreamResponse], error)
 	Embed(ctx context.Context, in *EmbedRequest, opts ...grpc.CallOption) (*EmbedResponse, error)
 	BudgetStatus(ctx context.Context, in *BudgetStatusRequest, opts ...grpc.CallOption) (*BudgetStatusResponse, error)
+	// EnsureBudget 预算预检（orchestrator 在 chat 入口调用）：
+	// 耗尽 → RESOURCE_EXHAUSTED（message 为 429 文案逐字）；未耗尽 → OK。
+	EnsureBudget(ctx context.Context, in *EnsureBudgetRequest, opts ...grpc.CallOption) (*EnsureBudgetResponse, error)
 }
 
 type generateServiceClient struct {
@@ -104,6 +108,16 @@ func (c *generateServiceClient) BudgetStatus(ctx context.Context, in *BudgetStat
 	return out, nil
 }
 
+func (c *generateServiceClient) EnsureBudget(ctx context.Context, in *EnsureBudgetRequest, opts ...grpc.CallOption) (*EnsureBudgetResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(EnsureBudgetResponse)
+	err := c.cc.Invoke(ctx, GenerateService_EnsureBudget_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // GenerateServiceServer is the server API for GenerateService service.
 // All implementations must embed UnimplementedGenerateServiceServer
 // for forward compatibility.
@@ -112,7 +126,7 @@ func (c *generateServiceClient) BudgetStatus(ctx context.Context, in *BudgetStat
 //
 // 错误约定：
 //   - 未配 key 直接调用 → FAILED_PRECONDITION，message「未配置 LLM_API_KEY，无法调用模型」；
-//   - 预算耗尽（调用前预检）→ RESOURCE_EXHAUSTED，message 为逐字中文文案
+//   - 预算耗尽（EnsureBudget 与每次调用前预检）→ RESOURCE_EXHAUSTED，message 为逐字中文文案
 //     「今日 token 预算已用尽（上限 {limit}），请明天再试」（调用方按现状语义降级/透传）；
 //   - 超时/网络错误向上抛（INTERNAL/DEADLINE_EXCEEDED 等），降级决策留在调用方；
 //   - 重试策略：仅连接失败且请求未发出重试 1 次，流式不自动重试（ADR）。
@@ -121,6 +135,9 @@ type GenerateServiceServer interface {
 	ChatStream(*ChatStreamRequest, grpc.ServerStreamingServer[ChatStreamResponse]) error
 	Embed(context.Context, *EmbedRequest) (*EmbedResponse, error)
 	BudgetStatus(context.Context, *BudgetStatusRequest) (*BudgetStatusResponse, error)
+	// EnsureBudget 预算预检（orchestrator 在 chat 入口调用）：
+	// 耗尽 → RESOURCE_EXHAUSTED（message 为 429 文案逐字）；未耗尽 → OK。
+	EnsureBudget(context.Context, *EnsureBudgetRequest) (*EnsureBudgetResponse, error)
 	mustEmbedUnimplementedGenerateServiceServer()
 }
 
@@ -142,6 +159,9 @@ func (UnimplementedGenerateServiceServer) Embed(context.Context, *EmbedRequest) 
 }
 func (UnimplementedGenerateServiceServer) BudgetStatus(context.Context, *BudgetStatusRequest) (*BudgetStatusResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method BudgetStatus not implemented")
+}
+func (UnimplementedGenerateServiceServer) EnsureBudget(context.Context, *EnsureBudgetRequest) (*EnsureBudgetResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method EnsureBudget not implemented")
 }
 func (UnimplementedGenerateServiceServer) mustEmbedUnimplementedGenerateServiceServer() {}
 func (UnimplementedGenerateServiceServer) testEmbeddedByValue()                         {}
@@ -229,6 +249,24 @@ func _GenerateService_BudgetStatus_Handler(srv interface{}, ctx context.Context,
 	return interceptor(ctx, in, info, handler)
 }
 
+func _GenerateService_EnsureBudget_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(EnsureBudgetRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(GenerateServiceServer).EnsureBudget(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: GenerateService_EnsureBudget_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(GenerateServiceServer).EnsureBudget(ctx, req.(*EnsureBudgetRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // GenerateService_ServiceDesc is the grpc.ServiceDesc for GenerateService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -247,6 +285,10 @@ var GenerateService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "BudgetStatus",
 			Handler:    _GenerateService_BudgetStatus_Handler,
+		},
+		{
+			MethodName: "EnsureBudget",
+			Handler:    _GenerateService_EnsureBudget_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{

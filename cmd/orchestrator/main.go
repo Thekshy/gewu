@@ -2,11 +2,8 @@
 package main
 
 import (
-	"google.golang.org/grpc"
-
 	"gewu/internal/services/orchestrator"
 	"gewu/internal/svcbase"
-	orchestratorv1 "gewu/pkg/gen/gewu/orchestrator/v1"
 
 	"go.uber.org/zap"
 )
@@ -16,13 +13,15 @@ func main() {
 	ctx, stop := svcbase.MainSignalContext()
 	defer stop()
 	cfg := orchestrator.LoadConfig()
-	err := svcbase.RunGRPC(ctx, svcbase.GRPCConfig{
+	srv, err := orchestrator.NewServer(cfg, log)
+	if err != nil {
+		log.Fatal("构造编排服务失败", zap.Error(err))
+	}
+	err = svcbase.RunGRPC(ctx, svcbase.GRPCConfig{
 		Name:      "orchestrator",
 		Addr:      cfg.Addr,
 		AdminAddr: cfg.AdminAddr,
-		Register: func(s *grpc.Server) {
-			orchestratorv1.RegisterChatServiceServer(s, orchestrator.NewServer(log))
-		},
+		Register:  srv.Register,
 	}, log)
 	if err != nil {
 		log.Fatal("服务退出", zap.Error(err))

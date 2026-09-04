@@ -35,10 +35,28 @@ type Server struct {
 	rag          ragv1.RagServiceClient
 }
 
+// clients 下游服务客户端集合（Run 装配 / 测试注入）。
+type clients struct {
+	orchestrator orchestratorv1.ChatServiceClient
+	conversation conversationv1.ConversationServiceClient
+	generate     generatev1.GenerateServiceClient
+	tool         toolv1.ToolServiceClient
+	rag          ragv1.RagServiceClient
+}
+
+// newServer 以注入的客户端构造网关（Run 与测试共用）。
+func newServer(cfg Config, log *zap.Logger, cl clients) *Server {
+	return &Server{log: log, cfg: cfg,
+		orchestrator: cl.orchestrator,
+		conversation: cl.conversation,
+		generate:     cl.generate,
+		tool:         cl.tool,
+		rag:          cl.rag,
+	}
+}
+
 // Run 装配下游连接并启动 HTTP + 管理端口，ctx 结束时优雅退出。
 func Run(ctx context.Context, cfg Config, log *zap.Logger) error {
-	s := &Server{log: log, cfg: cfg}
-
 	conns := make([]*grpc.ClientConn, 0, 5)
 	dial := func(target, name string) *grpc.ClientConn {
 		cc, err := svcbase.Dial(target)
@@ -48,11 +66,13 @@ func Run(ctx context.Context, cfg Config, log *zap.Logger) error {
 		conns = append(conns, cc)
 		return cc
 	}
-	s.orchestrator = orchestratorv1.NewChatServiceClient(dial(cfg.OrchestratorAddr, "orchestrator"))
-	s.conversation = conversationv1.NewConversationServiceClient(dial(cfg.ConversationAddr, "conversation"))
-	s.generate = generatev1.NewGenerateServiceClient(dial(cfg.GenerateAddr, "generate"))
-	s.tool = toolv1.NewToolServiceClient(dial(cfg.ToolAddr, "tool"))
-	s.rag = ragv1.NewRagServiceClient(dial(cfg.RagAddr, "rag"))
+	s := newServer(cfg, log, clients{
+		orchestrator: orchestratorv1.NewChatServiceClient(dial(cfg.OrchestratorAddr, "orchestrator")),
+		conversation: conversationv1.NewConversationServiceClient(dial(cfg.ConversationAddr, "conversation")),
+		generate:     generatev1.NewGenerateServiceClient(dial(cfg.GenerateAddr, "generate")),
+		tool:         toolv1.NewToolServiceClient(dial(cfg.ToolAddr, "tool")),
+		rag:          ragv1.NewRagServiceClient(dial(cfg.RagAddr, "rag")),
+	})
 	defer func() {
 		for _, cc := range conns {
 			_ = cc.Close()
@@ -106,7 +126,8 @@ func (s *Server) newRouter() *gin.Engine {
 
 	r.GET("/api/health", s.health)
 
-	// P0 骨架占位：契约端点在 P1~P4 逐阶段接入
+	// 契约端点：P1 起 chat 已接入（SSE 透传）；其余在 P3/P4 接入
+	r.POST("/api/chat", s.chat)
 	notWired := func(stage string) gin.HandlerFunc {
 		return func(c *gin.Context) {
 			c.JSON(http.StatusServiceUnavailable, gin.H{"detail": "P0 脚手架：" + stage})
@@ -114,7 +135,6 @@ func (s *Server) newRouter() *gin.Engine {
 	}
 	r.GET("/api/docs", notWired("/api/docs 在 P3 接入（rag）"))
 	r.POST("/api/search", notWired("/api/search 在 P3 接入（rag）"))
-	r.POST("/api/chat", notWired("/api/chat 在 P1 接入（orchestrator SSE）"))
 	r.POST("/api/business/reset", notWired("/api/business/* 在 P4 接入（tool）"))
 	r.GET("/api/business/overview", notWired("/api/business/* 在 P4 接入（tool）"))
 	return r

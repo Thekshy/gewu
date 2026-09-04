@@ -568,6 +568,86 @@ func (x *BudgetStatusResponse) GetHasKey() bool {
 	return false
 }
 
+type EnsureBudgetRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *EnsureBudgetRequest) Reset() {
+	*x = EnsureBudgetRequest{}
+	mi := &file_gewu_generate_v1_generate_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EnsureBudgetRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EnsureBudgetRequest) ProtoMessage() {}
+
+func (x *EnsureBudgetRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_gewu_generate_v1_generate_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EnsureBudgetRequest.ProtoReflect.Descriptor instead.
+func (*EnsureBudgetRequest) Descriptor() ([]byte, []int) {
+	return file_gewu_generate_v1_generate_proto_rawDescGZIP(), []int{11}
+}
+
+type EnsureBudgetResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	HasKey        bool                   `protobuf:"varint,1,opt,name=has_key,json=hasKey,proto3" json:"has_key,omitempty"` // 调用方据此选择 LLM/启发式分支
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *EnsureBudgetResponse) Reset() {
+	*x = EnsureBudgetResponse{}
+	mi := &file_gewu_generate_v1_generate_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *EnsureBudgetResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*EnsureBudgetResponse) ProtoMessage() {}
+
+func (x *EnsureBudgetResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_gewu_generate_v1_generate_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use EnsureBudgetResponse.ProtoReflect.Descriptor instead.
+func (*EnsureBudgetResponse) Descriptor() ([]byte, []int) {
+	return file_gewu_generate_v1_generate_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *EnsureBudgetResponse) GetHasKey() bool {
+	if x != nil {
+		return x.HasKey
+	}
+	return false
+}
+
 var File_gewu_generate_v1_generate_proto protoreflect.FileDescriptor
 
 const file_gewu_generate_v1_generate_proto_rawDesc = "" +
@@ -602,13 +682,17 @@ const file_gewu_generate_v1_generate_proto_rawDesc = "" +
 	"\x14BudgetStatusResponse\x12\x12\n" +
 	"\x04used\x18\x01 \x01(\x03R\x04used\x12\x14\n" +
 	"\x05limit\x18\x02 \x01(\x03R\x05limit\x12\x17\n" +
-	"\ahas_key\x18\x03 \x01(\bR\x06hasKey2\xdc\x02\n" +
+	"\ahas_key\x18\x03 \x01(\bR\x06hasKey\"\x15\n" +
+	"\x13EnsureBudgetRequest\"/\n" +
+	"\x14EnsureBudgetResponse\x12\x17\n" +
+	"\ahas_key\x18\x01 \x01(\bR\x06hasKey2\xbb\x03\n" +
 	"\x0fGenerateService\x12E\n" +
 	"\x04Chat\x12\x1d.gewu.generate.v1.ChatRequest\x1a\x1e.gewu.generate.v1.ChatResponse\x12Y\n" +
 	"\n" +
 	"ChatStream\x12#.gewu.generate.v1.ChatStreamRequest\x1a$.gewu.generate.v1.ChatStreamResponse0\x01\x12H\n" +
 	"\x05Embed\x12\x1e.gewu.generate.v1.EmbedRequest\x1a\x1f.gewu.generate.v1.EmbedResponse\x12]\n" +
-	"\fBudgetStatus\x12%.gewu.generate.v1.BudgetStatusRequest\x1a&.gewu.generate.v1.BudgetStatusResponseB*Z(gewu/pkg/gen/gewu/generate/v1;generatev1b\x06proto3"
+	"\fBudgetStatus\x12%.gewu.generate.v1.BudgetStatusRequest\x1a&.gewu.generate.v1.BudgetStatusResponse\x12]\n" +
+	"\fEnsureBudget\x12%.gewu.generate.v1.EnsureBudgetRequest\x1a&.gewu.generate.v1.EnsureBudgetResponseB*Z(gewu/pkg/gen/gewu/generate/v1;generatev1b\x06proto3"
 
 var (
 	file_gewu_generate_v1_generate_proto_rawDescOnce sync.Once
@@ -622,7 +706,7 @@ func file_gewu_generate_v1_generate_proto_rawDescGZIP() []byte {
 	return file_gewu_generate_v1_generate_proto_rawDescData
 }
 
-var file_gewu_generate_v1_generate_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
+var file_gewu_generate_v1_generate_proto_msgTypes = make([]protoimpl.MessageInfo, 13)
 var file_gewu_generate_v1_generate_proto_goTypes = []any{
 	(*Message)(nil),              // 0: gewu.generate.v1.Message
 	(*Options)(nil),              // 1: gewu.generate.v1.Options
@@ -635,6 +719,8 @@ var file_gewu_generate_v1_generate_proto_goTypes = []any{
 	(*EmbedResponse)(nil),        // 8: gewu.generate.v1.EmbedResponse
 	(*BudgetStatusRequest)(nil),  // 9: gewu.generate.v1.BudgetStatusRequest
 	(*BudgetStatusResponse)(nil), // 10: gewu.generate.v1.BudgetStatusResponse
+	(*EnsureBudgetRequest)(nil),  // 11: gewu.generate.v1.EnsureBudgetRequest
+	(*EnsureBudgetResponse)(nil), // 12: gewu.generate.v1.EnsureBudgetResponse
 }
 var file_gewu_generate_v1_generate_proto_depIdxs = []int32{
 	0,  // 0: gewu.generate.v1.ChatRequest.messages:type_name -> gewu.generate.v1.Message
@@ -646,12 +732,14 @@ var file_gewu_generate_v1_generate_proto_depIdxs = []int32{
 	4,  // 6: gewu.generate.v1.GenerateService.ChatStream:input_type -> gewu.generate.v1.ChatStreamRequest
 	6,  // 7: gewu.generate.v1.GenerateService.Embed:input_type -> gewu.generate.v1.EmbedRequest
 	9,  // 8: gewu.generate.v1.GenerateService.BudgetStatus:input_type -> gewu.generate.v1.BudgetStatusRequest
-	3,  // 9: gewu.generate.v1.GenerateService.Chat:output_type -> gewu.generate.v1.ChatResponse
-	5,  // 10: gewu.generate.v1.GenerateService.ChatStream:output_type -> gewu.generate.v1.ChatStreamResponse
-	8,  // 11: gewu.generate.v1.GenerateService.Embed:output_type -> gewu.generate.v1.EmbedResponse
-	10, // 12: gewu.generate.v1.GenerateService.BudgetStatus:output_type -> gewu.generate.v1.BudgetStatusResponse
-	9,  // [9:13] is the sub-list for method output_type
-	5,  // [5:9] is the sub-list for method input_type
+	11, // 9: gewu.generate.v1.GenerateService.EnsureBudget:input_type -> gewu.generate.v1.EnsureBudgetRequest
+	3,  // 10: gewu.generate.v1.GenerateService.Chat:output_type -> gewu.generate.v1.ChatResponse
+	5,  // 11: gewu.generate.v1.GenerateService.ChatStream:output_type -> gewu.generate.v1.ChatStreamResponse
+	8,  // 12: gewu.generate.v1.GenerateService.Embed:output_type -> gewu.generate.v1.EmbedResponse
+	10, // 13: gewu.generate.v1.GenerateService.BudgetStatus:output_type -> gewu.generate.v1.BudgetStatusResponse
+	12, // 14: gewu.generate.v1.GenerateService.EnsureBudget:output_type -> gewu.generate.v1.EnsureBudgetResponse
+	10, // [10:15] is the sub-list for method output_type
+	5,  // [5:10] is the sub-list for method input_type
 	5,  // [5:5] is the sub-list for extension type_name
 	5,  // [5:5] is the sub-list for extension extendee
 	0,  // [0:5] is the sub-list for field type_name
@@ -668,7 +756,7 @@ func file_gewu_generate_v1_generate_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_gewu_generate_v1_generate_proto_rawDesc), len(file_gewu_generate_v1_generate_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   11,
+			NumMessages:   13,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
