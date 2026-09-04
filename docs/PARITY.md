@@ -448,7 +448,8 @@ tool_descriptions(role) 只列该角色工具:`- {name}：{description}` 换行�
 - OpenAI 兼容端点:`{LLM_BASE_URL}/chat/completions`、`/embeddings`(base_url 以 / 结尾拼接)。
 - 模型分层:主答案/嵌入=LLM_MODEL(默认 glm-5.3);辅助调用(路由/拆解/抽槽/改写/意图/选工具,
   即 small=true)=LLM_SMALL_MODEL(默认 glm-5.3-flash)。
-- chat:默认 temperature=0.2,max_tokens=2048;json_mode → `response_format:{"type":"json_object"}`;
+- chat:temperature 取调用点显式值——主答案(直答/深研)传零值 Options 即 **0**(26/26 基线行为,
+  见 §18-7),辅助调用显式 0;max_tokens=2048;json_mode → `response_format:{"type":"json_object"}`;
   LLM_DISABLE_THINKING=true → 追加智谱私有参数 `thinking:{"type":"disabled"}`。
 - chat_stream:SSE 流式,逐 delta.content 产出;结束后预算入账 max(1, chars/2)。
 - embed:批量输入,按 index 排序返回向量。
@@ -515,3 +516,6 @@ tool_descriptions(role) 只列该角色工具:`- {name}：{description}` 换行�
 6. **leave_status 读工具返回**:Python 版业务层返回的 dict 无 `message` 键,tools 层
    `result["message"]` 抛 KeyError → 整轮变 error 事件(用户问「我的请假单批了吗」
    必然报错,属原设计缺陷;评测集未覆盖)。Go 版返回可读的请假单状态摘要。
+7. **主答案 temperature**:Python 版 chat 缺省 0.2(直答/深研未显式覆盖);Go 版调用点传零值
+   Options → temperature=0。26/26 基线在 temp=0 下取得,微服务迁移以此为准
+   (2026-09-04 决策,§13 措辞已同步修订)。
