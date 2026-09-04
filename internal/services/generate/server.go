@@ -18,9 +18,21 @@ type Server struct {
 	meter    *budgetMeter
 }
 
-// NewServer 构造生成服务。
+// NewServer 构造生成服务；配置了 POSTGRES_DSN 时预算持久化到 PG。
 func NewServer(cfg Config, log *zap.Logger) *Server {
 	meter := newBudgetMeter(cfg.DailyTokenBudget)
+	if cfg.PostgresDSN != "" {
+		sink, err := openPGSink(cfg.PostgresDSN)
+		if err != nil {
+			log.Fatal("预算持久化初始化失败", zap.Error(err))
+		}
+		if err := meter.attachSink(sink, log); err != nil {
+			log.Fatal("预算持久化加载失败", zap.Error(err))
+		}
+		log.Info("预算持久化已启用（PG）")
+	} else {
+		log.Warn("预算计量运行在内存模式（POSTGRES_DSN 未配置），重启后当日用量清零")
+	}
 	return &Server{cfg: cfg, log: log, provider: newProvider(cfg, meter), meter: meter}
 }
 

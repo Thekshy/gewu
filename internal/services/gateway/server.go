@@ -29,6 +29,7 @@ type Server struct {
 	cfg Config
 
 	orchestrator orchestratorv1.ChatServiceClient
+	config       orchestratorv1.ConfigServiceClient
 	conversation conversationv1.ConversationServiceClient
 	generate     generatev1.GenerateServiceClient
 	tool         toolv1.ToolServiceClient
@@ -38,6 +39,7 @@ type Server struct {
 // clients 下游服务客户端集合（Run 装配 / 测试注入）。
 type clients struct {
 	orchestrator orchestratorv1.ChatServiceClient
+	config       orchestratorv1.ConfigServiceClient
 	conversation conversationv1.ConversationServiceClient
 	generate     generatev1.GenerateServiceClient
 	tool         toolv1.ToolServiceClient
@@ -48,6 +50,7 @@ type clients struct {
 func newServer(cfg Config, log *zap.Logger, cl clients) *Server {
 	return &Server{log: log, cfg: cfg,
 		orchestrator: cl.orchestrator,
+		config:       cl.config,
 		conversation: cl.conversation,
 		generate:     cl.generate,
 		tool:         cl.tool,
@@ -66,8 +69,10 @@ func Run(ctx context.Context, cfg Config, log *zap.Logger) error {
 		conns = append(conns, cc)
 		return cc
 	}
+	orchCC := dial(cfg.OrchestratorAddr, "orchestrator")
 	s := newServer(cfg, log, clients{
-		orchestrator: orchestratorv1.NewChatServiceClient(dial(cfg.OrchestratorAddr, "orchestrator")),
+		orchestrator: orchestratorv1.NewChatServiceClient(orchCC),
+		config:       orchestratorv1.NewConfigServiceClient(orchCC),
 		conversation: conversationv1.NewConversationServiceClient(dial(cfg.ConversationAddr, "conversation")),
 		generate:     generatev1.NewGenerateServiceClient(dial(cfg.GenerateAddr, "generate")),
 		tool:         toolv1.NewToolServiceClient(dial(cfg.ToolAddr, "tool")),
@@ -137,6 +142,10 @@ func (s *Server) newRouter() *gin.Engine {
 	r.POST("/api/search", notWired("/api/search 在 P3 接入（rag）"))
 	r.POST("/api/business/reset", notWired("/api/business/* 在 P4 接入（tool）"))
 	r.GET("/api/business/overview", notWired("/api/business/* 在 P4 接入（tool）"))
+
+	// /admin/* 新增命名空间：配置管理（转发 orchestrator，P2）
+	r.GET("/admin/config", s.adminConfig)
+	r.PUT("/admin/config", s.adminConfig)
 	return r
 }
 

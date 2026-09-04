@@ -948,6 +948,251 @@ func (x *DoneEvent) GetLatencyMs() int64 {
 	return 0
 }
 
+// AgentConfig 编排配置（默认行 = 冻结单体 internal/agent/prompts.go 逐字快照）。
+type AgentConfig struct {
+	state             protoimpl.MessageState `protogen:"open.v1"`
+	RouterSystem      string                 `protobuf:"bytes,1,opt,name=router_system,json=routerSystem,proto3" json:"router_system,omitempty"`                  // 五分类路由提示词
+	SlotExtractSystem string                 `protobuf:"bytes,2,opt,name=slot_extract_system,json=slotExtractSystem,proto3" json:"slot_extract_system,omitempty"` // 槽位抽取提示词
+	PlannerSystem     string                 `protobuf:"bytes,3,opt,name=planner_system,json=plannerSystem,proto3" json:"planner_system,omitempty"`               // 深研拆解提示词
+	AnswerSystem      string                 `protobuf:"bytes,4,opt,name=answer_system,json=answerSystem,proto3" json:"answer_system,omitempty"`                  // 引用式作答提示词
+	unknownFields     protoimpl.UnknownFields
+	sizeCache         protoimpl.SizeCache
+}
+
+func (x *AgentConfig) Reset() {
+	*x = AgentConfig{}
+	mi := &file_gewu_orchestrator_v1_orchestrator_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AgentConfig) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AgentConfig) ProtoMessage() {}
+
+func (x *AgentConfig) ProtoReflect() protoreflect.Message {
+	mi := &file_gewu_orchestrator_v1_orchestrator_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AgentConfig.ProtoReflect.Descriptor instead.
+func (*AgentConfig) Descriptor() ([]byte, []int) {
+	return file_gewu_orchestrator_v1_orchestrator_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *AgentConfig) GetRouterSystem() string {
+	if x != nil {
+		return x.RouterSystem
+	}
+	return ""
+}
+
+func (x *AgentConfig) GetSlotExtractSystem() string {
+	if x != nil {
+		return x.SlotExtractSystem
+	}
+	return ""
+}
+
+func (x *AgentConfig) GetPlannerSystem() string {
+	if x != nil {
+		return x.PlannerSystem
+	}
+	return ""
+}
+
+func (x *AgentConfig) GetAnswerSystem() string {
+	if x != nil {
+		return x.AnswerSystem
+	}
+	return ""
+}
+
+type GetConfigRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetConfigRequest) Reset() {
+	*x = GetConfigRequest{}
+	mi := &file_gewu_orchestrator_v1_orchestrator_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetConfigRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetConfigRequest) ProtoMessage() {}
+
+func (x *GetConfigRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_gewu_orchestrator_v1_orchestrator_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetConfigRequest.ProtoReflect.Descriptor instead.
+func (*GetConfigRequest) Descriptor() ([]byte, []int) {
+	return file_gewu_orchestrator_v1_orchestrator_proto_rawDescGZIP(), []int{15}
+}
+
+type GetConfigResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Config        *AgentConfig           `protobuf:"bytes,1,opt,name=config,proto3" json:"config,omitempty"`
+	IsDefault     bool                   `protobuf:"varint,2,opt,name=is_default,json=isDefault,proto3" json:"is_default,omitempty"` // 是否默认行（未被 /admin 修改过）
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetConfigResponse) Reset() {
+	*x = GetConfigResponse{}
+	mi := &file_gewu_orchestrator_v1_orchestrator_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetConfigResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetConfigResponse) ProtoMessage() {}
+
+func (x *GetConfigResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_gewu_orchestrator_v1_orchestrator_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetConfigResponse.ProtoReflect.Descriptor instead.
+func (*GetConfigResponse) Descriptor() ([]byte, []int) {
+	return file_gewu_orchestrator_v1_orchestrator_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *GetConfigResponse) GetConfig() *AgentConfig {
+	if x != nil {
+		return x.Config
+	}
+	return nil
+}
+
+func (x *GetConfigResponse) GetIsDefault() bool {
+	if x != nil {
+		return x.IsDefault
+	}
+	return false
+}
+
+type SetConfigRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Config        *AgentConfig           `protobuf:"bytes,1,opt,name=config,proto3" json:"config,omitempty"` // 空字段保持不变
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SetConfigRequest) Reset() {
+	*x = SetConfigRequest{}
+	mi := &file_gewu_orchestrator_v1_orchestrator_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetConfigRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetConfigRequest) ProtoMessage() {}
+
+func (x *SetConfigRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_gewu_orchestrator_v1_orchestrator_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetConfigRequest.ProtoReflect.Descriptor instead.
+func (*SetConfigRequest) Descriptor() ([]byte, []int) {
+	return file_gewu_orchestrator_v1_orchestrator_proto_rawDescGZIP(), []int{17}
+}
+
+func (x *SetConfigRequest) GetConfig() *AgentConfig {
+	if x != nil {
+		return x.Config
+	}
+	return nil
+}
+
+type SetConfigResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Config        *AgentConfig           `protobuf:"bytes,1,opt,name=config,proto3" json:"config,omitempty"` // 更新后的生效配置
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SetConfigResponse) Reset() {
+	*x = SetConfigResponse{}
+	mi := &file_gewu_orchestrator_v1_orchestrator_proto_msgTypes[18]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SetConfigResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SetConfigResponse) ProtoMessage() {}
+
+func (x *SetConfigResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_gewu_orchestrator_v1_orchestrator_proto_msgTypes[18]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SetConfigResponse.ProtoReflect.Descriptor instead.
+func (*SetConfigResponse) Descriptor() ([]byte, []int) {
+	return file_gewu_orchestrator_v1_orchestrator_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *SetConfigResponse) GetConfig() *AgentConfig {
+	if x != nil {
+		return x.Config
+	}
+	return nil
+}
+
 var File_gewu_orchestrator_v1_orchestrator_proto protoreflect.FileDescriptor
 
 const file_gewu_orchestrator_v1_orchestrator_proto_rawDesc = "" +
@@ -1012,9 +1257,26 @@ const file_gewu_orchestrator_v1_orchestrator_proto_rawDesc = "" +
 	"\amessage\x18\x01 \x01(\tR\amessage\"*\n" +
 	"\tDoneEvent\x12\x1d\n" +
 	"\n" +
-	"latency_ms\x18\x01 \x01(\x03R\tlatencyMs2^\n" +
+	"latency_ms\x18\x01 \x01(\x03R\tlatencyMs\"\xae\x01\n" +
+	"\vAgentConfig\x12#\n" +
+	"\rrouter_system\x18\x01 \x01(\tR\frouterSystem\x12.\n" +
+	"\x13slot_extract_system\x18\x02 \x01(\tR\x11slotExtractSystem\x12%\n" +
+	"\x0eplanner_system\x18\x03 \x01(\tR\rplannerSystem\x12#\n" +
+	"\ranswer_system\x18\x04 \x01(\tR\fanswerSystem\"\x12\n" +
+	"\x10GetConfigRequest\"m\n" +
+	"\x11GetConfigResponse\x129\n" +
+	"\x06config\x18\x01 \x01(\v2!.gewu.orchestrator.v1.AgentConfigR\x06config\x12\x1d\n" +
+	"\n" +
+	"is_default\x18\x02 \x01(\bR\tisDefault\"M\n" +
+	"\x10SetConfigRequest\x129\n" +
+	"\x06config\x18\x01 \x01(\v2!.gewu.orchestrator.v1.AgentConfigR\x06config\"N\n" +
+	"\x11SetConfigResponse\x129\n" +
+	"\x06config\x18\x01 \x01(\v2!.gewu.orchestrator.v1.AgentConfigR\x06config2^\n" +
 	"\vChatService\x12O\n" +
-	"\x04Chat\x12!.gewu.orchestrator.v1.ChatRequest\x1a\".gewu.orchestrator.v1.ChatResponse0\x01B2Z0gewu/pkg/gen/gewu/orchestrator/v1;orchestratorv1b\x06proto3"
+	"\x04Chat\x12!.gewu.orchestrator.v1.ChatRequest\x1a\".gewu.orchestrator.v1.ChatResponse0\x012\xcb\x01\n" +
+	"\rConfigService\x12\\\n" +
+	"\tGetConfig\x12&.gewu.orchestrator.v1.GetConfigRequest\x1a'.gewu.orchestrator.v1.GetConfigResponse\x12\\\n" +
+	"\tSetConfig\x12&.gewu.orchestrator.v1.SetConfigRequest\x1a'.gewu.orchestrator.v1.SetConfigResponseB2Z0gewu/pkg/gen/gewu/orchestrator/v1;orchestratorv1b\x06proto3"
 
 var (
 	file_gewu_orchestrator_v1_orchestrator_proto_rawDescOnce sync.Once
@@ -1028,7 +1290,7 @@ func file_gewu_orchestrator_v1_orchestrator_proto_rawDescGZIP() []byte {
 	return file_gewu_orchestrator_v1_orchestrator_proto_rawDescData
 }
 
-var file_gewu_orchestrator_v1_orchestrator_proto_msgTypes = make([]protoimpl.MessageInfo, 14)
+var file_gewu_orchestrator_v1_orchestrator_proto_msgTypes = make([]protoimpl.MessageInfo, 19)
 var file_gewu_orchestrator_v1_orchestrator_proto_goTypes = []any{
 	(*ChatRequest)(nil),        // 0: gewu.orchestrator.v1.ChatRequest
 	(*ArgPair)(nil),            // 1: gewu.orchestrator.v1.ArgPair
@@ -1044,6 +1306,11 @@ var file_gewu_orchestrator_v1_orchestrator_proto_goTypes = []any{
 	(*ActionResultEvent)(nil),  // 11: gewu.orchestrator.v1.ActionResultEvent
 	(*ErrorEvent)(nil),         // 12: gewu.orchestrator.v1.ErrorEvent
 	(*DoneEvent)(nil),          // 13: gewu.orchestrator.v1.DoneEvent
+	(*AgentConfig)(nil),        // 14: gewu.orchestrator.v1.AgentConfig
+	(*GetConfigRequest)(nil),   // 15: gewu.orchestrator.v1.GetConfigRequest
+	(*GetConfigResponse)(nil),  // 16: gewu.orchestrator.v1.GetConfigResponse
+	(*SetConfigRequest)(nil),   // 17: gewu.orchestrator.v1.SetConfigRequest
+	(*SetConfigResponse)(nil),  // 18: gewu.orchestrator.v1.SetConfigResponse
 }
 var file_gewu_orchestrator_v1_orchestrator_proto_depIdxs = []int32{
 	4,  // 0: gewu.orchestrator.v1.ChatResponse.route:type_name -> gewu.orchestrator.v1.RouteEvent
@@ -1058,13 +1325,20 @@ var file_gewu_orchestrator_v1_orchestrator_proto_depIdxs = []int32{
 	13, // 9: gewu.orchestrator.v1.ChatResponse.done:type_name -> gewu.orchestrator.v1.DoneEvent
 	2,  // 10: gewu.orchestrator.v1.CitationsEvent.items:type_name -> gewu.orchestrator.v1.Citation
 	1,  // 11: gewu.orchestrator.v1.PendingActionEvent.args:type_name -> gewu.orchestrator.v1.ArgPair
-	0,  // 12: gewu.orchestrator.v1.ChatService.Chat:input_type -> gewu.orchestrator.v1.ChatRequest
-	3,  // 13: gewu.orchestrator.v1.ChatService.Chat:output_type -> gewu.orchestrator.v1.ChatResponse
-	13, // [13:14] is the sub-list for method output_type
-	12, // [12:13] is the sub-list for method input_type
-	12, // [12:12] is the sub-list for extension type_name
-	12, // [12:12] is the sub-list for extension extendee
-	0,  // [0:12] is the sub-list for field type_name
+	14, // 12: gewu.orchestrator.v1.GetConfigResponse.config:type_name -> gewu.orchestrator.v1.AgentConfig
+	14, // 13: gewu.orchestrator.v1.SetConfigRequest.config:type_name -> gewu.orchestrator.v1.AgentConfig
+	14, // 14: gewu.orchestrator.v1.SetConfigResponse.config:type_name -> gewu.orchestrator.v1.AgentConfig
+	0,  // 15: gewu.orchestrator.v1.ChatService.Chat:input_type -> gewu.orchestrator.v1.ChatRequest
+	15, // 16: gewu.orchestrator.v1.ConfigService.GetConfig:input_type -> gewu.orchestrator.v1.GetConfigRequest
+	17, // 17: gewu.orchestrator.v1.ConfigService.SetConfig:input_type -> gewu.orchestrator.v1.SetConfigRequest
+	3,  // 18: gewu.orchestrator.v1.ChatService.Chat:output_type -> gewu.orchestrator.v1.ChatResponse
+	16, // 19: gewu.orchestrator.v1.ConfigService.GetConfig:output_type -> gewu.orchestrator.v1.GetConfigResponse
+	18, // 20: gewu.orchestrator.v1.ConfigService.SetConfig:output_type -> gewu.orchestrator.v1.SetConfigResponse
+	18, // [18:21] is the sub-list for method output_type
+	15, // [15:18] is the sub-list for method input_type
+	15, // [15:15] is the sub-list for extension type_name
+	15, // [15:15] is the sub-list for extension extendee
+	0,  // [0:15] is the sub-list for field type_name
 }
 
 func init() { file_gewu_orchestrator_v1_orchestrator_proto_init() }
@@ -1090,9 +1364,9 @@ func file_gewu_orchestrator_v1_orchestrator_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_gewu_orchestrator_v1_orchestrator_proto_rawDesc), len(file_gewu_orchestrator_v1_orchestrator_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   14,
+			NumMessages:   19,
 			NumExtensions: 0,
-			NumServices:   1,
+			NumServices:   2,
 		},
 		GoTypes:           file_gewu_orchestrator_v1_orchestrator_proto_goTypes,
 		DependencyIndexes: file_gewu_orchestrator_v1_orchestrator_proto_depIdxs,

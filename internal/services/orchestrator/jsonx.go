@@ -3,22 +3,7 @@ package orchestrator
 import (
 	"encoding/json"
 	"strings"
-
-	"io"
-
-	"google.golang.org/grpc/status"
 )
-
-// errEOF 统一 EOF 判定（gRPC 流结束）。
-var errEOF = io.EOF
-
-// errText 取错误的可展示文本（gRPC 状态消息优先）。
-func errText(err error) string {
-	if s, ok := status.FromError(err); ok && s.Message() != "" {
-		return s.Message()
-	}
-	return err.Error()
-}
 
 // parseJSONObject 容错解析 LLM 输出的 JSON 对象（拷贝自冻结 internal/agent/jsonx.go，
 // 行为逐字一致）：剥离 ```json 围栏、截取首个 { 到末个 } 之间的内容再解析。
@@ -61,6 +46,15 @@ func jsonStrSlice(obj map[string]any, key string) []string {
 		}
 	}
 	return out
+}
+
+// jsonStrMap 取对象嵌套对象字段（槽位抽取 {"slots": {...}} 用）。
+func jsonStrMap(obj map[string]any, key string) map[string]any {
+	m, ok := obj[key].(map[string]any)
+	if !ok {
+		return map[string]any{}
+	}
+	return m
 }
 
 // errEmptyJSON 空输出（调用方各自降级）。

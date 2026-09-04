@@ -21,6 +21,8 @@ type Config struct {
 	EmbedModel       string
 	DisableThinking  bool
 	DailyTokenBudget int64 // 每日 token 上限（PARITY §12.2）
+
+	PostgresDSN string // 预算持久化；空 = 内存模式（重启清零，开发降级）
 }
 
 // LoadConfig 从环境变量装配；缺省值与冻结单体 internal/config 一致。
@@ -40,5 +42,7 @@ func LoadConfig() Config {
 		EmbedModel:       svcbase.EnvOr("EMBED_MODEL", "embedding-3"),
 		DisableThinking:  svcbase.EnvOr("LLM_DISABLE_THINKING", "false") == "true",
 		DailyTokenBudget: budget,
+
+		PostgresDSN: svcbase.EnvOr("POSTGRES_DSN", ""),
 	}
 }

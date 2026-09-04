@@ -102,3 +102,33 @@ service ChatService {
   // 客户端断开 → ctx 取消 → 全链路取消传播到 generate 的 provider 请求。
   rpc Chat(ChatRequest) returns (stream ChatResponse);
 }
+
+// AgentConfig 编排配置（默认行 = 冻结单体 internal/agent/prompts.go 逐字快照）。
+message AgentConfig {
+  string router_system = 1;       // 五分类路由提示词
+  string slot_extract_system = 2; // 槽位抽取提示词
+  string planner_system = 3;      // 深研拆解提示词
+  string answer_system = 4;       // 引用式作答提示词
+}
+
+message GetConfigRequest {}
+
+message GetConfigResponse {
+  AgentConfig config = 1;
+  bool is_default = 2; // 是否默认行（未被 /admin 修改过）
+}
+
+message SetConfigRequest {
+  AgentConfig config = 1; // 空字段保持不变
+}
+
+message SetConfigResponse {
+  AgentConfig config = 1; // 更新后的生效配置
+}
+
+// ConfigService 编排配置管理（gateway /admin/* 转发至此；新增命名空间，
+// 不触碰既有 /api/* 契约）。热路径读走 Redis 缓存，零配置 RPC。
+service ConfigService {
+  rpc GetConfig(GetConfigRequest) returns (GetConfigResponse);
+  rpc SetConfig(SetConfigRequest) returns (SetConfigResponse);
+}

@@ -57,6 +57,9 @@ services:
       RAG_ADDR: "rag:9005"
       POSTGRES_DSN: ${POSTGRES_DSN:-postgres://gewu:gewu@postgres:5432/gewu?sslmode=disable}
       REDIS_ADDR: "redis:6379"
+      DATA_DIR: /srv/data
+    volumes:
+      - ./data:/srv/data   # P4 前业务库（business.db）仍由编排进程持有
     healthcheck:
       <<: *healthz
       test: ["CMD", "wget", "-qO-", "http://localhost:9101/healthz"]

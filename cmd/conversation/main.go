@@ -16,12 +16,20 @@ func main() {
 	ctx, stop := svcbase.MainSignalContext()
 	defer stop()
 	cfg := conversation.LoadConfig()
-	err := svcbase.RunGRPC(ctx, svcbase.GRPCConfig{
+	store, closeStore, err := cfg.OpenStore()
+	if err != nil {
+		log.Fatal("会话存储初始化失败", zap.Error(err))
+	}
+	defer closeStore()
+	if _, memory := store.(*conversation.MemoryStore); memory {
+		log.Warn("会话存储运行在内存模式（POSTGRES_DSN 未配置），重启后会话丢失")
+	}
+	err = svcbase.RunGRPC(ctx, svcbase.GRPCConfig{
 		Name:      "conversation",
 		Addr:      cfg.Addr,
 		AdminAddr: cfg.AdminAddr,
 		Register: func(s *grpc.Server) {
-			conversationv1.RegisterConversationServiceServer(s, conversation.NewServer(log))
+			conversationv1.RegisterConversationServiceServer(s, conversation.NewServer(store, log))
 		},
 	}, log)
 	if err != nil {
