@@ -42,14 +42,42 @@ message ListDocsResponse {
 message StatsRequest {}
 
 message StatsResponse {
-  int32 docs = 1;
-  int32 chunks = 2;
-  bool embedded = 3; // 库中是否有向量
+	int32 docs = 1;
+	int32 chunks = 2;
+	bool embedded = 3; // 库中是否有向量
 }
 
-// RagService 知识检索。
+// 摄入（P3）：流水线走 Redis Streams，Ingest RPC 保持阻塞语义
+// （发布后等待完成回执，超时报错）——评测与 A/B 需要确定性索引状态。
+message IngestRequest {
+	bool no_embed = 1; // 只建 BM25
+	bool rebuild = 2;  // 清空后重建
+}
+
+message IngestResponse {
+	string line = 1;             // 进度行（逐文档）
+	bool done = 2;               // 全部完成（stats 有效）
+	StatsResponse stats = 3;     // done 时索引规模
+	string error = 4;            // 失败原因（done 且失败时）
+	bool embedded = 5;           // 本轮是否完成向量化
+}
+
+message UploadRequest {
+	string filename = 1; // *.md
+	bytes content = 2;
+}
+
+message UploadResponse {
+	string doc_id = 1;
+}
+
+// RagService 知识检索与摄入。
 service RagService {
-  rpc Search(SearchRequest) returns (SearchResponse);
-  rpc ListDocs(ListDocsRequest) returns (ListDocsResponse);
-  rpc Stats(StatsRequest) returns (StatsResponse);
+	rpc Search(SearchRequest) returns (SearchResponse);
+	rpc ListDocs(ListDocsRequest) returns (ListDocsResponse);
+	rpc Stats(StatsRequest) returns (StatsResponse);
+	// Ingest 阻塞式全量入库（CLI：make ingest-ms；corpus 目录由服务侧读取）。
+	rpc Ingest(IngestRequest) returns (stream IngestResponse);
+	// Upload 异步上传（新增演示面：发布单个文档的摄入任务，立即返回）。
+	rpc Upload(UploadRequest) returns (UploadResponse);
 }

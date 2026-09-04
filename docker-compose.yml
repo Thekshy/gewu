@@ -138,7 +138,11 @@ services:
       GENERATE_ADDR: "generate:9003"
       POSTGRES_DSN: ${POSTGRES_DSN:-postgres://gewu:gewu@postgres:5432/gewu?sslmode=disable}
       REDIS_ADDR: "redis:6379"
-      MILVUS_ADDR: "milvus:19530"
+      MILVUS_ADDR: ${MILVUS_ADDR:-milvus:19530}
+      DATA_DIR: /srv/data
+      RETRIEVAL_K: ${RETRIEVAL_K:-6}
+    volumes:
+      - ./data:/srv/data   # 语料 data/corpus 与上传目录
     healthcheck:
       <<: *healthz
       test: ["CMD", "wget", "-qO-", "http://localhost:9105/healthz"]

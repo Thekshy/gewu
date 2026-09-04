@@ -345,12 +345,12 @@ func (s *Server) llmExtractTool(ctx context.Context, question, role string) stri
 	return ""
 }
 
-// fallbackKnowledge 工具未识别 → 转知识库检索（P3 前为空库语义 → NO_DATA）。
+// fallbackKnowledge 工具未识别 → 转知识库检索（PARITY §9.4 文案逐字）。
 func (s *Server) fallbackKnowledge(ctx context.Context, emit emitFn, question string, hasKey bool) error {
 	if err := emit(answerEvent("这个问题我理解为你想咨询校园信息，为你转知识库检索：")); err != nil {
 		return err
 	}
-	return s.answerDirectBare(ctx, emit, question, hasKey)
+	return s.answerDirect(ctx, emit, question, 0, hasKey)
 }
 
 // advance collect 阶段：吸收新信息 → 齐了进确认，缺则追问。

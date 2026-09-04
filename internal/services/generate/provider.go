@@ -279,15 +279,12 @@ func (p *provider) embed(ctx context.Context, texts []string) ([][]float64, erro
 }
 
 // postJSON 发送 JSON 请求并把响应解析到 out；受限重试（仅连接失败且请求未发出）。
+// body 为结构体——由 newRequest 统一 marshal 一次（[]byte 二次 marshal 会变 base64）。
 func (p *provider) postJSON(ctx context.Context, u string, body any, out any) error {
 	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
 	defer cancel()
-	buf, err := json.Marshal(body)
-	if err != nil {
-		return wrapInternal(err)
-	}
 	do := func() error {
-		req, err := p.newRequest(ctx, http.MethodPost, u, buf)
+		req, err := p.newRequest(ctx, http.MethodPost, u, body)
 		if err != nil {
 			return err
 		}
@@ -305,7 +302,7 @@ func (p *provider) postJSON(ctx context.Context, u string, body any, out any) er
 		}
 		return nil
 	}
-	err = do()
+	err := do()
 	if err != nil && isDialFailure(err) {
 		err = do() // ADR：连接失败（请求未发出）重试 1 次；流式不走此路径
 	}

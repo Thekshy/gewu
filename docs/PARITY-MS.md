@@ -22,7 +22,10 @@
 | 9 | **摄入流水线异步化（Redis Streams）+ 异步上传 API**；`make ingest` 保持阻塞语义 | 流水线解耦 | CLI 行为不变（发布→等回执→超时报错） | P3 验收 | P3（预登记） |
 | 10 | **业务系统 SQLite→PostgreSQL（tool 服务宿主）**；序列语义一致（DELETE 不复位） | 存储统一 | 单号继续增长与 SQLite AUTOINCREMENT 一致；评测断言不含单号字面值（已核对 dataset） | P4 A/B | P4（预登记） |
 | 11 | **向量存储暴力余弦→Milvus FLAT（IP + L2 归一化 = 余弦）**；pgvector 降级 | 基础设施升级 | 数学等价；平局次序需 rag 服务端 (score, chunk_id) 稳定化重排 | P3 /api/search 逐位对照 | P3（预登记） |
-| 12 | **conversation 历史不接入答案生成（仅审计）**；记忆 Recall/Put 不接入生成 | 26/26 行为前提，接入与否迁移完单独评估（ADR） | 无（预留能力） | 26 题全量复跑 | P2/P5 |
+| 12 | **conversation 历史不接入答案生成（仅审计）**；记忆 Recall/Put 不接入生成 | 26/26 行为前提，接入与否迁移完单独评估（ADR-0005） | 无（预留能力） | 26 题全量复跑 | P2/P5 |
+| 13 | **检索 RPC 失败时编排按「无命中」降级**（单体语义：Search 错误中止整轮→error 事件） | 基础设施抖动不应放大为整轮失败；评测不覆盖 rag 宕机场景 | 仅 rag 不可用时的问答轮：NO_DATA 而非 error 事件（SERVICES §12 风险表备案） | 日志可见 + 单测 | P3 |
+| 14 | **摄入异步化（Redis Streams）与异步上传 API**；`make ingest-ms` 保持阻塞语义（发布→回执→超时报错），单体 `make ingest`（同步直写 SQLite）保留为 A/B 路径 | 流水线解耦（ADR-0003） | CLI 终态语义一致；内部路径不同 | ingest-ms 实跑 + 逐位 A/B | P3 |
+| 15 | **查询改写的缓存为 rag 服务进程内**（单体重试/重启后缓存丢失同理）；key 状态经 BudgetStatus 惰性同步 | 单实例部署语义等价 | 无可观察差异（改写结果不进事件流） | 代码审查 | P3 |
 
 ## 已知等价说明（不构成差异，备案备查）
 

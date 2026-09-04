@@ -25,17 +25,23 @@ const (
 	RagService_Search_FullMethodName   = "/gewu.rag.v1.RagService/Search"
 	RagService_ListDocs_FullMethodName = "/gewu.rag.v1.RagService/ListDocs"
 	RagService_Stats_FullMethodName    = "/gewu.rag.v1.RagService/Stats"
+	RagService_Ingest_FullMethodName   = "/gewu.rag.v1.RagService/Ingest"
+	RagService_Upload_FullMethodName   = "/gewu.rag.v1.RagService/Upload"
 )
 
 // RagServiceClient is the client API for RagService service.
 //
 // For semantics around ctx use and closing/ending streaming RPCs, please refer to https://pkg.go.dev/google.golang.org/grpc/?tab=doc#ClientConn.NewStream.
 //
-// RagService 知识检索。
+// RagService 知识检索与摄入。
 type RagServiceClient interface {
 	Search(ctx context.Context, in *SearchRequest, opts ...grpc.CallOption) (*SearchResponse, error)
 	ListDocs(ctx context.Context, in *ListDocsRequest, opts ...grpc.CallOption) (*ListDocsResponse, error)
 	Stats(ctx context.Context, in *StatsRequest, opts ...grpc.CallOption) (*StatsResponse, error)
+	// Ingest 阻塞式全量入库（CLI：make ingest-ms；corpus 目录由服务侧读取）。
+	Ingest(ctx context.Context, in *IngestRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[IngestResponse], error)
+	// Upload 异步上传（新增演示面：发布单个文档的摄入任务，立即返回）。
+	Upload(ctx context.Context, in *UploadRequest, opts ...grpc.CallOption) (*UploadResponse, error)
 }
 
 type ragServiceClient struct {
@@ -76,15 +82,48 @@ func (c *ragServiceClient) Stats(ctx context.Context, in *StatsRequest, opts ...
 	return out, nil
 }
 
+func (c *ragServiceClient) Ingest(ctx context.Context, in *IngestRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[IngestResponse], error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	stream, err := c.cc.NewStream(ctx, &RagService_ServiceDesc.Streams[0], RagService_Ingest_FullMethodName, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	x := &grpc.GenericClientStream[IngestRequest, IngestResponse]{ClientStream: stream}
+	if err := x.ClientStream.SendMsg(in); err != nil {
+		return nil, err
+	}
+	if err := x.ClientStream.CloseSend(); err != nil {
+		return nil, err
+	}
+	return x, nil
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type RagService_IngestClient = grpc.ServerStreamingClient[IngestResponse]
+
+func (c *ragServiceClient) Upload(ctx context.Context, in *UploadRequest, opts ...grpc.CallOption) (*UploadResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(UploadResponse)
+	err := c.cc.Invoke(ctx, RagService_Upload_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // RagServiceServer is the server API for RagService service.
 // All implementations must embed UnimplementedRagServiceServer
 // for forward compatibility.
 //
-// RagService 知识检索。
+// RagService 知识检索与摄入。
 type RagServiceServer interface {
 	Search(context.Context, *SearchRequest) (*SearchResponse, error)
 	ListDocs(context.Context, *ListDocsRequest) (*ListDocsResponse, error)
 	Stats(context.Context, *StatsRequest) (*StatsResponse, error)
+	// Ingest 阻塞式全量入库（CLI：make ingest-ms；corpus 目录由服务侧读取）。
+	Ingest(*IngestRequest, grpc.ServerStreamingServer[IngestResponse]) error
+	// Upload 异步上传（新增演示面：发布单个文档的摄入任务，立即返回）。
+	Upload(context.Context, *UploadRequest) (*UploadResponse, error)
 	mustEmbedUnimplementedRagServiceServer()
 }
 
@@ -103,6 +142,12 @@ func (UnimplementedRagServiceServer) ListDocs(context.Context, *ListDocsRequest)
 }
 func (UnimplementedRagServiceServer) Stats(context.Context, *StatsRequest) (*StatsResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Stats not implemented")
+}
+func (UnimplementedRagServiceServer) Ingest(*IngestRequest, grpc.ServerStreamingServer[IngestResponse]) error {
+	return status.Errorf(codes.Unimplemented, "method Ingest not implemented")
+}
+func (UnimplementedRagServiceServer) Upload(context.Context, *UploadRequest) (*UploadResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method Upload not implemented")
 }
 func (UnimplementedRagServiceServer) mustEmbedUnimplementedRagServiceServer() {}
 func (UnimplementedRagServiceServer) testEmbeddedByValue()                    {}
@@ -179,6 +224,35 @@ func _RagService_Stats_Handler(srv interface{}, ctx context.Context, dec func(in
 	return interceptor(ctx, in, info, handler)
 }
 
+func _RagService_Ingest_Handler(srv interface{}, stream grpc.ServerStream) error {
+	m := new(IngestRequest)
+	if err := stream.RecvMsg(m); err != nil {
+		return err
+	}
+	return srv.(RagServiceServer).Ingest(m, &grpc.GenericServerStream[IngestRequest, IngestResponse]{ServerStream: stream})
+}
+
+// This type alias is provided for backwards compatibility with existing code that references the prior non-generic stream type by name.
+type RagService_IngestServer = grpc.ServerStreamingServer[IngestResponse]
+
+func _RagService_Upload_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(UploadRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RagServiceServer).Upload(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RagService_Upload_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RagServiceServer).Upload(ctx, req.(*UploadRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // RagService_ServiceDesc is the grpc.ServiceDesc for RagService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -198,7 +272,17 @@ var RagService_ServiceDesc = grpc.ServiceDesc{
 			MethodName: "Stats",
 			Handler:    _RagService_Stats_Handler,
 		},
+		{
+			MethodName: "Upload",
+			Handler:    _RagService_Upload_Handler,
+		},
 	},
-	Streams:  []grpc.StreamDesc{},
+	Streams: []grpc.StreamDesc{
+		{
+			StreamName:    "Ingest",
+			Handler:       _RagService_Ingest_Handler,
+			ServerStreams: true,
+		},
+	},
 	Metadata: "gewu/rag/v1/rag.proto",
 }

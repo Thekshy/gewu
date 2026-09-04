@@ -8,6 +8,7 @@ import (
 	conversationv1 "gewu/pkg/gen/gewu/conversation/v1"
 	generatev1 "gewu/pkg/gen/gewu/generate/v1"
 	orchestratorv1 "gewu/pkg/gen/gewu/orchestrator/v1"
+	ragv1 "gewu/pkg/gen/gewu/rag/v1"
 
 	"gewu/internal/business"
 	"gewu/internal/svcbase"
@@ -26,6 +27,7 @@ type Server struct {
 	log      *zap.Logger
 	cfg      Config
 	generate generatev1.GenerateServiceClient
+	rag      ragv1.RagServiceClient
 	sessions sessionStore
 	business *business.Business
 	tools    map[string]Tool
@@ -45,6 +47,10 @@ func NewServer(cfg Config, log *zap.Logger) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
+	ragCC, err := svcbase.Dial(cfg.RagAddr)
+	if err != nil {
+		return nil, err
+	}
 	biz, err := business.Open(cfg.BusinessDBPath)
 	if err != nil {
 		return nil, err
@@ -58,6 +64,7 @@ func NewServer(cfg Config, log *zap.Logger) (*Server, error) {
 	}
 	s := newServerWithDeps(cfg, generatev1.NewGenerateServiceClient(genCC),
 		newGrpcSessions(conversationv1.NewConversationServiceClient(convCC)), biz, cs, log)
+	s.rag = ragv1.NewRagServiceClient(ragCC)
 	return s, nil
 }
 

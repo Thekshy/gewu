@@ -457,6 +457,232 @@ func (x *StatsResponse) GetEmbedded() bool {
 	return false
 }
 
+// 摄入（P3）：流水线走 Redis Streams，Ingest RPC 保持阻塞语义
+// （发布后等待完成回执，超时报错）——评测与 A/B 需要确定性索引状态。
+type IngestRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	NoEmbed       bool                   `protobuf:"varint,1,opt,name=no_embed,json=noEmbed,proto3" json:"no_embed,omitempty"` // 只建 BM25
+	Rebuild       bool                   `protobuf:"varint,2,opt,name=rebuild,proto3" json:"rebuild,omitempty"`                // 清空后重建
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *IngestRequest) Reset() {
+	*x = IngestRequest{}
+	mi := &file_gewu_rag_v1_rag_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *IngestRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*IngestRequest) ProtoMessage() {}
+
+func (x *IngestRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_gewu_rag_v1_rag_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use IngestRequest.ProtoReflect.Descriptor instead.
+func (*IngestRequest) Descriptor() ([]byte, []int) {
+	return file_gewu_rag_v1_rag_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *IngestRequest) GetNoEmbed() bool {
+	if x != nil {
+		return x.NoEmbed
+	}
+	return false
+}
+
+func (x *IngestRequest) GetRebuild() bool {
+	if x != nil {
+		return x.Rebuild
+	}
+	return false
+}
+
+type IngestResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Line          string                 `protobuf:"bytes,1,opt,name=line,proto3" json:"line,omitempty"`          // 进度行（逐文档）
+	Done          bool                   `protobuf:"varint,2,opt,name=done,proto3" json:"done,omitempty"`         // 全部完成（stats 有效）
+	Stats         *StatsResponse         `protobuf:"bytes,3,opt,name=stats,proto3" json:"stats,omitempty"`        // done 时索引规模
+	Error         string                 `protobuf:"bytes,4,opt,name=error,proto3" json:"error,omitempty"`        // 失败原因（done 且失败时）
+	Embedded      bool                   `protobuf:"varint,5,opt,name=embedded,proto3" json:"embedded,omitempty"` // 本轮是否完成向量化
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *IngestResponse) Reset() {
+	*x = IngestResponse{}
+	mi := &file_gewu_rag_v1_rag_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *IngestResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*IngestResponse) ProtoMessage() {}
+
+func (x *IngestResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_gewu_rag_v1_rag_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use IngestResponse.ProtoReflect.Descriptor instead.
+func (*IngestResponse) Descriptor() ([]byte, []int) {
+	return file_gewu_rag_v1_rag_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *IngestResponse) GetLine() string {
+	if x != nil {
+		return x.Line
+	}
+	return ""
+}
+
+func (x *IngestResponse) GetDone() bool {
+	if x != nil {
+		return x.Done
+	}
+	return false
+}
+
+func (x *IngestResponse) GetStats() *StatsResponse {
+	if x != nil {
+		return x.Stats
+	}
+	return nil
+}
+
+func (x *IngestResponse) GetError() string {
+	if x != nil {
+		return x.Error
+	}
+	return ""
+}
+
+func (x *IngestResponse) GetEmbedded() bool {
+	if x != nil {
+		return x.Embedded
+	}
+	return false
+}
+
+type UploadRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Filename      string                 `protobuf:"bytes,1,opt,name=filename,proto3" json:"filename,omitempty"` // *.md
+	Content       []byte                 `protobuf:"bytes,2,opt,name=content,proto3" json:"content,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UploadRequest) Reset() {
+	*x = UploadRequest{}
+	mi := &file_gewu_rag_v1_rag_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UploadRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UploadRequest) ProtoMessage() {}
+
+func (x *UploadRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_gewu_rag_v1_rag_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UploadRequest.ProtoReflect.Descriptor instead.
+func (*UploadRequest) Descriptor() ([]byte, []int) {
+	return file_gewu_rag_v1_rag_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *UploadRequest) GetFilename() string {
+	if x != nil {
+		return x.Filename
+	}
+	return ""
+}
+
+func (x *UploadRequest) GetContent() []byte {
+	if x != nil {
+		return x.Content
+	}
+	return nil
+}
+
+type UploadResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	DocId         string                 `protobuf:"bytes,1,opt,name=doc_id,json=docId,proto3" json:"doc_id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *UploadResponse) Reset() {
+	*x = UploadResponse{}
+	mi := &file_gewu_rag_v1_rag_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *UploadResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*UploadResponse) ProtoMessage() {}
+
+func (x *UploadResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_gewu_rag_v1_rag_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use UploadResponse.ProtoReflect.Descriptor instead.
+func (*UploadResponse) Descriptor() ([]byte, []int) {
+	return file_gewu_rag_v1_rag_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *UploadResponse) GetDocId() string {
+	if x != nil {
+		return x.DocId
+	}
+	return ""
+}
+
 var File_gewu_rag_v1_rag_proto protoreflect.FileDescriptor
 
 const file_gewu_rag_v1_rag_proto_rawDesc = "" +
@@ -487,12 +713,28 @@ const file_gewu_rag_v1_rag_proto_rawDesc = "" +
 	"\rStatsResponse\x12\x12\n" +
 	"\x04docs\x18\x01 \x01(\x05R\x04docs\x12\x16\n" +
 	"\x06chunks\x18\x02 \x01(\x05R\x06chunks\x12\x1a\n" +
-	"\bembedded\x18\x03 \x01(\bR\bembedded2\xd8\x01\n" +
+	"\bembedded\x18\x03 \x01(\bR\bembedded\"D\n" +
+	"\rIngestRequest\x12\x19\n" +
+	"\bno_embed\x18\x01 \x01(\bR\anoEmbed\x12\x18\n" +
+	"\arebuild\x18\x02 \x01(\bR\arebuild\"\x9c\x01\n" +
+	"\x0eIngestResponse\x12\x12\n" +
+	"\x04line\x18\x01 \x01(\tR\x04line\x12\x12\n" +
+	"\x04done\x18\x02 \x01(\bR\x04done\x120\n" +
+	"\x05stats\x18\x03 \x01(\v2\x1a.gewu.rag.v1.StatsResponseR\x05stats\x12\x14\n" +
+	"\x05error\x18\x04 \x01(\tR\x05error\x12\x1a\n" +
+	"\bembedded\x18\x05 \x01(\bR\bembedded\"E\n" +
+	"\rUploadRequest\x12\x1a\n" +
+	"\bfilename\x18\x01 \x01(\tR\bfilename\x12\x18\n" +
+	"\acontent\x18\x02 \x01(\fR\acontent\"'\n" +
+	"\x0eUploadResponse\x12\x15\n" +
+	"\x06doc_id\x18\x01 \x01(\tR\x05docId2\xe0\x02\n" +
 	"\n" +
 	"RagService\x12A\n" +
 	"\x06Search\x12\x1a.gewu.rag.v1.SearchRequest\x1a\x1b.gewu.rag.v1.SearchResponse\x12G\n" +
 	"\bListDocs\x12\x1c.gewu.rag.v1.ListDocsRequest\x1a\x1d.gewu.rag.v1.ListDocsResponse\x12>\n" +
-	"\x05Stats\x12\x19.gewu.rag.v1.StatsRequest\x1a\x1a.gewu.rag.v1.StatsResponseB Z\x1egewu/pkg/gen/gewu/rag/v1;ragv1b\x06proto3"
+	"\x05Stats\x12\x19.gewu.rag.v1.StatsRequest\x1a\x1a.gewu.rag.v1.StatsResponse\x12C\n" +
+	"\x06Ingest\x12\x1a.gewu.rag.v1.IngestRequest\x1a\x1b.gewu.rag.v1.IngestResponse0\x01\x12A\n" +
+	"\x06Upload\x12\x1a.gewu.rag.v1.UploadRequest\x1a\x1b.gewu.rag.v1.UploadResponseB Z\x1egewu/pkg/gen/gewu/rag/v1;ragv1b\x06proto3"
 
 var (
 	file_gewu_rag_v1_rag_proto_rawDescOnce sync.Once
@@ -506,7 +748,7 @@ func file_gewu_rag_v1_rag_proto_rawDescGZIP() []byte {
 	return file_gewu_rag_v1_rag_proto_rawDescData
 }
 
-var file_gewu_rag_v1_rag_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
+var file_gewu_rag_v1_rag_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
 var file_gewu_rag_v1_rag_proto_goTypes = []any{
 	(*Hit)(nil),              // 0: gewu.rag.v1.Hit
 	(*SearchRequest)(nil),    // 1: gewu.rag.v1.SearchRequest
@@ -516,21 +758,30 @@ var file_gewu_rag_v1_rag_proto_goTypes = []any{
 	(*ListDocsResponse)(nil), // 5: gewu.rag.v1.ListDocsResponse
 	(*StatsRequest)(nil),     // 6: gewu.rag.v1.StatsRequest
 	(*StatsResponse)(nil),    // 7: gewu.rag.v1.StatsResponse
+	(*IngestRequest)(nil),    // 8: gewu.rag.v1.IngestRequest
+	(*IngestResponse)(nil),   // 9: gewu.rag.v1.IngestResponse
+	(*UploadRequest)(nil),    // 10: gewu.rag.v1.UploadRequest
+	(*UploadResponse)(nil),   // 11: gewu.rag.v1.UploadResponse
 }
 var file_gewu_rag_v1_rag_proto_depIdxs = []int32{
-	0, // 0: gewu.rag.v1.SearchResponse.hits:type_name -> gewu.rag.v1.Hit
-	3, // 1: gewu.rag.v1.ListDocsResponse.docs:type_name -> gewu.rag.v1.DocInfo
-	1, // 2: gewu.rag.v1.RagService.Search:input_type -> gewu.rag.v1.SearchRequest
-	4, // 3: gewu.rag.v1.RagService.ListDocs:input_type -> gewu.rag.v1.ListDocsRequest
-	6, // 4: gewu.rag.v1.RagService.Stats:input_type -> gewu.rag.v1.StatsRequest
-	2, // 5: gewu.rag.v1.RagService.Search:output_type -> gewu.rag.v1.SearchResponse
-	5, // 6: gewu.rag.v1.RagService.ListDocs:output_type -> gewu.rag.v1.ListDocsResponse
-	7, // 7: gewu.rag.v1.RagService.Stats:output_type -> gewu.rag.v1.StatsResponse
-	5, // [5:8] is the sub-list for method output_type
-	2, // [2:5] is the sub-list for method input_type
-	2, // [2:2] is the sub-list for extension type_name
-	2, // [2:2] is the sub-list for extension extendee
-	0, // [0:2] is the sub-list for field type_name
+	0,  // 0: gewu.rag.v1.SearchResponse.hits:type_name -> gewu.rag.v1.Hit
+	3,  // 1: gewu.rag.v1.ListDocsResponse.docs:type_name -> gewu.rag.v1.DocInfo
+	7,  // 2: gewu.rag.v1.IngestResponse.stats:type_name -> gewu.rag.v1.StatsResponse
+	1,  // 3: gewu.rag.v1.RagService.Search:input_type -> gewu.rag.v1.SearchRequest
+	4,  // 4: gewu.rag.v1.RagService.ListDocs:input_type -> gewu.rag.v1.ListDocsRequest
+	6,  // 5: gewu.rag.v1.RagService.Stats:input_type -> gewu.rag.v1.StatsRequest
+	8,  // 6: gewu.rag.v1.RagService.Ingest:input_type -> gewu.rag.v1.IngestRequest
+	10, // 7: gewu.rag.v1.RagService.Upload:input_type -> gewu.rag.v1.UploadRequest
+	2,  // 8: gewu.rag.v1.RagService.Search:output_type -> gewu.rag.v1.SearchResponse
+	5,  // 9: gewu.rag.v1.RagService.ListDocs:output_type -> gewu.rag.v1.ListDocsResponse
+	7,  // 10: gewu.rag.v1.RagService.Stats:output_type -> gewu.rag.v1.StatsResponse
+	9,  // 11: gewu.rag.v1.RagService.Ingest:output_type -> gewu.rag.v1.IngestResponse
+	11, // 12: gewu.rag.v1.RagService.Upload:output_type -> gewu.rag.v1.UploadResponse
+	8,  // [8:13] is the sub-list for method output_type
+	3,  // [3:8] is the sub-list for method input_type
+	3,  // [3:3] is the sub-list for extension type_name
+	3,  // [3:3] is the sub-list for extension extendee
+	0,  // [0:3] is the sub-list for field type_name
 }
 
 func init() { file_gewu_rag_v1_rag_proto_init() }
@@ -544,7 +795,7 @@ func file_gewu_rag_v1_rag_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_gewu_rag_v1_rag_proto_rawDesc), len(file_gewu_rag_v1_rag_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   8,
+			NumMessages:   12,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

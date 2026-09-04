@@ -16,22 +16,23 @@ const rewriteSystem = `你是校园政策检索的查询改写器。把用户的
 3. 输出 10~25 个字的查询词串，不解释、不使用引号。
 只输出改写后的查询串本身。`
 
-// rewriter 进程内查询改写器，带并发安全的缓存。
-type rewriter struct {
-	client *llm.Client
+// Rewriter 进程内查询改写器，带并发安全的缓存（导出供微服务 rag 复用——
+// 决策 A 同族的接口化改动，行为零变化）。
+type Rewriter struct {
+	client LLMer
 
 	mu    sync.RWMutex
 	cache map[string]string
 }
 
-// newRewriter 构造改写器。
-func newRewriter(client *llm.Client) *rewriter {
-	return &rewriter{client: client, cache: map[string]string{}}
+// NewRewriter 构造改写器。
+func NewRewriter(client LLMer) *Rewriter {
+	return &Rewriter{client: client, cache: map[string]string{}}
 }
 
 // Expand 返回「原查询 + 改写词串」（保召回）；失败或无 key 时返回原查询。
 // 解决无向量检索时的词法失配：改写只做词面归一，不改变语义。
-func (r *rewriter) Expand(ctx context.Context, query string) string {
+func (r *Rewriter) Expand(ctx context.Context, query string) string {
 	if r.client == nil || !r.client.HasKey() {
 		return query
 	}

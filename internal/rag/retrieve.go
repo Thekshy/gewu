@@ -7,17 +7,26 @@ import (
 	"gewu/internal/llm"
 )
 
+// LLMer 检索管线对 LLM 访问层的最小依赖（决策 A：冻结库唯一接口化改动）。
+// 单体注入 *llm.Client 原样工作；微服务 rag 注入实现该接口的 generate RPC
+// 客户端——检索编排仍是这一份代码，行为对齐不靠拷贝。
+type LLMer interface {
+	HasKey() bool
+	Chat(ctx context.Context, messages []llm.Message, o llm.Options) (string, error)
+	Embed(ctx context.Context, texts []string) ([][]float64, error)
+}
+
 // Retriever 混合检索：BM25 + 向量（可用时）→ RRF 融合 → 命中附文档元信息。
 type Retriever struct {
 	Store    *Store
 	K        int
-	client   *llm.Client
-	rewriter *rewriter
+	client   LLMer
+	rewriter *Rewriter
 }
 
 // NewRetriever 构造检索器。client 为 nil（零 key 模式）时只走 BM25。
-func NewRetriever(store *Store, k int, client *llm.Client) *Retriever {
-	return &Retriever{Store: store, K: k, client: client, rewriter: newRewriter(client)}
+func NewRetriever(store *Store, k int, client LLMer) *Retriever {
+	return &Retriever{Store: store, K: k, client: client, rewriter: NewRewriter(client)}
 }
 
 // Search 执行混合检索，返回前 k 条命中。

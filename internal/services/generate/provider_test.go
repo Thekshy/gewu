@@ -2,6 +2,7 @@ package generate
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -31,6 +32,13 @@ func newFakeLLM(t *testing.T, f *fakeLLM) *fakeLLM {
 	t.Helper()
 	mux := http.NewServeMux()
 	mux.HandleFunc("/chat/completions", func(w http.ResponseWriter, r *http.Request) {
+		// 回归断言：请求体必须是 JSON 对象（防 []byte 二次 marshal 变 base64 字符串）
+		var probe map[string]any
+		if err := json.NewDecoder(r.Body).Decode(&probe); err != nil || probe["model"] == nil {
+			w.WriteHeader(http.StatusBadRequest)
+			fmt.Fprintf(w, `{"error":"请求体不是 JSON 对象: %v %v"}`, probe, err)
+			return
+		}
 		w.Header().Set("Content-Type", "application/json")
 		fmt.Fprint(w, f.chatBody)
 	})

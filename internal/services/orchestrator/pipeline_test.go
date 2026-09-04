@@ -11,6 +11,7 @@ import (
 	conversationv1 "gewu/pkg/gen/gewu/conversation/v1"
 	generatev1 "gewu/pkg/gen/gewu/generate/v1"
 	orchestratorv1 "gewu/pkg/gen/gewu/orchestrator/v1"
+	ragv1 "gewu/pkg/gen/gewu/rag/v1"
 
 	"gewu/internal/agent"
 	"gewu/internal/business"
@@ -75,6 +76,35 @@ func dialFakeGen(t *testing.T, fake *fakeGen) generatev1.GenerateServiceClient {
 	}
 	t.Cleanup(func() { _ = cc.Close() })
 	return generatev1.NewGenerateServiceClient(cc)
+}
+
+// fakeRag 可编程的检索服务桩（缺省空命中）。
+type fakeRag struct {
+	ragv1.UnimplementedRagServiceServer
+	hits []*ragv1.Hit
+}
+
+func (f *fakeRag) Search(ctx context.Context, req *ragv1.SearchRequest) (*ragv1.SearchResponse, error) {
+	return &ragv1.SearchResponse{Hits: f.hits}, nil
+}
+
+// dialFakeRag 起一个 fake rag gRPC 服务并返回客户端。
+func dialFakeRag(t *testing.T, fake *fakeRag) ragv1.RagServiceClient {
+	t.Helper()
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := grpc.NewServer()
+	ragv1.RegisterRagServiceServer(srv, fake)
+	go func() { _ = srv.Serve(lis) }()
+	t.Cleanup(srv.Stop)
+	cc, err := grpc.NewClient(lis.Addr().String(), grpc.WithTransportCredentials(insecure.NewCredentials()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = cc.Close() })
+	return ragv1.NewRagServiceClient(cc)
 }
 
 // dialRealConversation 起一个真实 conversation gRPC 服务（内存存储）并返回
@@ -517,5 +547,98 @@ func TestCrossProcessSessionFlow(t *testing.T) {
 	}
 	if sess, _ := s.sessions.Get(context.Background(), sid); sess != nil {
 		t.Error("办理完成后会话应清除")
+	}
+}
+
+// ---------- P3：直答/深研检索链路 ----------
+
+// ask2 带 err 返回的 ask 变体。
+func ask2(t *testing.T, s *Server, text string) ([]*orchestratorv1.ChatResponse, error) {
+	t.Helper()
+	return ask(t, s, "p3-"+t.Name(), text, "student"), nil
+}
+
+func TestDirectZeroKeyWithHitsDemoText(t *testing.T) {
+	biz, _ := business.Open(filepath.Join(t.TempDir(), "biz.db"))
+	cs, _ := openConfigStore("", "", zap.NewNop())
+	s := newServerWithDeps(LoadConfig(), dialFakeGen(t, &fakeGen{hasKey: false}),
+		newMemorySessions(), biz, cs, zap.NewNop())
+	s.rag = dialFakeRag(t, &fakeRag{hits: []*ragv1.Hit{
+		{ChunkId: 1, DocId: "0007-library", Seq: 0, Text: "图书馆开放时间为 7:00-22:00。", Title: "图书馆服务指南", Source: "钱塘大学"},
+	}})
+	events, err := ask2(t, s, "图书馆几点开门")
+	if err != nil {
+		t.Fatal(err)
+	}
+	answer := answerText(events)
+	if !strings.Contains(answer, agent.DemoModeNote) ||
+		!strings.Contains(answer, "[1] 《图书馆服务指南》：图书馆开放时间为 7:00-22:00。…") {
+		t.Fatalf("零 key 直答应为检索节选演示文案：%q", answer)
+	}
+	cites := firstOf(events, "citations").GetCitations().GetItems()
+	if len(cites) != 1 || cites[0].GetDocId() != "0007-library" {
+		t.Fatalf("引用不匹配：%v", cites)
+	}
+}
+
+func TestDirectStreamWithHits(t *testing.T) {
+	biz, _ := business.Open(filepath.Join(t.TempDir(), "biz.db"))
+	cs, _ := openConfigStore("", "", zap.NewNop())
+	s := newServerWithDeps(LoadConfig(), dialFakeGen(t, &fakeGen{
+		hasKey: true, deltas: []string{"第一", "第二"},
+	}), newMemorySessions(), biz, cs, zap.NewNop())
+	s.rag = dialFakeRag(t, &fakeRag{hits: []*ragv1.Hit{
+		{ChunkId: 1, DocId: "0007-library", Seq: 0, Text: "图书馆开放时间为 7:00-22:00。", Title: "图书馆服务指南", Source: "钱塘大学"},
+	}})
+	events, err := ask2(t, s, "图书馆几点开门")
+	if err != nil {
+		t.Fatal(err)
+	}
+	kinds := make([]string, 0, len(events))
+	for _, ev := range events {
+		kinds = append(kinds, eventKind(ev))
+	}
+	want := []string{"route", "answer_delta", "answer_delta", "citations", "done"}
+	if len(kinds) != len(want) {
+		t.Fatalf("事件序不匹配：%v", kinds)
+	}
+	for i := range want {
+		if kinds[i] != want[i] {
+			t.Fatalf("事件序不匹配：%v", kinds)
+		}
+	}
+	if answerText(events) != "第一第二" {
+		t.Fatalf("流式增量不匹配：%q", answerText(events))
+	}
+}
+
+func TestResearchZeroKeyStepsAndDemo(t *testing.T) {
+	biz, _ := business.Open(filepath.Join(t.TempDir(), "biz.db"))
+	cs, _ := openConfigStore("", "", zap.NewNop())
+	s := newServerWithDeps(LoadConfig(), dialFakeGen(t, &fakeGen{hasKey: false}),
+		newMemorySessions(), biz, cs, zap.NewNop())
+	s.rag = dialFakeRag(t, &fakeRag{hits: []*ragv1.Hit{
+		{ChunkId: 1, DocId: "0001-transfer", Seq: 0, Text: "转专业绩点要求 2.0 以上。", Title: "转专业管理办法", Source: "钱塘大学"},
+	}})
+	events, err := ask2(t, s, "转专业绩点要求以及申请流程分别是什么")
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 零 key：plan=[原问题] → 事件序：
+	// route → status(拆解) → step → status(证据数) → answer(演示) → citations → done
+	var kinds []string
+	for _, ev := range events {
+		kinds = append(kinds, eventKind(ev))
+	}
+	if len(events) != 7 || kinds[0] != "route" || kinds[1] != "status" || kinds[2] != "step" {
+		t.Fatalf("深研事件序不匹配：%v", kinds)
+	}
+	step := events[2].GetStep()
+	if step.GetIndex() != 1 || step.GetSources() == nil {
+		t.Fatalf("step 不匹配：%v", step)
+	}
+	answer := answerText(events)
+	if !strings.Contains(answer, "围绕 1 个子问题共检索到 1 条相关段落") {
+		t.Fatalf("深研演示文案不匹配：%q", answer)
 	}
 }

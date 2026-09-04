@@ -2,6 +2,7 @@ package orchestrator
 
 import (
 	"path/filepath"
+	"strconv"
 
 	"gewu/internal/svcbase"
 )
@@ -13,6 +14,9 @@ type Config struct {
 
 	GenerateAddr     string // generate 服务地址（LLM 网关 + 预算）
 	ConversationAddr string // conversation 服务地址（会话状态）
+	RagAddr          string // rag 服务地址（检索）
+
+	RetrievalK int // 直答缺省检索条数（PARITY §14 RETRIEVAL_K）
 
 	PostgresDSN string // agent_config 存储；空 = 内存模式
 	RedisAddr   string // 配置缓存（L2）；空 = 跳过
@@ -29,10 +33,22 @@ func LoadConfig() Config {
 
 		GenerateAddr:     svcbase.NormalizeTarget(svcbase.EnvOr("GENERATE_ADDR", ":9003")),
 		ConversationAddr: svcbase.NormalizeTarget(svcbase.EnvOr("CONVERSATION_ADDR", ":9002")),
+		RagAddr:          svcbase.NormalizeTarget(svcbase.EnvOr("RAG_ADDR", ":9005")),
+
+		RetrievalK: envIntOr("RETRIEVAL_K", 6),
 
 		PostgresDSN: svcbase.EnvOr("POSTGRES_DSN", ""),
 		RedisAddr:   svcbase.EnvOr("REDIS_ADDR", ""),
 
 		BusinessDBPath: filepath.Join(dataDir, "business.db"),
 	}
+}
+
+func envIntOr(key string, def int) int {
+	if v := svcbase.EnvOr(key, ""); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 0 {
+			return n
+		}
+	}
+	return def
 }

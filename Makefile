@@ -14,6 +14,11 @@ build:
 ingest:
 	go run ./cmd/server -ingest
 
+# 微服务侧入库（P3 起）：经 rag 服务 Redis Streams 流水线，阻塞至完成回执。
+# 服务需已启动（compose 或 run-ms）；可选 NO_EMBED=1 / REBUILD=1
+ingest-ms:
+	go run ./cmd/rag -ingest $(if $(NO_EMBED),-no-embed,) $(if $(REBUILD),-rebuild,)
+
 # 启动单体 API（:8000）；先 make ingest 建索引
 run:
 	go run ./cmd/server

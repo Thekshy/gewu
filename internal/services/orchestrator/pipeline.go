@@ -93,18 +93,18 @@ func (s *Server) runChat(ctx context.Context, send func(*orchestratorv1.ChatResp
 			return err
 		}
 	case "factual":
-		if err := s.answerDirectBare(ctx, emit, question, hasKey); err != nil {
+		if err := s.answerDirect(ctx, emit, question, 0, hasKey); err != nil {
 			return err
 		}
 	case "research":
-		if err := s.runResearchBare(ctx, emit, question, hasKey); err != nil {
+		if err := s.runResearch(ctx, emit, question, hasKey); err != nil {
 			return err
 		}
 	case "hybrid":
 		if err := emit(statusEvent("先回答你的政策问题…")); err != nil {
 			return err
 		}
-		if err := s.answerDirectBare(ctx, emit, question, hasKey); err != nil {
+		if err := s.answerDirect(ctx, emit, question, 0, hasKey); err != nil {
 			return err
 		}
 		if err := emit(statusEvent("接下来为你办理业务…")); err != nil {
@@ -164,85 +164,6 @@ func (s *Server) routeQuestion(ctx context.Context, question string, hasKey bool
 var validRoutes = map[string]bool{
 	"factual": true, "research": true, "refusal": true, "transaction": true, "hybrid": true,
 }
-
-// ---------- P3 前的直答/深研占位（空库语义，等价于冻结单体在空索引下的行为） ----------
-
-// answerDirectBare 直答（P3 接 rag 检索后替换为真实 AnswerDirect）：
-// 空检索 → 无命中 → NO_DATA + citations[]；有 key 时直接流式（P1 遗留验证链路）。
-func (s *Server) answerDirectBare(ctx context.Context, emit emitFn, question string, hasKey bool) error {
-	if !hasKey {
-		if err := emit(answerEvent(agent.NoDataAnswer)); err != nil {
-			return err
-		}
-		return emit(citationsEvent(nil))
-	}
-	gs, err := s.generate.ChatStream(ctx, &generatev1.ChatStreamRequest{
-		Messages: []*generatev1.Message{
-			{Role: "system", Content: s.cfgStore.answerPrompt(ctx)},
-			{Role: "user", Content: question},
-		},
-	})
-	if err != nil {
-		return err
-	}
-	for {
-		delta, err := gs.Recv()
-		if err != nil {
-			if err == errEOF {
-				break
-			}
-			return err
-		}
-		if delta.GetText() != "" {
-			if err := emit(answerEvent(delta.GetText())); err != nil {
-				return err
-			}
-		}
-	}
-	return emit(citationsEvent(nil))
-}
-
-// runResearchBare 深研空库形态（P3 接检索）：拆解 → 逐子问题 step（空来源）→
-// 证据池空 → NO_DATA + citations[]——与冻结单体在空索引下的行为一致。
-func (s *Server) runResearchBare(ctx context.Context, emit emitFn, question string, hasKey bool) error {
-	if err := emit(statusEvent("正在拆解问题…")); err != nil {
-		return err
-	}
-	subquestions := []string{question}
-	if hasKey {
-		raw, err := s.generate.Chat(ctx, &generatev1.ChatRequest{
-			Messages: []*generatev1.Message{
-				{Role: "system", Content: s.cfgStore.plannerPrompt(ctx)},
-				{Role: "user", Content: question},
-			},
-			Options: &generatev1.Options{JsonMode: true, Temperature: 0, MaxTokens: 400, Small: true},
-		})
-		if err == nil {
-			if obj, perr := parseJSONObject(raw.GetContent()); perr == nil {
-				if subs := jsonStrSlice(obj, "subquestions"); len(subs) > 0 {
-					if len(subs) > maxSubquestions {
-						subs = subs[:maxSubquestions]
-					}
-					subquestions = subs
-				}
-			}
-		} else {
-			s.log.Warn("子问题拆解失败，退化为单路检索", zap.Error(err))
-		}
-	}
-	for i, sub := range subquestions {
-		if err := emit(stepEvent(int32(i+1), sub, []string{})); err != nil {
-			return err
-		}
-	}
-	// 空证据池 → NO_DATA
-	if err := emit(answerEvent(agent.NoDataAnswer)); err != nil {
-		return err
-	}
-	return emit(citationsEvent(nil))
-}
-
-const maxSubquestions = 4
 
 func minRunes(a, b int) int {
 	if a < b {

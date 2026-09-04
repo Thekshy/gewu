@@ -90,8 +90,9 @@ func splitParagraphs(text string) []string {
 	return out
 }
 
-// EmbedBatched 分批向量化并做 L2 归一化。端点不支持/无额度时返回错误由调用方降级。
-func EmbedBatched(ctx context.Context, client *llm.Client, chunks []string) ([][]float64, error) {
+// EmbedBatched 分批向量化并做 L2 归一化（client 为 LLMer——决策 A 同族接口化，
+// 单体注入 *llm.Client 原样工作）。端点不支持/无额度时返回错误由调用方降级。
+func EmbedBatched(ctx context.Context, client LLMer, chunks []string) ([][]float64, error) {
 	var all [][]float64
 	for i := 0; i < len(chunks); i += embedBatch {
 		end := i + embedBatch

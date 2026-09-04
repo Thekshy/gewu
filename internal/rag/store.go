@@ -56,20 +56,15 @@ type Stats struct {
 	Embedded bool
 }
 
-// bm25Index 内存倒排索引（首次查询时构建，写入后失效）。
-type bm25Index struct {
-	postings map[string]map[int]int // token -> chunk -> tf
-	docLen   map[int]int
-	idf      map[string]float64
-	avgdl    float64
-}
+// bm25IndexCache 等旧字段见 Store；BM25 倒排结构已提取到 BM25Index
+// （同一份公式代码，SQLite Store 与微服务 PG 数据源共用）。
 
 // Store SQLite 知识库存储：BM25 + 向量余弦，供上层做 RRF 混合检索。
 // 单写连接串行化（与 Python 单连接语义一致），BM25/向量缓存用 RWMutex 保护。
 type Store struct {
 	db  *sql.DB
 	mu  sync.RWMutex
-	bm  *bm25Index
+	bm  *BM25Index
 	vec map[int][]float32 // L2 归一化缓存
 }
 
@@ -185,57 +180,29 @@ func (s *Store) ensureBM25() error {
 	if s.bm != nil {
 		return nil
 	}
-	idx := &bm25Index{
-		postings: map[string]map[int]int{},
-		docLen:   map[int]int{},
-		idf:      map[string]float64{},
-	}
+	idx := NewBM25Index()
 	rows, err := s.db.Query("SELECT id, text FROM chunks")
 	if err != nil {
 		return err
 	}
 	defer rows.Close()
-	var totalLen float64
 	for rows.Next() {
 		var cid int
 		var text string
 		if err := rows.Scan(&cid, &text); err != nil {
 			return err
 		}
-		tokens := Tokenize(text)
-		if n := len(tokens); n < 1 {
-			idx.docLen[cid] = 1
-		} else {
-			idx.docLen[cid] = n
-		}
-		totalLen += float64(idx.docLen[cid])
-		counts := map[string]int{}
-		for _, t := range tokens {
-			counts[t]++
-		}
-		for t, tf := range counts {
-			if idx.postings[t] == nil {
-				idx.postings[t] = map[int]int{}
-			}
-			idx.postings[t][cid] = tf
-		}
+		idx.AddDoc(cid, text)
 	}
 	if err := rows.Err(); err != nil {
 		return err
 	}
-	n := len(idx.docLen)
-	if n == 0 {
-		n = 1
-	}
-	idx.avgdl = totalLen / float64(n)
-	for t, plist := range idx.postings {
-		idx.idf[t] = math.Log(1 + (float64(n)-float64(len(plist))+0.5)/(float64(len(plist))+0.5))
-	}
+	idx.Finalize()
 	s.bm = idx
 	return nil
 }
 
-// BM25Search 返回按 BM25 得分降序的前 k 个 (chunkID, score)；k1=1.5, b=0.75。
+// BM25Search 返回按 BM25 得分降序的前 k 个 (chunkID, score)（委托 BM25Index）。
 func (s *Store) BM25Search(query string, k int) ([]Scored, error) {
 	s.mu.RLock()
 	err := s.ensureBM25()
@@ -244,34 +211,7 @@ func (s *Store) BM25Search(query string, k int) ([]Scored, error) {
 	if err != nil || idx == nil {
 		return nil, err
 	}
-	scores := map[int]float64{}
-	const k1, b = 1.5, 0.75
-	for _, token := range dedupKeepOrder(Tokenize(query)) {
-		plist, ok := idx.postings[token]
-		if !ok {
-			continue
-		}
-		idf := idx.idf[token]
-		for cid, tf := range plist {
-			denom := float64(tf) + k1*(1-b+b*float64(idx.docLen[cid])/idx.avgdl)
-			scores[cid] += idf * float64(tf) * (k1 + 1) / denom
-		}
-	}
-
-	out := make([]Scored, 0, len(scores))
-	for cid, sc := range scores {
-		out = append(out, Scored{ID: cid, Score: sc})
-	}
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].Score != out[j].Score {
-			return out[i].Score > out[j].Score
-		}
-		return out[i].ID < out[j].ID // 平分按 chunk id 升序（Go 版确定化，见 go-notes）
-	})
-	if len(out) > k {
-		out = out[:k]
-	}
-	return out, nil
+	return idx.Search(query, k), nil
 }
 
 // ---------- 向量 ----------
