@@ -19,8 +19,12 @@ func newGenerateAdapter(cli generatev1.GenerateServiceClient) *generateAdapter {
 	return &generateAdapter{cli: cli}
 }
 
-// refreshKey 从 BudgetStatus 同步 key 状态（启动与每次检索前惰性刷新可接受）。
+// refreshKey 从 BudgetStatus 同步 key 状态（启动与每次检索前惰性刷新可接受；
+// cli 未接线（单测）时保持现状）。
 func (g *generateAdapter) refreshKey(ctx context.Context) {
+	if g.cli == nil {
+		return
+	}
 	if resp, err := g.cli.BudgetStatus(ctx, &generatev1.BudgetStatusRequest{}); err == nil {
 		g.hasKey = resp.GetHasKey()
 	}

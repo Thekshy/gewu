@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"strings"
 
 	"github.com/redis/go-redis/v9"
 
@@ -137,6 +138,49 @@ func (s *Server) Stats(ctx context.Context, req *ragv1.StatsRequest) (*ragv1.Sta
 		embedded = has
 	}
 	return &ragv1.StatsResponse{Docs: int32(st.Docs), Chunks: int32(st.Chunks), Embedded: embedded}, nil
+}
+
+// MemoryPut 写入长期记忆（P5；不接入答案生成，ADR-0005）。
+func (s *Server) MemoryPut(ctx context.Context, req *ragv1.MemoryPutRequest) (*ragv1.MemoryPutResponse, error) {
+	text := strings.TrimSpace(req.GetText())
+	if l := len([]rune(text)); l < 1 || l > 2000 {
+		return nil, status.Error(codes.InvalidArgument, "text 长度需在 1~2000 字之间")
+	}
+	if req.GetSessionId() == "" {
+		return nil, status.Error(codes.InvalidArgument, "session_id 不能为空")
+	}
+	id, err := s.memoryPut(ctx, req.GetSessionId(), text)
+	if err != nil {
+		return nil, errStatus(err)
+	}
+	return &ragv1.MemoryPutResponse{Id: id}, nil
+}
+
+// MemoryRecall 语义检索记忆（向量可用走余弦，否则 recency 降级）。
+func (s *Server) MemoryRecall(ctx context.Context, req *ragv1.MemoryRecallRequest) (*ragv1.MemoryRecallResponse, error) {
+	query := strings.TrimSpace(req.GetQuery())
+	if l := len([]rune(query)); l < 1 || l > 500 {
+		return nil, status.Error(codes.InvalidArgument, "query 长度需在 1~500 字之间")
+	}
+	if req.GetSessionId() == "" {
+		return nil, status.Error(codes.InvalidArgument, "session_id 不能为空")
+	}
+	k := int(req.GetK())
+	if k <= 0 {
+		k = 5
+	}
+	if k > 20 {
+		k = 20
+	}
+	items, err := s.memoryRecall(ctx, req.GetSessionId(), query, k)
+	if err != nil {
+		return nil, errStatus(err)
+	}
+	out := make([]*ragv1.MemoryItem, 0, len(items))
+	for _, m := range items {
+		out = append(out, &ragv1.MemoryItem{Id: m.ID, Text: m.Text, Score: m.Score})
+	}
+	return &ragv1.MemoryRecallResponse{Items: out}, nil
 }
 
 // ---------- 小辅助 ----------

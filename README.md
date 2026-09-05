@@ -8,6 +8,69 @@
 
 **声明**：本项目为个人开源展示项目，采用 **clean-room** 方式独立实现；演示语料为完全虚构的「钱塘大学」合成数据，与任何真实高校、任何闭源商业项目无关。
 
+## 两种部署形态
+
+| | 单体（`cmd/server`） | 微服务（1 网关 + 5 gRPC 服务） |
+| --- | --- | --- |
+| 部署 | 单二进制 + SQLite，零外部依赖 | 六进程 + PostgreSQL/Redis（Milvus 可选） |
+| 行为 | [PARITY.md](./docs/PARITY.md) 契约 | 与单体**逐字一致**（26/26 逐题对照，[报告](./eval/reports/p4-ms-vs-monolith.md)） |
+| 定位 | A/B 对照基线与回退（tag `go-monolith`） | 架构演进主线（P0~P5，[升级记录](./docs/microservices-upgrade-prompt.md)） |
+
+## 微服务架构
+
+```mermaid
+flowchart LR
+    C[客户端 / 评测 / web] -->|HTTP/SSE :8000| GW[gateway<br/>限流·CORS·SSE 透传·身份派生]
+    GW -->|gRPC| ORC[orchestrator<br/>编排管线·五分类路由·agent_config]
+    ORC -->|gRPC| CONV[conversation<br/>会话状态·TTL·消息审计]
+    ORC -->|gRPC| GEN[generate<br/>LLM 网关·预算集中计量]
+    ORC -->|gRPC| RAG[rag<br/>混合检索·摄入流水线·记忆]
+    ORC -->|gRPC| TOOL[tool<br/>权限矩阵·业务系统]
+    GW -->|gRPC| RAG
+    GW -->|gRPC| TOOL
+    GEN --> LLM[[OpenAI 兼容端点]]
+    RAG --> PG[(PostgreSQL)] & MV[(Milvus FLAT<br/>可选·降级 PG 余弦)]
+    CONV & TOOL & GEN --> PG
+    ORC & RAG & GEN --> RD[(Redis<br/>配置缓存·Streams 摄入)]
+    CORPUS[data/corpus] -->|ingest-ms（Streams）| RAG
+```
+
+服务职责：**gateway**（唯一 HTTP/SSE 入口，端口/路径/帧格式与单体一致）；**orchestrator**
+（编排管线 + 五分类路由 + 工具调度 + `agent_config` 热配置）；**conversation**（办理会话状态，
+TTL 30 分钟语义逐字，重启保留）；**generate**（LLM 网关 + 每日 token 预算集中计量，PG 持久化）；
+**tool**（权限矩阵 + mock 业务系统，`user` 服务端注入）；**rag**（BM25+向量混合检索、
+Redis Streams 摄入、长期记忆 API 预留）。
+
+设计决策见 [docs/ADR/](./docs/ADR/)（服务边界、Milvus FLAT 选型、Redis Streams MQ、
+generate 重试、历史不接入生成、业务归属、预算计量、SQLite→PG）；与单体的有意差异
+逐条登记于 [docs/PARITY-MS.md](./docs/PARITY-MS.md)。
+
+### 微服务快速开始
+
+```bash
+# 1. 起基础设施 + 全链路（零 key 可跑；compose 内自动连接）
+docker compose up -d --wait
+
+# 2. 语料入库（经 rag 服务 Redis Streams 流水线，阻塞至完成）
+make ingest-ms          # 或 NO_EMBED=1 / REBUILD=1
+
+# 3. 使用：:8000 即网关（前端/评测指向不变）
+curl -N localhost:8000/api/chat -H 'Content-Type: application/json' \
+  -d '{"question":"帮我预约明天晚上的羽毛球馆"}'
+
+# 配置管理（新增命名空间）
+curl localhost:8000/admin/config
+```
+
+本机直跑（不进容器）：`docker compose up -d --wait postgres redis` 后 `make run-ms`。
+
+### 压测（k6）
+
+```bash
+k6 run -e BASE_URL=http://127.0.0.1:8000 eval/k6-chat.js
+# 30VU/60s 零 key 确定性链路实测：TTFT P95 ≈ 17ms，0 失败（[报告](./eval/reports/p5-k6-load.md)）
+```
+
 ## 为什么用 Go 重写（原为 Python/FastAPI）
 
 v1 用 Python（FastAPI）快速验证了产品形态：路由、混合检索、业务办理、评测 26/26 全绿。
@@ -68,7 +131,7 @@ flowchart LR
 [docs/PARITY.md](./docs/PARITY.md)（API 行为规格）与 [docs/go-notes.md](./docs/go-notes.md)
 （Go 设计决策与重写修复清单）。
 
-## 快速开始
+## 快速开始（单体）
 
 前置：Go 1.25+、Node 18+（前端）。
 

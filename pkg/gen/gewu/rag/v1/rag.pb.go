@@ -683,6 +683,267 @@ func (x *UploadResponse) GetDocId() string {
 	return ""
 }
 
+// MemoryItem 一条长期记忆。
+type MemoryItem struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"` // 服务端生成的记忆 ID
+	Text          string                 `protobuf:"bytes,2,opt,name=text,proto3" json:"text,omitempty"`
+	Score         float64                `protobuf:"fixed64,3,opt,name=score,proto3" json:"score,omitempty"` // Recall 时的相似度
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MemoryItem) Reset() {
+	*x = MemoryItem{}
+	mi := &file_gewu_rag_v1_rag_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MemoryItem) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MemoryItem) ProtoMessage() {}
+
+func (x *MemoryItem) ProtoReflect() protoreflect.Message {
+	mi := &file_gewu_rag_v1_rag_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MemoryItem.ProtoReflect.Descriptor instead.
+func (*MemoryItem) Descriptor() ([]byte, []int) {
+	return file_gewu_rag_v1_rag_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *MemoryItem) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+func (x *MemoryItem) GetText() string {
+	if x != nil {
+		return x.Text
+	}
+	return ""
+}
+
+func (x *MemoryItem) GetScore() float64 {
+	if x != nil {
+		return x.Score
+	}
+	return 0
+}
+
+type MemoryPutRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	SessionId     string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"` // 归属会话（隔离维度）
+	Text          string                 `protobuf:"bytes,2,opt,name=text,proto3" json:"text,omitempty"`                            // 1~2000 字
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MemoryPutRequest) Reset() {
+	*x = MemoryPutRequest{}
+	mi := &file_gewu_rag_v1_rag_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MemoryPutRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MemoryPutRequest) ProtoMessage() {}
+
+func (x *MemoryPutRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_gewu_rag_v1_rag_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MemoryPutRequest.ProtoReflect.Descriptor instead.
+func (*MemoryPutRequest) Descriptor() ([]byte, []int) {
+	return file_gewu_rag_v1_rag_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *MemoryPutRequest) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+func (x *MemoryPutRequest) GetText() string {
+	if x != nil {
+		return x.Text
+	}
+	return ""
+}
+
+type MemoryPutResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Id            string                 `protobuf:"bytes,1,opt,name=id,proto3" json:"id,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MemoryPutResponse) Reset() {
+	*x = MemoryPutResponse{}
+	mi := &file_gewu_rag_v1_rag_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MemoryPutResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MemoryPutResponse) ProtoMessage() {}
+
+func (x *MemoryPutResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_gewu_rag_v1_rag_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MemoryPutResponse.ProtoReflect.Descriptor instead.
+func (*MemoryPutResponse) Descriptor() ([]byte, []int) {
+	return file_gewu_rag_v1_rag_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *MemoryPutResponse) GetId() string {
+	if x != nil {
+		return x.Id
+	}
+	return ""
+}
+
+type MemoryRecallRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	SessionId     string                 `protobuf:"bytes,1,opt,name=session_id,json=sessionId,proto3" json:"session_id,omitempty"` // 限定会话范围
+	Query         string                 `protobuf:"bytes,2,opt,name=query,proto3" json:"query,omitempty"`                          // 1~500 字
+	K             int32                  `protobuf:"varint,3,opt,name=k,proto3" json:"k,omitempty"`                                 // 缺省 5，上限 20
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MemoryRecallRequest) Reset() {
+	*x = MemoryRecallRequest{}
+	mi := &file_gewu_rag_v1_rag_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MemoryRecallRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MemoryRecallRequest) ProtoMessage() {}
+
+func (x *MemoryRecallRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_gewu_rag_v1_rag_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MemoryRecallRequest.ProtoReflect.Descriptor instead.
+func (*MemoryRecallRequest) Descriptor() ([]byte, []int) {
+	return file_gewu_rag_v1_rag_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *MemoryRecallRequest) GetSessionId() string {
+	if x != nil {
+		return x.SessionId
+	}
+	return ""
+}
+
+func (x *MemoryRecallRequest) GetQuery() string {
+	if x != nil {
+		return x.Query
+	}
+	return ""
+}
+
+func (x *MemoryRecallRequest) GetK() int32 {
+	if x != nil {
+		return x.K
+	}
+	return 0
+}
+
+type MemoryRecallResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Items         []*MemoryItem          `protobuf:"bytes,1,rep,name=items,proto3" json:"items,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *MemoryRecallResponse) Reset() {
+	*x = MemoryRecallResponse{}
+	mi := &file_gewu_rag_v1_rag_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *MemoryRecallResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*MemoryRecallResponse) ProtoMessage() {}
+
+func (x *MemoryRecallResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_gewu_rag_v1_rag_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use MemoryRecallResponse.ProtoReflect.Descriptor instead.
+func (*MemoryRecallResponse) Descriptor() ([]byte, []int) {
+	return file_gewu_rag_v1_rag_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *MemoryRecallResponse) GetItems() []*MemoryItem {
+	if x != nil {
+		return x.Items
+	}
+	return nil
+}
+
 var File_gewu_rag_v1_rag_proto protoreflect.FileDescriptor
 
 const file_gewu_rag_v1_rag_proto_rawDesc = "" +
@@ -727,14 +988,34 @@ const file_gewu_rag_v1_rag_proto_rawDesc = "" +
 	"\bfilename\x18\x01 \x01(\tR\bfilename\x12\x18\n" +
 	"\acontent\x18\x02 \x01(\fR\acontent\"'\n" +
 	"\x0eUploadResponse\x12\x15\n" +
-	"\x06doc_id\x18\x01 \x01(\tR\x05docId2\xe0\x02\n" +
+	"\x06doc_id\x18\x01 \x01(\tR\x05docId\"F\n" +
+	"\n" +
+	"MemoryItem\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\x12\x12\n" +
+	"\x04text\x18\x02 \x01(\tR\x04text\x12\x14\n" +
+	"\x05score\x18\x03 \x01(\x01R\x05score\"E\n" +
+	"\x10MemoryPutRequest\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x12\n" +
+	"\x04text\x18\x02 \x01(\tR\x04text\"#\n" +
+	"\x11MemoryPutResponse\x12\x0e\n" +
+	"\x02id\x18\x01 \x01(\tR\x02id\"X\n" +
+	"\x13MemoryRecallRequest\x12\x1d\n" +
+	"\n" +
+	"session_id\x18\x01 \x01(\tR\tsessionId\x12\x14\n" +
+	"\x05query\x18\x02 \x01(\tR\x05query\x12\f\n" +
+	"\x01k\x18\x03 \x01(\x05R\x01k\"E\n" +
+	"\x14MemoryRecallResponse\x12-\n" +
+	"\x05items\x18\x01 \x03(\v2\x17.gewu.rag.v1.MemoryItemR\x05items2\x81\x04\n" +
 	"\n" +
 	"RagService\x12A\n" +
 	"\x06Search\x12\x1a.gewu.rag.v1.SearchRequest\x1a\x1b.gewu.rag.v1.SearchResponse\x12G\n" +
 	"\bListDocs\x12\x1c.gewu.rag.v1.ListDocsRequest\x1a\x1d.gewu.rag.v1.ListDocsResponse\x12>\n" +
 	"\x05Stats\x12\x19.gewu.rag.v1.StatsRequest\x1a\x1a.gewu.rag.v1.StatsResponse\x12C\n" +
 	"\x06Ingest\x12\x1a.gewu.rag.v1.IngestRequest\x1a\x1b.gewu.rag.v1.IngestResponse0\x01\x12A\n" +
-	"\x06Upload\x12\x1a.gewu.rag.v1.UploadRequest\x1a\x1b.gewu.rag.v1.UploadResponseB Z\x1egewu/pkg/gen/gewu/rag/v1;ragv1b\x06proto3"
+	"\x06Upload\x12\x1a.gewu.rag.v1.UploadRequest\x1a\x1b.gewu.rag.v1.UploadResponse\x12J\n" +
+	"\tMemoryPut\x12\x1d.gewu.rag.v1.MemoryPutRequest\x1a\x1e.gewu.rag.v1.MemoryPutResponse\x12S\n" +
+	"\fMemoryRecall\x12 .gewu.rag.v1.MemoryRecallRequest\x1a!.gewu.rag.v1.MemoryRecallResponseB Z\x1egewu/pkg/gen/gewu/rag/v1;ragv1b\x06proto3"
 
 var (
 	file_gewu_rag_v1_rag_proto_rawDescOnce sync.Once
@@ -748,40 +1029,50 @@ func file_gewu_rag_v1_rag_proto_rawDescGZIP() []byte {
 	return file_gewu_rag_v1_rag_proto_rawDescData
 }
 
-var file_gewu_rag_v1_rag_proto_msgTypes = make([]protoimpl.MessageInfo, 12)
+var file_gewu_rag_v1_rag_proto_msgTypes = make([]protoimpl.MessageInfo, 17)
 var file_gewu_rag_v1_rag_proto_goTypes = []any{
-	(*Hit)(nil),              // 0: gewu.rag.v1.Hit
-	(*SearchRequest)(nil),    // 1: gewu.rag.v1.SearchRequest
-	(*SearchResponse)(nil),   // 2: gewu.rag.v1.SearchResponse
-	(*DocInfo)(nil),          // 3: gewu.rag.v1.DocInfo
-	(*ListDocsRequest)(nil),  // 4: gewu.rag.v1.ListDocsRequest
-	(*ListDocsResponse)(nil), // 5: gewu.rag.v1.ListDocsResponse
-	(*StatsRequest)(nil),     // 6: gewu.rag.v1.StatsRequest
-	(*StatsResponse)(nil),    // 7: gewu.rag.v1.StatsResponse
-	(*IngestRequest)(nil),    // 8: gewu.rag.v1.IngestRequest
-	(*IngestResponse)(nil),   // 9: gewu.rag.v1.IngestResponse
-	(*UploadRequest)(nil),    // 10: gewu.rag.v1.UploadRequest
-	(*UploadResponse)(nil),   // 11: gewu.rag.v1.UploadResponse
+	(*Hit)(nil),                  // 0: gewu.rag.v1.Hit
+	(*SearchRequest)(nil),        // 1: gewu.rag.v1.SearchRequest
+	(*SearchResponse)(nil),       // 2: gewu.rag.v1.SearchResponse
+	(*DocInfo)(nil),              // 3: gewu.rag.v1.DocInfo
+	(*ListDocsRequest)(nil),      // 4: gewu.rag.v1.ListDocsRequest
+	(*ListDocsResponse)(nil),     // 5: gewu.rag.v1.ListDocsResponse
+	(*StatsRequest)(nil),         // 6: gewu.rag.v1.StatsRequest
+	(*StatsResponse)(nil),        // 7: gewu.rag.v1.StatsResponse
+	(*IngestRequest)(nil),        // 8: gewu.rag.v1.IngestRequest
+	(*IngestResponse)(nil),       // 9: gewu.rag.v1.IngestResponse
+	(*UploadRequest)(nil),        // 10: gewu.rag.v1.UploadRequest
+	(*UploadResponse)(nil),       // 11: gewu.rag.v1.UploadResponse
+	(*MemoryItem)(nil),           // 12: gewu.rag.v1.MemoryItem
+	(*MemoryPutRequest)(nil),     // 13: gewu.rag.v1.MemoryPutRequest
+	(*MemoryPutResponse)(nil),    // 14: gewu.rag.v1.MemoryPutResponse
+	(*MemoryRecallRequest)(nil),  // 15: gewu.rag.v1.MemoryRecallRequest
+	(*MemoryRecallResponse)(nil), // 16: gewu.rag.v1.MemoryRecallResponse
 }
 var file_gewu_rag_v1_rag_proto_depIdxs = []int32{
 	0,  // 0: gewu.rag.v1.SearchResponse.hits:type_name -> gewu.rag.v1.Hit
 	3,  // 1: gewu.rag.v1.ListDocsResponse.docs:type_name -> gewu.rag.v1.DocInfo
 	7,  // 2: gewu.rag.v1.IngestResponse.stats:type_name -> gewu.rag.v1.StatsResponse
-	1,  // 3: gewu.rag.v1.RagService.Search:input_type -> gewu.rag.v1.SearchRequest
-	4,  // 4: gewu.rag.v1.RagService.ListDocs:input_type -> gewu.rag.v1.ListDocsRequest
-	6,  // 5: gewu.rag.v1.RagService.Stats:input_type -> gewu.rag.v1.StatsRequest
-	8,  // 6: gewu.rag.v1.RagService.Ingest:input_type -> gewu.rag.v1.IngestRequest
-	10, // 7: gewu.rag.v1.RagService.Upload:input_type -> gewu.rag.v1.UploadRequest
-	2,  // 8: gewu.rag.v1.RagService.Search:output_type -> gewu.rag.v1.SearchResponse
-	5,  // 9: gewu.rag.v1.RagService.ListDocs:output_type -> gewu.rag.v1.ListDocsResponse
-	7,  // 10: gewu.rag.v1.RagService.Stats:output_type -> gewu.rag.v1.StatsResponse
-	9,  // 11: gewu.rag.v1.RagService.Ingest:output_type -> gewu.rag.v1.IngestResponse
-	11, // 12: gewu.rag.v1.RagService.Upload:output_type -> gewu.rag.v1.UploadResponse
-	8,  // [8:13] is the sub-list for method output_type
-	3,  // [3:8] is the sub-list for method input_type
-	3,  // [3:3] is the sub-list for extension type_name
-	3,  // [3:3] is the sub-list for extension extendee
-	0,  // [0:3] is the sub-list for field type_name
+	12, // 3: gewu.rag.v1.MemoryRecallResponse.items:type_name -> gewu.rag.v1.MemoryItem
+	1,  // 4: gewu.rag.v1.RagService.Search:input_type -> gewu.rag.v1.SearchRequest
+	4,  // 5: gewu.rag.v1.RagService.ListDocs:input_type -> gewu.rag.v1.ListDocsRequest
+	6,  // 6: gewu.rag.v1.RagService.Stats:input_type -> gewu.rag.v1.StatsRequest
+	8,  // 7: gewu.rag.v1.RagService.Ingest:input_type -> gewu.rag.v1.IngestRequest
+	10, // 8: gewu.rag.v1.RagService.Upload:input_type -> gewu.rag.v1.UploadRequest
+	13, // 9: gewu.rag.v1.RagService.MemoryPut:input_type -> gewu.rag.v1.MemoryPutRequest
+	15, // 10: gewu.rag.v1.RagService.MemoryRecall:input_type -> gewu.rag.v1.MemoryRecallRequest
+	2,  // 11: gewu.rag.v1.RagService.Search:output_type -> gewu.rag.v1.SearchResponse
+	5,  // 12: gewu.rag.v1.RagService.ListDocs:output_type -> gewu.rag.v1.ListDocsResponse
+	7,  // 13: gewu.rag.v1.RagService.Stats:output_type -> gewu.rag.v1.StatsResponse
+	9,  // 14: gewu.rag.v1.RagService.Ingest:output_type -> gewu.rag.v1.IngestResponse
+	11, // 15: gewu.rag.v1.RagService.Upload:output_type -> gewu.rag.v1.UploadResponse
+	14, // 16: gewu.rag.v1.RagService.MemoryPut:output_type -> gewu.rag.v1.MemoryPutResponse
+	16, // 17: gewu.rag.v1.RagService.MemoryRecall:output_type -> gewu.rag.v1.MemoryRecallResponse
+	11, // [11:18] is the sub-list for method output_type
+	4,  // [4:11] is the sub-list for method input_type
+	4,  // [4:4] is the sub-list for extension type_name
+	4,  // [4:4] is the sub-list for extension extendee
+	0,  // [0:4] is the sub-list for field type_name
 }
 
 func init() { file_gewu_rag_v1_rag_proto_init() }
@@ -795,7 +1086,7 @@ func file_gewu_rag_v1_rag_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_gewu_rag_v1_rag_proto_rawDesc), len(file_gewu_rag_v1_rag_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   12,
+			NumMessages:   17,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

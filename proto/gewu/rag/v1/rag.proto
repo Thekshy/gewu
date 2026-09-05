@@ -80,4 +80,40 @@ service RagService {
 	rpc Ingest(IngestRequest) returns (stream IngestResponse);
 	// Upload 异步上传（新增演示面：发布单个文档的摄入任务，立即返回）。
 	rpc Upload(UploadRequest) returns (UploadResponse);
+
+	// ---------- 长期记忆（P5；与知识 collection 分离，共用 embedding 管线） ----------
+	//
+	// 注意：Recall/Put 预留为独立 API，**默认不接入答案生成**（各轮独立作答
+	// 是 26/26 行为前提，ADR-0005）；接入与否迁移完成后单独评估。
+
+	// MemoryPut 写入一条长期记忆（文本 → embed → 记忆向量库）。
+	rpc MemoryPut(MemoryPutRequest) returns (MemoryPutResponse);
+	// MemoryRecall 按语义检索记忆（无向量时降级为 BM25/最近写入，见实现注释）。
+	rpc MemoryRecall(MemoryRecallRequest) returns (MemoryRecallResponse);
+}
+
+// MemoryItem 一条长期记忆。
+message MemoryItem {
+	string id = 1;    // 服务端生成的记忆 ID
+	string text = 2;
+	double score = 3; // Recall 时的相似度
+}
+
+message MemoryPutRequest {
+	string session_id = 1; // 归属会话（隔离维度）
+	string text = 2;       // 1~2000 字
+}
+
+message MemoryPutResponse {
+	string id = 1;
+}
+
+message MemoryRecallRequest {
+	string session_id = 1; // 限定会话范围
+	string query = 2;      // 1~500 字
+	int32 k = 3;           // 缺省 5，上限 20
+}
+
+message MemoryRecallResponse {
+	repeated MemoryItem items = 1;
 }

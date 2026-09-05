@@ -22,11 +22,13 @@ import (
 const _ = grpc.SupportPackageIsVersion9
 
 const (
-	RagService_Search_FullMethodName   = "/gewu.rag.v1.RagService/Search"
-	RagService_ListDocs_FullMethodName = "/gewu.rag.v1.RagService/ListDocs"
-	RagService_Stats_FullMethodName    = "/gewu.rag.v1.RagService/Stats"
-	RagService_Ingest_FullMethodName   = "/gewu.rag.v1.RagService/Ingest"
-	RagService_Upload_FullMethodName   = "/gewu.rag.v1.RagService/Upload"
+	RagService_Search_FullMethodName       = "/gewu.rag.v1.RagService/Search"
+	RagService_ListDocs_FullMethodName     = "/gewu.rag.v1.RagService/ListDocs"
+	RagService_Stats_FullMethodName        = "/gewu.rag.v1.RagService/Stats"
+	RagService_Ingest_FullMethodName       = "/gewu.rag.v1.RagService/Ingest"
+	RagService_Upload_FullMethodName       = "/gewu.rag.v1.RagService/Upload"
+	RagService_MemoryPut_FullMethodName    = "/gewu.rag.v1.RagService/MemoryPut"
+	RagService_MemoryRecall_FullMethodName = "/gewu.rag.v1.RagService/MemoryRecall"
 )
 
 // RagServiceClient is the client API for RagService service.
@@ -42,6 +44,10 @@ type RagServiceClient interface {
 	Ingest(ctx context.Context, in *IngestRequest, opts ...grpc.CallOption) (grpc.ServerStreamingClient[IngestResponse], error)
 	// Upload 异步上传（新增演示面：发布单个文档的摄入任务，立即返回）。
 	Upload(ctx context.Context, in *UploadRequest, opts ...grpc.CallOption) (*UploadResponse, error)
+	// MemoryPut 写入一条长期记忆（文本 → embed → 记忆向量库）。
+	MemoryPut(ctx context.Context, in *MemoryPutRequest, opts ...grpc.CallOption) (*MemoryPutResponse, error)
+	// MemoryRecall 按语义检索记忆（无向量时降级为 BM25/最近写入，见实现注释）。
+	MemoryRecall(ctx context.Context, in *MemoryRecallRequest, opts ...grpc.CallOption) (*MemoryRecallResponse, error)
 }
 
 type ragServiceClient struct {
@@ -111,6 +117,26 @@ func (c *ragServiceClient) Upload(ctx context.Context, in *UploadRequest, opts .
 	return out, nil
 }
 
+func (c *ragServiceClient) MemoryPut(ctx context.Context, in *MemoryPutRequest, opts ...grpc.CallOption) (*MemoryPutResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MemoryPutResponse)
+	err := c.cc.Invoke(ctx, RagService_MemoryPut_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
+func (c *ragServiceClient) MemoryRecall(ctx context.Context, in *MemoryRecallRequest, opts ...grpc.CallOption) (*MemoryRecallResponse, error) {
+	cOpts := append([]grpc.CallOption{grpc.StaticMethod()}, opts...)
+	out := new(MemoryRecallResponse)
+	err := c.cc.Invoke(ctx, RagService_MemoryRecall_FullMethodName, in, out, cOpts...)
+	if err != nil {
+		return nil, err
+	}
+	return out, nil
+}
+
 // RagServiceServer is the server API for RagService service.
 // All implementations must embed UnimplementedRagServiceServer
 // for forward compatibility.
@@ -124,6 +150,10 @@ type RagServiceServer interface {
 	Ingest(*IngestRequest, grpc.ServerStreamingServer[IngestResponse]) error
 	// Upload 异步上传（新增演示面：发布单个文档的摄入任务，立即返回）。
 	Upload(context.Context, *UploadRequest) (*UploadResponse, error)
+	// MemoryPut 写入一条长期记忆（文本 → embed → 记忆向量库）。
+	MemoryPut(context.Context, *MemoryPutRequest) (*MemoryPutResponse, error)
+	// MemoryRecall 按语义检索记忆（无向量时降级为 BM25/最近写入，见实现注释）。
+	MemoryRecall(context.Context, *MemoryRecallRequest) (*MemoryRecallResponse, error)
 	mustEmbedUnimplementedRagServiceServer()
 }
 
@@ -148,6 +178,12 @@ func (UnimplementedRagServiceServer) Ingest(*IngestRequest, grpc.ServerStreaming
 }
 func (UnimplementedRagServiceServer) Upload(context.Context, *UploadRequest) (*UploadResponse, error) {
 	return nil, status.Errorf(codes.Unimplemented, "method Upload not implemented")
+}
+func (UnimplementedRagServiceServer) MemoryPut(context.Context, *MemoryPutRequest) (*MemoryPutResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method MemoryPut not implemented")
+}
+func (UnimplementedRagServiceServer) MemoryRecall(context.Context, *MemoryRecallRequest) (*MemoryRecallResponse, error) {
+	return nil, status.Errorf(codes.Unimplemented, "method MemoryRecall not implemented")
 }
 func (UnimplementedRagServiceServer) mustEmbedUnimplementedRagServiceServer() {}
 func (UnimplementedRagServiceServer) testEmbeddedByValue()                    {}
@@ -253,6 +289,42 @@ func _RagService_Upload_Handler(srv interface{}, ctx context.Context, dec func(i
 	return interceptor(ctx, in, info, handler)
 }
 
+func _RagService_MemoryPut_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MemoryPutRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RagServiceServer).MemoryPut(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RagService_MemoryPut_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RagServiceServer).MemoryPut(ctx, req.(*MemoryPutRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
+func _RagService_MemoryRecall_Handler(srv interface{}, ctx context.Context, dec func(interface{}) error, interceptor grpc.UnaryServerInterceptor) (interface{}, error) {
+	in := new(MemoryRecallRequest)
+	if err := dec(in); err != nil {
+		return nil, err
+	}
+	if interceptor == nil {
+		return srv.(RagServiceServer).MemoryRecall(ctx, in)
+	}
+	info := &grpc.UnaryServerInfo{
+		Server:     srv,
+		FullMethod: RagService_MemoryRecall_FullMethodName,
+	}
+	handler := func(ctx context.Context, req interface{}) (interface{}, error) {
+		return srv.(RagServiceServer).MemoryRecall(ctx, req.(*MemoryRecallRequest))
+	}
+	return interceptor(ctx, in, info, handler)
+}
+
 // RagService_ServiceDesc is the grpc.ServiceDesc for RagService service.
 // It's only intended for direct use with grpc.RegisterService,
 // and not to be introspected or modified (even as a copy)
@@ -275,6 +347,14 @@ var RagService_ServiceDesc = grpc.ServiceDesc{
 		{
 			MethodName: "Upload",
 			Handler:    _RagService_Upload_Handler,
+		},
+		{
+			MethodName: "MemoryPut",
+			Handler:    _RagService_MemoryPut_Handler,
+		},
+		{
+			MethodName: "MemoryRecall",
+			Handler:    _RagService_MemoryRecall_Handler,
 		},
 	},
 	Streams: []grpc.StreamDesc{
