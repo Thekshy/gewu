@@ -18,6 +18,7 @@ import (
 
 	generatev1 "gewu/pkg/gen/gewu/generate/v1"
 	orchestratorv1 "gewu/pkg/gen/gewu/orchestrator/v1"
+	toolv1 "gewu/pkg/gen/gewu/tool/v1"
 
 	"gewu/internal/business"
 	"gewu/internal/dates"
@@ -34,6 +35,27 @@ const (
 
 // emitFn 事件发射器：返回错误时中止（下游断开）。
 type emitFn func(*orchestratorv1.ChatResponse) error
+
+// callTool 经 tool 服务执行（权限矩阵与 user 注入在 tool 侧，ADR-0006）。
+// 返回形态对齐冻结 business.Result；RPC 不可达按内部错误处理。
+func (s *Server) callTool(ctx context.Context, name string, args map[string]string, role, user string) business.Result {
+	resp, err := s.tool.CallTool(withUser(ctx, user), &toolv1.CallToolRequest{
+		Tool: name, Args: args, Role: role,
+	})
+	if err != nil {
+		return business.Result{Err: "internal", Message: errText(err)}
+	}
+	return business.Result{
+		OK:           resp.GetOk(),
+		Err:          resp.GetError(),
+		Field:        resp.GetField(),
+		Message:      resp.GetMessage(),
+		Receipt:      resp.GetReceipt(),
+		Alternatives: resp.GetAlternatives(),
+		Days:         int(resp.GetDays()),
+		Approver:     resp.GetApprover(),
+	}
+}
 
 // toolPatterns 工具识别（离线启发式，按序首个命中；顺序是契约）。
 var toolPatterns = []struct {
@@ -129,24 +151,30 @@ func (s *Server) parseSlot(text string) string {
 	return ""
 }
 
-// parseVenue 场馆名 → venue_id（名称子串匹配）。
-func (s *Server) parseVenue(text string) string {
-	v, ok, err := s.business.VenueByName(text)
-	if err != nil || !ok {
+// parseVenue 场馆名 → venue_id（名称子串匹配，经 tool RPC）。
+func (s *Server) parseVenue(ctx context.Context, text string) string {
+	if s.tool == nil {
 		return ""
 	}
-	return v.VenueID
+	resp, err := s.tool.VenueByName(ctx, &toolv1.VenueByNameRequest{Text: text})
+	if err != nil || !resp.GetFound() {
+		return ""
+	}
+	return resp.GetVenue().GetVenueId()
 }
 
-// normVenueID venue_id → 场馆名（确认摘要展示用）。
-func (s *Server) normVenueID(venueID string) string {
-	venues, err := s.business.ListVenues()
+// normVenueID venue_id → 场馆名（确认摘要展示用，经 tool RPC）。
+func (s *Server) normVenueID(ctx context.Context, venueID string) string {
+	if s.tool == nil {
+		return venueID
+	}
+	resp, err := s.tool.ListVenues(ctx, &toolv1.ListVenuesRequest{})
 	if err != nil {
 		return venueID
 	}
-	for _, v := range venues {
-		if v.VenueID == venueID {
-			return v.Name
+	for _, v := range resp.GetVenues() {
+		if v.GetVenueId() == venueID {
+			return v.GetName()
 		}
 	}
 	return venueID
@@ -171,7 +199,7 @@ func rawText(text string) (string, bool) {
 }
 
 // rawTextFn 非空原文（自由文本槽位）。
-func rawTextFn(d *Server, t string) (string, bool) { return rawText(t) }
+func rawTextFn(d *Server, ctx context.Context, t string) (string, bool) { return rawText(t) }
 
 var bookingIDRe = regexp.MustCompile(`VE-\d+`)
 var ticketIDRe = regexp.MustCompile(`LV-\d+`)
@@ -188,7 +216,7 @@ func firstMatch(re *regexp.Regexp, text string) (string, bool) {
 type slotMeta struct {
 	Label string
 	Ask   string
-	Parse func(d *Server, text string) (string, bool)
+	Parse func(d *Server, ctx context.Context, text string) (string, bool)
 }
 
 // slotOrder SLOT_META 的遍历顺序（Python dict 插入序，confirm 修改检测依赖此序）。
@@ -197,33 +225,33 @@ var slotOrder = []string{
 }
 
 var slotMetaTable = map[string]slotMeta{
-	"venue": {Label: "场馆", Ask: "想预约哪个场馆？可选：羽毛球馆、篮球场、研讨间301、研讨间302", Parse: func(d *Server, t string) (string, bool) {
-		v := d.parseVenue(t)
+	"venue": {Label: "场馆", Ask: "想预约哪个场馆？可选：羽毛球馆、篮球场、研讨间301、研讨间302", Parse: func(d *Server, ctx context.Context, t string) (string, bool) {
+		v := d.parseVenue(ctx, t)
 		return v, v != ""
 	}},
 	"date": {Label: "日期", Ask: "预约哪一天？（如：明天、周三、9月2日）", Parse: parseDateSlotFn},
-	"slot": {Label: "时段", Ask: "预约哪个时段？可选：08:00-10:00 / 10:00-12:00 / 14:00-16:00 / 16:00-18:00 / 19:00-21:00（也可回复上午/下午/晚上）", Parse: func(d *Server, t string) (string, bool) {
+	"slot": {Label: "时段", Ask: "预约哪个时段？可选：08:00-10:00 / 10:00-12:00 / 14:00-16:00 / 16:00-18:00 / 19:00-21:00（也可回复上午/下午/晚上）", Parse: func(d *Server, ctx context.Context, t string) (string, bool) {
 		s := d.parseSlot(t)
 		return s, s != ""
 	}},
 	"purpose": {Label: "用途", Ask: "预约用途是什么？（如：班级活动、训练）", Parse: rawTextFn},
-	"leave_type": {Label: "类型", Ask: "请假类型是？（事假 / 病假 / 其他）", Parse: func(d *Server, t string) (string, bool) {
+	"leave_type": {Label: "类型", Ask: "请假类型是？（事假 / 病假 / 其他）", Parse: func(d *Server, ctx context.Context, t string) (string, bool) {
 		s := parseLeaveType(t)
 		return s, s != ""
 	}},
 	"start_date": {Label: "开始日期", Ask: "从哪一天开始请假？（如：明天、下周一）", Parse: parseDateSlotFn},
 	"end_date":   {Label: "结束日期", Ask: "请到哪一天？（含当天，如：下周二）", Parse: parseDateSlotFn},
 	"reason":     {Label: "事由", Ask: "请简要说明请假事由", Parse: rawTextFn},
-	"booking_id": {Label: "预约单号", Ask: "要取消的预约单号是？（形如 VE-0001，可先查「我的预约」）", Parse: func(d *Server, t string) (string, bool) {
+	"booking_id": {Label: "预约单号", Ask: "要取消的预约单号是？（形如 VE-0001，可先查「我的预约」）", Parse: func(d *Server, ctx context.Context, t string) (string, bool) {
 		return firstMatch(bookingIDRe, t)
 	}},
-	"ticket_id": {Label: "请假单号", Ask: "请假单号是？（形如 LV-0001）", Parse: func(d *Server, t string) (string, bool) {
+	"ticket_id": {Label: "请假单号", Ask: "请假单号是？（形如 LV-0001）", Parse: func(d *Server, ctx context.Context, t string) (string, bool) {
 		return firstMatch(ticketIDRe, t)
 	}},
 }
 
 // parseDateSlotFn 日期表述 → ISO（确定性解析）。
-func parseDateSlotFn(d *Server, t string) (string, bool) {
+func parseDateSlotFn(d *Server, ctx context.Context, t string) (string, bool) {
 	iso := dates.ParseISO(t, nil)
 	return iso, iso != ""
 }
@@ -281,18 +309,18 @@ func (s *Server) startFlow(ctx context.Context, emit emitFn, question, role, use
 	if tool == "" && hasKey {
 		tool = s.llmExtractTool(ctx, question, role)
 	}
-	if _, known := s.tools[tool]; !known {
+	if tool == "" {
 		return s.fallbackKnowledge(ctx, emit, question, hasKey)
 	}
 
 	if _, inFlows := flowDefs[tool]; readTools[tool] || !inFlows {
 		args := map[string]string{}
 		if tool == "query_venues" {
-			if iso, ok := parseDateSlotFn(s, question); ok {
+			if iso, ok := parseDateSlotFn(s, ctx, question); ok {
 				args["date"] = iso
 			}
 		}
-		result := s.callTool(tool, args, role, user)
+		result := s.callTool(ctx, tool, args, role, user)
 		if err := emit(actionResultEvent(tool, result.OK, result.Message, result.Receipt)); err != nil {
 			return err
 		}
@@ -320,12 +348,22 @@ func orMessage(r business.Result) string {
 	return "未知错误"
 }
 
+// toolDescriptions 角色可见工具清单（经 tool RPC）。
+func (s *Server) toolDescriptions(ctx context.Context, role string) string {
+	resp, err := s.tool.ToolDescriptions(ctx, &toolv1.ToolDescriptionsRequest{Role: role})
+	if err != nil {
+		s.log.Warn("获取工具清单失败", zap.Error(err))
+		return ""
+	}
+	return resp.GetDescriptions()
+}
+
 // llmExtractTool LLM 选工具（启发式未识别且有 key 时）。
 func (s *Server) llmExtractTool(ctx context.Context, question, role string) string {
 	raw, err := s.generate.Chat(ctx, &generatev1.ChatRequest{
 		Messages: []*generatev1.Message{
 			{Role: "system", Content: fmt.Sprintf(
-				"根据用户消息选择最匹配的工具，只输出工具名 JSON：{\"tool\": \"...\"}。可选工具：\n%s", s.toolDescriptions(role))},
+				"根据用户消息选择最匹配的工具，只输出工具名 JSON：{\"tool\": \"...\"}。可选工具：\n%s", s.toolDescriptions(ctx, role))},
 			{Role: "user", Content: question},
 		},
 		Options: &generatev1.Options{JsonMode: true, Temperature: 0, MaxTokens: 100, Small: true},
@@ -338,11 +376,7 @@ func (s *Server) llmExtractTool(ctx context.Context, question, role string) stri
 	if err != nil {
 		return ""
 	}
-	name := jsonStr(obj, "tool")
-	if _, ok := s.tools[name]; ok {
-		return name
-	}
-	return ""
+	return jsonStr(obj, "tool") // 合法性由 tool 侧 unknown_tool 拦截兜底
 }
 
 // fallbackKnowledge 工具未识别 → 转知识库检索（PARITY §9.4 文案逐字）。
@@ -367,7 +401,7 @@ func (s *Server) advance(ctx context.Context, emit emitFn, sess *TxSession, user
 			if _, collected := sess.Slots[slot]; collected {
 				continue
 			}
-			if norm, ok := s.normalizeSlot(slot, value); ok {
+			if norm, ok := s.normalizeSlot(ctx, slot, value); ok {
 				sess.Slots[slot] = norm
 			}
 		}
@@ -375,12 +409,12 @@ func (s *Server) advance(ctx context.Context, emit emitFn, sess *TxSession, user
 		// 离线：针对上一轮追问的字段解析；首轮则对全文做结构化字段的机会性抽取
 		if sess.LastAsked != "" {
 			if meta, ok := slotMetaTable[sess.LastAsked]; ok {
-				if v, ok := meta.Parse(s, userText); ok {
+				if v, ok := meta.Parse(s, ctx, userText); ok {
 					sess.Slots[sess.LastAsked] = v
 				}
 			}
 		} else {
-			s.opportunisticFill(sess, userText)
+			s.opportunisticFill(ctx, sess, userText)
 		}
 	}
 
@@ -399,7 +433,7 @@ func (s *Server) advance(ctx context.Context, emit emitFn, sess *TxSession, user
 
 	sess.Phase = PhaseConfirm
 	sess.LastAsked = ""
-	return s.emitConfirm(emit, sess)
+	return s.emitConfirm(ctx, emit, sess)
 }
 
 // missingSlots 按流程必填顺序找缺失槽位。
@@ -415,7 +449,7 @@ func missingSlots(flow flowDef, slots map[string]string) []string {
 
 // opportunisticFill 离线首轮：从原句里直接抽取结构化字段（场馆/日期/时段/类型）。
 // 自由文本字段（purpose/reason/单号）不猜测，留给追问。
-func (s *Server) opportunisticFill(sess *TxSession, text string) {
+func (s *Server) opportunisticFill(ctx context.Context, sess *TxSession, text string) {
 	flow := flowDefs[sess.Tool]
 	slots := append(append([]string{}, flow.Required...), flow.Optional...)
 	for _, slot := range slots {
@@ -427,7 +461,7 @@ func (s *Server) opportunisticFill(sess *TxSession, text string) {
 			continue
 		case "date":
 			if sess.Tool == "book_venue" {
-				if iso, ok := parseDateSlotFn(s, text); ok {
+				if iso, ok := parseDateSlotFn(s, ctx, text); ok {
 					sess.Slots["date"] = iso
 				}
 			}
@@ -443,7 +477,7 @@ func (s *Server) opportunisticFill(sess *TxSession, text string) {
 			}
 		default:
 			if meta, ok := slotMetaTable[slot]; ok {
-				if v, ok := meta.Parse(s, text); ok {
+				if v, ok := meta.Parse(s, ctx, text); ok {
 					sess.Slots[slot] = v
 				}
 			}
@@ -508,7 +542,7 @@ func (s *Server) llmExtractSlots(ctx context.Context, tool, text string, collect
 }
 
 // normalizeSlot LLM 抽出的原始值过确定性解析器归一（日期换算、场馆名→ID 等）。
-func (s *Server) normalizeSlot(slot, value string) (string, bool) {
+func (s *Server) normalizeSlot(ctx context.Context, slot, value string) (string, bool) {
 	switch slot {
 	case "purpose", "reason", "booking_id", "ticket_id":
 		return rawText(value)
@@ -517,11 +551,11 @@ func (s *Server) normalizeSlot(slot, value string) (string, bool) {
 	if !ok {
 		return "", false
 	}
-	return meta.Parse(s, value)
+	return meta.Parse(s, ctx, value)
 }
 
 // emitConfirm 确认摘要（PARITY §9.3.3）。
-func (s *Server) emitConfirm(emit emitFn, sess *TxSession) error {
+func (s *Server) emitConfirm(ctx context.Context, emit emitFn, sess *TxSession) error {
 	flow := flowDefs[sess.Tool]
 	args := newOrderedArgs()
 	for _, sl := range append(append([]string{}, flow.Required...), flow.Optional...) {
@@ -542,7 +576,7 @@ func (s *Server) emitConfirm(emit emitFn, sess *TxSession) error {
 		}
 	}
 	if sess.Tool == "book_venue" {
-		args.set("场馆", s.normVenueID(sess.Slots["venue"]))
+		args.set("场馆", s.normVenueID(ctx, sess.Slots["venue"]))
 	}
 	var parts []string
 	for _, k := range args.keys {
@@ -582,7 +616,7 @@ func (s *Server) handleReply(ctx context.Context, emit emitFn, sess *TxSession, 
 			continue
 		}
 		meta := slotMetaTable[slot]
-		value, ok := meta.Parse(s, userText)
+		value, ok := meta.Parse(s, ctx, userText)
 		if ok && value != sess.Slots[slot] {
 			sess.Slots[slot] = value
 			modified = true
@@ -593,7 +627,7 @@ func (s *Server) handleReply(ctx context.Context, emit emitFn, sess *TxSession, 
 		if err := emit(statusEvent("已更新，请重新确认：")); err != nil {
 			return err
 		}
-		return s.emitConfirm(emit, sess)
+		return s.emitConfirm(ctx, emit, sess)
 	}
 
 	if confirmModifyRe.MatchString(userText) {
@@ -617,7 +651,7 @@ func containsStr(list []string, item string) (int, bool) {
 
 // execute 确认后的执行与失败恢复（PARITY §9.3.5）。
 func (s *Server) execute(ctx context.Context, emit emitFn, sess *TxSession) error {
-	result := s.callTool(sess.Tool, sess.Slots, sess.Role, sess.User)
+	result := s.callTool(ctx, sess.Tool, sess.Slots, sess.Role, sess.User)
 
 	if result.OK {
 		s.clearSession(ctx, sess)
@@ -712,7 +746,7 @@ func (s *Server) classifyReply(ctx context.Context, userText string, sess *TxSes
 	}
 	if sess.LastAsked != "" {
 		if meta, ok := slotMetaTable[sess.LastAsked]; ok {
-			if _, ok := meta.Parse(s, userText); ok {
+			if _, ok := meta.Parse(s, ctx, userText); ok {
 				return "continue"
 			}
 		}
@@ -725,7 +759,7 @@ func (s *Server) classifyReply(ctx context.Context, userText string, sess *TxSes
 			continue
 		}
 		if meta, ok := slotMetaTable[slot]; ok {
-			if _, ok := meta.Parse(s, userText); ok {
+			if _, ok := meta.Parse(s, ctx, userText); ok {
 				return "continue"
 			}
 		}

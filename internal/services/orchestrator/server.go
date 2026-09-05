@@ -9,8 +9,8 @@ import (
 	generatev1 "gewu/pkg/gen/gewu/generate/v1"
 	orchestratorv1 "gewu/pkg/gen/gewu/orchestrator/v1"
 	ragv1 "gewu/pkg/gen/gewu/rag/v1"
+	toolv1 "gewu/pkg/gen/gewu/tool/v1"
 
-	"gewu/internal/business"
 	"gewu/internal/svcbase"
 
 	"go.uber.org/zap"
@@ -28,9 +28,8 @@ type Server struct {
 	cfg      Config
 	generate generatev1.GenerateServiceClient
 	rag      ragv1.RagServiceClient
+	tool     toolv1.ToolServiceClient
 	sessions sessionStore
-	business *business.Business
-	tools    map[string]Tool
 	cfgStore *configStore
 
 	hasKey atomic.Bool // 启动时从 generate 查询（env 固定后不变化）
@@ -51,7 +50,7 @@ func NewServer(cfg Config, log *zap.Logger) (*Server, error) {
 	if err != nil {
 		return nil, err
 	}
-	biz, err := business.Open(cfg.BusinessDBPath)
+	toolCC, err := dialTool(cfg.ToolAddr)
 	if err != nil {
 		return nil, err
 	}
@@ -63,22 +62,22 @@ func NewServer(cfg Config, log *zap.Logger) (*Server, error) {
 		log.Warn("agent_config 运行在内存模式（POSTGRES_DSN 未配置），配置修改重启失效")
 	}
 	s := newServerWithDeps(cfg, generatev1.NewGenerateServiceClient(genCC),
-		newGrpcSessions(conversationv1.NewConversationServiceClient(convCC)), biz, cs, log)
+		newGrpcSessions(conversationv1.NewConversationServiceClient(convCC)),
+		toolv1.NewToolServiceClient(toolCC), cs, log)
 	s.rag = ragv1.NewRagServiceClient(ragCC)
 	return s, nil
 }
 
 // newServerWithDeps 注入依赖（测试用）。
 func newServerWithDeps(cfg Config, gen generatev1.GenerateServiceClient, sess sessionStore,
-	biz *business.Business, cs *configStore, log *zap.Logger) *Server {
+	tool toolv1.ToolServiceClient, cs *configStore, log *zap.Logger) *Server {
 	s := &Server{
 		log: log, cfg: cfg,
 		generate: gen,
+		tool:     tool,
 		sessions: sess,
-		business: biz,
 		cfgStore: cs,
 	}
-	s.tools = toolsFor(s)
 	return s
 }
 

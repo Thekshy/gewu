@@ -16,12 +16,17 @@ func main() {
 	ctx, stop := svcbase.MainSignalContext()
 	defer stop()
 	cfg := tool.LoadConfig()
-	err := svcbase.RunGRPC(ctx, svcbase.GRPCConfig{
+	srv, err := tool.NewServer(cfg, log)
+	if err != nil {
+		log.Fatal("构造工具服务失败", zap.Error(err))
+	}
+	defer srv.Close()
+	err = svcbase.RunGRPC(ctx, svcbase.GRPCConfig{
 		Name:      "tool",
 		Addr:      cfg.Addr,
 		AdminAddr: cfg.AdminAddr,
-		Register: func(s *grpc.Server) {
-			toolv1.RegisterToolServiceServer(s, tool.NewServer(log))
+		Register: func(g *grpc.Server) {
+			toolv1.RegisterToolServiceServer(g, srv)
 		},
 	}, log)
 	if err != nil {

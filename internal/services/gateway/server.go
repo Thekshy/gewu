@@ -131,17 +131,12 @@ func (s *Server) newRouter() *gin.Engine {
 
 	r.GET("/api/health", s.health)
 
-	// 契约端点：chat（P1）/search、docs（P3）已接入；business 在 P4 接入
+	// 契约端点全部接入：chat（P1）/search、docs（P3）/business（P4）
 	r.POST("/api/chat", s.chat)
 	r.POST("/api/search", s.search)
 	r.GET("/api/docs", s.listDocs)
-	notWired := func(stage string) gin.HandlerFunc {
-		return func(c *gin.Context) {
-			c.JSON(http.StatusServiceUnavailable, gin.H{"detail": "P0 脚手架：" + stage})
-		}
-	}
-	r.POST("/api/business/reset", notWired("/api/business/* 在 P4 接入（tool）"))
-	r.GET("/api/business/overview", notWired("/api/business/* 在 P4 接入（tool）"))
+	r.POST("/api/business/reset", s.businessReset)
+	r.GET("/api/business/overview", s.businessOverview)
 
 	// /admin/* 新增命名空间：配置管理（转发 orchestrator，P2）
 	r.GET("/admin/config", s.adminConfig)

@@ -12,11 +12,13 @@ import (
 	generatev1 "gewu/pkg/gen/gewu/generate/v1"
 	orchestratorv1 "gewu/pkg/gen/gewu/orchestrator/v1"
 	ragv1 "gewu/pkg/gen/gewu/rag/v1"
+	toolv1 "gewu/pkg/gen/gewu/tool/v1"
 
 	"gewu/internal/agent"
 	"gewu/internal/business"
 	"gewu/internal/dates"
 	"gewu/internal/services/conversation"
+	"gewu/internal/services/tool"
 
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials/insecure"
@@ -88,6 +90,32 @@ func (f *fakeRag) Search(ctx context.Context, req *ragv1.SearchRequest) (*ragv1.
 	return &ragv1.SearchResponse{Hits: f.hits}, nil
 }
 
+// dialFakeTool 起一个真实 tool 服务（bizStore=冻结 SQLite business）并返回
+// 客户端——权限矩阵/user 注入/消息格式化与生产同代码。
+func dialFakeTool(t *testing.T, dbPath string) toolv1.ToolServiceClient {
+	t.Helper()
+	biz, err := business.Open(dbPath)
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = biz.Close() })
+	lis, err := net.Listen("tcp", "127.0.0.1:0")
+	if err != nil {
+		t.Fatal(err)
+	}
+	srv := grpc.NewServer()
+	toolv1.RegisterToolServiceServer(srv, tool.NewServerWithStore(biz, zap.NewNop()))
+	go func() { _ = srv.Serve(lis) }()
+	t.Cleanup(srv.Stop)
+	cc, err := grpc.NewClient(lis.Addr().String(), grpc.WithTransportCredentials(insecure.NewCredentials()),
+		grpc.WithChainUnaryInterceptor(userInjectInterceptor()))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = cc.Close() })
+	return toolv1.NewToolServiceClient(cc)
+}
+
 // dialFakeRag 起一个 fake rag gRPC 服务并返回客户端。
 func dialFakeRag(t *testing.T, fake *fakeRag) ragv1.RagServiceClient {
 	t.Helper()
@@ -128,20 +156,20 @@ func dialRealConversation(t *testing.T) sessionStore {
 	return newGrpcSessions(conversationv1.NewConversationServiceClient(cc))
 }
 
-// testServer 构造零 key（离线确定性链路）的编排服务。
+// testServer 构造零 key（离线确定性链路）的编排服务：tool 走真实 tool 服务
+// 逻辑（bizStore=冻结 SQLite business，gRPC 转一圈——跨进程路径全覆盖）。
 func testServer(t *testing.T) *Server {
 	t.Helper()
-	biz, err := business.Open(filepath.Join(t.TempDir(), "biz.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = biz.Close() })
+	return newServerWithDeps(LoadConfig(), dialFakeGen(t, &fakeGen{hasKey: false}),
+		newMemorySessions(), dialFakeTool(t, filepath.Join(t.TempDir(), "biz.db")), mustConfigStore(), zap.NewNop())
+}
+
+func mustConfigStore() *configStore {
 	cs, err := openConfigStore("", "", zap.NewNop())
 	if err != nil {
-		t.Fatal(err)
+		panic(err)
 	}
-	return newServerWithDeps(LoadConfig(), dialFakeGen(t, &fakeGen{hasKey: false}),
-		newMemorySessions(), biz, cs, zap.NewNop())
+	return cs
 }
 
 // ask 跑一轮对话，收集全部事件。
@@ -225,27 +253,49 @@ var tomorrowISO = func() string { return dates.Today().AddDate(0, 0, 1).Format("
 
 func TestToolsPermissionMatrix(t *testing.T) {
 	s := testServer(t)
-	if r := s.callTool("pending_leaves", map[string]string{}, "student", "demo-student"); r.OK || r.Err != "permission" {
+	ctx := context.Background()
+	if r := s.callTool(ctx, "pending_leaves", map[string]string{}, "student", "demo-student"); r.OK || r.Err != "permission" {
 		t.Errorf("学生查待审批应拦截: %+v", r)
 	}
-	if r := s.business.SubmitLeave("demo-student", "事假", "2099-01-01", "2099-01-02", "家事"); !r.OK {
+	if r := s.callTool(ctx, "submit_leave", map[string]string{
+		"leave_type": "事假", "start_date": "2099-01-01", "end_date": "2099-01-02", "reason": "家事",
+	}, "counselor", "demo-counselor"); !r.OK {
 		t.Fatal(r)
 	}
-	r := s.callTool("pending_leaves", map[string]string{}, "counselor", "demo-counselor")
+	r := s.callTool(ctx, "pending_leaves", map[string]string{}, "counselor", "demo-counselor")
 	if !r.OK || !strings.Contains(r.Message, "LV-") {
 		t.Errorf("辅导员应可查: %+v", r)
 	}
-	if r := s.callTool("drop_tables", map[string]string{}, "student", "u"); r.OK || r.Err != "unknown_tool" {
+	if r := s.callTool(ctx, "drop_tables", map[string]string{}, "student", "u"); r.OK || r.Err != "unknown_tool" {
 		t.Errorf("未知工具: %+v", r)
 	}
-	student := s.toolDescriptions("student")
-	counselor := s.toolDescriptions("counselor")
+	student := s.toolDescriptions(ctx, "student")
+	counselor := s.toolDescriptions(ctx, "counselor")
 	if strings.Contains(student, "pending_leaves") || !strings.Contains(counselor, "pending_leaves") {
 		t.Error("工具清单应按角色过滤")
 	}
-	if r := s.callTool("book_venue", map[string]string{"venue": "venue-room301"}, "student", "u"); r.Err != "missing_arg" || r.Message != "缺少参数：date" {
+	if r := s.callTool(ctx, "book_venue", map[string]string{"venue": "venue-room301"}, "student", "u"); r.Err != "missing_arg" || r.Message != "缺少参数：date" {
 		t.Errorf("缺参数应 missing_arg: %+v", r)
 	}
+}
+
+// overviewBookings / overviewTickets 经 tool RPC 的评测断言视图。
+func overviewBookings(t *testing.T, client toolv1.ToolServiceClient) []*toolv1.BookingView {
+	t.Helper()
+	resp, err := client.Overview(context.Background(), &toolv1.OverviewRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return resp.GetBookings()
+}
+
+func overviewTickets(t *testing.T, client toolv1.ToolServiceClient) []*toolv1.TicketView {
+	t.Helper()
+	resp, err := client.Overview(context.Background(), &toolv1.OverviewRequest{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return resp.GetTickets()
 }
 
 // ---------- 知行执行层端到端（离线确定性：collect/confirm/修改/取消/冲突恢复） ----------
@@ -269,7 +319,7 @@ func TestBookVenueHappyPathOneShot(t *testing.T) {
 	if !result.GetSuccess() || !strings.HasPrefix(result.GetReceipt(), "VE-") {
 		t.Fatalf("result = %+v", result)
 	}
-	bookings, _ := s.business.AllBookings()
+	bookings := overviewBookings(t, s.tool)
 	if len(bookings) != 1 || bookings[0].Venue != "羽毛球馆" || bookings[0].Date != tomorrowISO() || bookings[0].Slot != "19:00-21:00" {
 		t.Errorf("bookings = %+v", bookings)
 	}
@@ -319,7 +369,7 @@ func TestConflictRecovery(t *testing.T) {
 		t.Fatalf("换时段后应成功: %+v", r)
 	}
 
-	bookings, _ := s.business.AllBookings()
+	bookings := overviewBookings(t, s.tool)
 	slots := map[string]bool{}
 	for _, b := range bookings {
 		if b.Date == dayAfter {
@@ -353,7 +403,7 @@ func TestLeaveDaysPhraseAndApprover(t *testing.T) {
 	if r := firstOf(events, "action_result").GetActionResult(); !r.GetSuccess() {
 		t.Fatalf("result = %+v", r)
 	}
-	tickets, _ := s.business.AllTickets()
+	tickets := overviewTickets(t, s.tool)
 	last := tickets[len(tickets)-1]
 	if last.Days != 2 || last.Approver != "辅导员" {
 		t.Errorf("ticket = %+v", last)
@@ -372,7 +422,7 @@ func TestLeaveOneDayPhrase(t *testing.T) {
 	if r := firstOf(events, "action_result").GetActionResult(); !r.GetSuccess() {
 		t.Fatalf("result = %+v", r)
 	}
-	tickets, _ := s.business.AllTickets()
+	tickets := overviewTickets(t, s.tool)
 	if tickets[len(tickets)-1].Days != 1 {
 		t.Errorf("days = %d, want 1", tickets[len(tickets)-1].Days)
 	}
@@ -522,14 +572,9 @@ func TestAgentConfigDefaultMatchesPrompts(t *testing.T) {
 
 // TestCrossProcessSessionFlow 跨进程集成：编排 ↔ conversation（gRPC）多轮办理。
 func TestCrossProcessSessionFlow(t *testing.T) {
-	biz, err := business.Open(filepath.Join(t.TempDir(), "biz.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = biz.Close() })
-	cs, _ := openConfigStore("", "", zap.NewNop())
 	s := newServerWithDeps(LoadConfig(), dialFakeGen(t, &fakeGen{hasKey: false}),
-		dialRealConversation(t), biz, cs, zap.NewNop())
+		dialRealConversation(t), dialFakeTool(t, filepath.Join(t.TempDir(), "biz.db")),
+		mustConfigStore(), zap.NewNop())
 
 	sid := "cross-1"
 	events := ask(t, s, sid, "帮我预约研讨间301", "student")
@@ -559,10 +604,9 @@ func ask2(t *testing.T, s *Server, text string) ([]*orchestratorv1.ChatResponse,
 }
 
 func TestDirectZeroKeyWithHitsDemoText(t *testing.T) {
-	biz, _ := business.Open(filepath.Join(t.TempDir(), "biz.db"))
-	cs, _ := openConfigStore("", "", zap.NewNop())
 	s := newServerWithDeps(LoadConfig(), dialFakeGen(t, &fakeGen{hasKey: false}),
-		newMemorySessions(), biz, cs, zap.NewNop())
+		newMemorySessions(), dialFakeTool(t, filepath.Join(t.TempDir(), "biz.db")),
+		mustConfigStore(), zap.NewNop())
 	s.rag = dialFakeRag(t, &fakeRag{hits: []*ragv1.Hit{
 		{ChunkId: 1, DocId: "0007-library", Seq: 0, Text: "图书馆开放时间为 7:00-22:00。", Title: "图书馆服务指南", Source: "钱塘大学"},
 	}})
@@ -582,11 +626,10 @@ func TestDirectZeroKeyWithHitsDemoText(t *testing.T) {
 }
 
 func TestDirectStreamWithHits(t *testing.T) {
-	biz, _ := business.Open(filepath.Join(t.TempDir(), "biz.db"))
-	cs, _ := openConfigStore("", "", zap.NewNop())
 	s := newServerWithDeps(LoadConfig(), dialFakeGen(t, &fakeGen{
 		hasKey: true, deltas: []string{"第一", "第二"},
-	}), newMemorySessions(), biz, cs, zap.NewNop())
+	}), newMemorySessions(), dialFakeTool(t, filepath.Join(t.TempDir(), "biz.db")),
+		mustConfigStore(), zap.NewNop())
 	s.rag = dialFakeRag(t, &fakeRag{hits: []*ragv1.Hit{
 		{ChunkId: 1, DocId: "0007-library", Seq: 0, Text: "图书馆开放时间为 7:00-22:00。", Title: "图书馆服务指南", Source: "钱塘大学"},
 	}})
@@ -613,10 +656,9 @@ func TestDirectStreamWithHits(t *testing.T) {
 }
 
 func TestResearchZeroKeyStepsAndDemo(t *testing.T) {
-	biz, _ := business.Open(filepath.Join(t.TempDir(), "biz.db"))
-	cs, _ := openConfigStore("", "", zap.NewNop())
 	s := newServerWithDeps(LoadConfig(), dialFakeGen(t, &fakeGen{hasKey: false}),
-		newMemorySessions(), biz, cs, zap.NewNop())
+		newMemorySessions(), dialFakeTool(t, filepath.Join(t.TempDir(), "biz.db")),
+		mustConfigStore(), zap.NewNop())
 	s.rag = dialFakeRag(t, &fakeRag{hits: []*ragv1.Hit{
 		{ChunkId: 1, DocId: "0001-transfer", Seq: 0, Text: "转专业绩点要求 2.0 以上。", Title: "转专业管理办法", Source: "钱塘大学"},
 	}})

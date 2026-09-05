@@ -1,7 +1,6 @@
 package orchestrator
 
 import (
-	"path/filepath"
 	"strconv"
 
 	"gewu/internal/svcbase"
@@ -21,12 +20,11 @@ type Config struct {
 	PostgresDSN string // agent_config 存储；空 = 内存模式
 	RedisAddr   string // 配置缓存（L2）；空 = 跳过
 
-	BusinessDBPath string // 冻结业务库（P4 迁 tool 服务前的过渡）
+	ToolAddr string // tool 服务地址（权限矩阵 + 业务系统）
 }
 
 // LoadConfig 从环境变量装配（缺省本机开发端口）。
 func LoadConfig() Config {
-	dataDir := svcbase.EnvOr("DATA_DIR", "data")
 	return Config{
 		Addr:      svcbase.EnvOr("ORCHESTRATOR_ADDR", ":9001"),
 		AdminAddr: svcbase.EnvOr("ORCHESTRATOR_ADMIN_ADDR", ":9101"),
@@ -40,7 +38,7 @@ func LoadConfig() Config {
 		PostgresDSN: svcbase.EnvOr("POSTGRES_DSN", ""),
 		RedisAddr:   svcbase.EnvOr("REDIS_ADDR", ""),
 
-		BusinessDBPath: filepath.Join(dataDir, "business.db"),
+		ToolAddr: svcbase.NormalizeTarget(svcbase.EnvOr("TOOL_ADDR", ":9004")),
 	}
 }
 

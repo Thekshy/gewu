@@ -18,7 +18,12 @@ import (
 
 const traceHeader = "x-trace-id"
 
+// userHeader 服务端派生身份的出站键（ADR-0006：tool 服务只认 metadata 注入）。
+const userHeader = "x-user"
+
 type traceKey struct{}
+
+type userKey struct{}
 
 // NewTraceID 生成 16 位十六进制随机 ID。
 func NewTraceID() string {
@@ -37,6 +42,19 @@ func WithTraceID(ctx context.Context, id string) context.Context {
 // TraceID 取当前 trace id（无则空串）。
 func TraceID(ctx context.Context) string {
 	if v, ok := ctx.Value(traceKey{}).(string); ok {
+		return v
+	}
+	return ""
+}
+
+// WithUser 把派生身份放入 context。
+func WithUser(ctx context.Context, user string) context.Context {
+	return context.WithValue(ctx, userKey{}, user)
+}
+
+// UserFromContext 取派生身份（无则空串）。
+func UserFromContext(ctx context.Context) string {
+	if v, ok := ctx.Value(userKey{}).(string); ok {
 		return v
 	}
 	return ""
