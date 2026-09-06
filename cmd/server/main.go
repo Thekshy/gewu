@@ -103,12 +103,18 @@ func run(settings *config.Settings, llmClient *llm.Client, tokenBudget *budget.T
 		return err
 	}
 	defer mem.Close()
+	sessions, err := openSessions(settings)
+	if err != nil {
+		return err
+	}
+	defer sessions.Close()
 
 	retriever := rag.NewRetriever(store, settings.RetrievalK, llmClient)
 	if settings.RerankMode != "off" {
 		retriever = retriever.WithReranker(rag.NewLLMReranker(llmClient))
 	}
 	deps := agent.NewDeps(settings, llmClient, retriever, biz, mem)
+	deps.Sessions = sessions // 默认内存版替换为 SESSION_STORE 指定的后端
 
 	srv := &server{deps: deps, store: store, budget: tokenBudget, llm: llmClient, settings: settings}
 
@@ -116,10 +122,22 @@ func run(settings *config.Settings, llmClient *llm.Client, tokenBudget *budget.T
 		gin.SetMode(gin.ReleaseMode)
 	}
 	router := srv.newRouter()
-	fmt.Printf("格物 Gewu API %s 监听 %s（LLM %s，路由 %s，切分 %s，rerank %s，react %s，补全 %s）\n",
+	fmt.Printf("格物 Gewu API %s 监听 %s（LLM %s，路由 %s，切分 %s，rerank %s，react %s，补全 %s，会话 %s）\n",
 		config.Version, addr, llmState(llmClient), settings.RouterMode, settings.ChunkMode,
-		settings.RerankMode, settings.ReactMode, settings.QueryRewrite)
+		settings.RerankMode, settings.ReactMode, settings.QueryRewrite, settings.SessionStore)
 	return router.Run(addr)
+}
+
+// openSessions 按 SESSION_STORE 构造会话后端（缺省 sqlite：办理流程跨重启续办）。
+func openSessions(settings *config.Settings) (agent.SessionStore, error) {
+	switch settings.SessionStore {
+	case "", "sqlite":
+		return agent.OpenSessionStore(settings.DataDir + "/sessions.db")
+	case "memory":
+		return agent.NewSessionStore(), nil
+	default:
+		return nil, fmt.Errorf("SESSION_STORE 必须为 sqlite/memory，当前：%s", settings.SessionStore)
+	}
 }
 
 func llmState(c *llm.Client) string {

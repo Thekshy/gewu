@@ -34,6 +34,9 @@ type Settings struct {
 	ReactMode    string // REACT_MODE：off（默认，纯 workflow）| on（路径不定的办理问题转 ReAct）
 	QueryRewrite string // QUERY_REWRITE：on（默认，多轮指代消解补全）| off（路由/检索只见裸问题）
 
+	// P8-1 会话持久化：办理流程状态（槽位/确认）的存储后端。
+	SessionStore string // SESSION_STORE：sqlite（默认，跨重启续办）| memory（进程内 map）
+
 	DataDir   string
 	CorpusDir string // 缺省 {DataDir}/corpus
 	IndexPath string // 缺省 {DataDir}/index.db
@@ -58,6 +61,7 @@ func Default() *Settings {
 		RerankMode:         "on",
 		ReactMode:          "off",
 		QueryRewrite:       "on",
+		SessionStore:       "sqlite",
 		DataDir:            "data",
 		RateLimitPerMinute: 20,
 		DailyTokenBudget:   2_000_000,
@@ -124,6 +128,7 @@ func applyOSEnv(s *Settings) {
 		"LLM_API_KEY", "LLM_BASE_URL", "LLM_MODEL", "LLM_SMALL_MODEL",
 		"EMBED_API_KEY", "EMBED_BASE_URL", "EMBED_MODEL", "EMBED_MODE",
 		"ROUTER_MODE", "CHUNK_MODE", "RERANK_MODE", "REACT_MODE", "QUERY_REWRITE",
+		"SESSION_STORE",
 		"LLM_DISABLE_THINKING", "DATA_DIR", "CORPUS_DIR", "INDEX_PATH",
 		"RATE_LIMIT_PER_MINUTE", "DAILY_TOKEN_BUDGET", "RETRIEVAL_K", "MAX_QUESTION_CHARS",
 	} {
@@ -161,6 +166,8 @@ func setField(s *Settings, key, val string) {
 		s.ReactMode = val
 	case "QUERY_REWRITE":
 		s.QueryRewrite = val
+	case "SESSION_STORE":
+		s.SessionStore = val
 	case "LLM_DISABLE_THINKING":
 		s.LLMDisableThinking = parseBool(val)
 	case "DATA_DIR":

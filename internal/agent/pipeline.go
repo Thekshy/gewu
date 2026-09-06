@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"log"
 	"strings"
 	"time"
 
@@ -29,7 +30,7 @@ type Deps struct {
 	LLM       LLMer // nil 或未配 key = 调用会失败（启动时已强制有 key，此兜底为测试/健壮性保留）
 	Retriever *rag.Retriever
 	Business  *business.Business
-	Sessions  *SessionStore
+	Sessions  SessionStore // 内存（默认/单测）或 SQLite（SESSION_STORE=sqlite，跨重启续办）
 	Tools     map[string]Tool
 	Memory    *MemoryStore // 长期记忆（nil = 不启用；单测可省）
 }
@@ -74,6 +75,11 @@ func (d *Deps) RunChat(ctx context.Context, emit emitFn, question, mode, session
 		// emit 失败（客户端已断开）在此静默忽略。
 		_ = emit(errorEvt(err.Error()))
 		_ = emit(doneEvt(elapsedMS(t0)))
+	}
+	// 本轮对办理会话的全部修改（槽位/阶段/完成清除）落库：SQLite 后端据此
+	// 跨重启续办；内存版为 no-op。失败只告警，不影响已发出的回答。
+	if err := d.Sessions.Sync(); err != nil {
+		log.Printf("[agent] 会话状态落库失败（不影响本轮回答）：%v", err)
 	}
 	d.consolidateAsync(ctx, user, sessionID, question, answerSB.String())
 }

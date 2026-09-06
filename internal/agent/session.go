@@ -27,20 +27,42 @@ type TxSession struct {
 	Updated   time.Time
 }
 
-// SessionStore 会话状态存储：进程内 map + TTL 惰性清理。
-type SessionStore struct {
+// SessionStore 会话状态存储：办理流程（槽位收集/确认）的跨轮状态。
+// 两种后端同一语义（Get/Ensure/Clear + TTL 30 分钟惰性清理）：
+// 进程内 map（NewSessionStore）与 SQLite（OpenSessionStore，跨重启续办），
+// 由 SESSION_STORE 装配选择。
+type SessionStore interface {
+	// Get 取会话（过期返回 nil）。
+	Get(sessionID string) *TxSession
+	// Ensure 取或建会话，并刷新 role/user/时间戳。
+	Ensure(sessionID, role, user string) *TxSession
+	// Clear 移除会话（办理完成/取消/切话题）。
+	Clear(sessionID string)
+	// Sync 把当前会话状态写透到后端（内存版 no-op；SQLite 版全量落库）。
+	Sync() error
+	// Close 释放后端资源（内存版 no-op）。
+	Close() error
+}
+
+// memSessionStore 进程内 map + TTL 惰性清理。
+type memSessionStore struct {
 	mu    sync.Mutex
 	data  map[string]*TxSession
 	clock func() time.Time // 可注入，测试用
 }
 
-// NewSessionStore 构造会话存储。
-func NewSessionStore() *SessionStore {
-	return &SessionStore{data: map[string]*TxSession{}, clock: time.Now}
+// NewSessionStore 构造内存会话存储。
+func NewSessionStore() SessionStore {
+	return newMemSessionStore(time.Now)
+}
+
+// newMemSessionStore 测试注入 clock 的构造口。
+func newMemSessionStore(clock func() time.Time) *memSessionStore {
+	return &memSessionStore{data: map[string]*TxSession{}, clock: clock}
 }
 
 // evictLocked 清理过期会话；需持有 mu。
-func (s *SessionStore) evictLocked() {
+func (s *memSessionStore) evictLocked() {
 	now := s.clock()
 	for sid, sess := range s.data {
 		if now.Sub(sess.Updated) > ttl {
@@ -50,7 +72,7 @@ func (s *SessionStore) evictLocked() {
 }
 
 // Get 取会话（过期返回 nil）。
-func (s *SessionStore) Get(sessionID string) *TxSession {
+func (s *memSessionStore) Get(sessionID string) *TxSession {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.evictLocked()
@@ -58,7 +80,7 @@ func (s *SessionStore) Get(sessionID string) *TxSession {
 }
 
 // Ensure 取或建会话，并刷新 role/user/时间戳。
-func (s *SessionStore) Ensure(sessionID, role, user string) *TxSession {
+func (s *memSessionStore) Ensure(sessionID, role, user string) *TxSession {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	s.evictLocked()
@@ -73,8 +95,14 @@ func (s *SessionStore) Ensure(sessionID, role, user string) *TxSession {
 }
 
 // Clear 移除会话（办理完成/取消/切话题）。
-func (s *SessionStore) Clear(sessionID string) {
+func (s *memSessionStore) Clear(sessionID string) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	delete(s.data, sessionID)
 }
+
+// Sync 内存后端无需持久化。
+func (s *memSessionStore) Sync() error { return nil }
+
+// Close 内存后端无资源。
+func (s *memSessionStore) Close() error { return nil }
