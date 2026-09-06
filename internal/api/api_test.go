@@ -1,4 +1,4 @@
-package main
+package api
 
 import (
 	"bufio"
@@ -80,11 +80,11 @@ func (m *mockLLM) Embed(_ context.Context, texts []string) ([][]float64, error) 
 }
 
 // newTestServer 构造带 mock LLM 的完整 HTTP 服务（临时数据目录）。
-func newTestServer(t *testing.T, rateLimit int) (*server, *httptest.Server) {
+func newTestServer(t *testing.T, rateLimit int) (*Server, *httptest.Server) {
 	return newTestServerWithMock(t, rateLimit, nil)
 }
 
-func newTestServerWithMock(t *testing.T, rateLimit int, mock *mockLLM) (*server, *httptest.Server) {
+func newTestServerWithMock(t *testing.T, rateLimit int, mock *mockLLM) (*Server, *httptest.Server) {
 	t.Helper()
 	if mock == nil {
 		mock = &mockLLM{}
@@ -122,8 +122,8 @@ func newTestServerWithMock(t *testing.T, rateLimit int, mock *mockLLM) (*server,
 	}
 	lc := mock
 	deps := agent.NewDeps(settings, lc, rag.NewRetriever(store, settings.RetrievalK, lc), biz, mem)
-	srv := &server{deps: deps, store: store, budget: tb, settings: settings}
-	ts := httptest.NewServer(srv.newRouter())
+	srv := New(deps, store, tb, settings)
+	ts := httptest.NewServer(srv.NewRouter())
 	t.Cleanup(ts.Close)
 	return srv, ts
 }

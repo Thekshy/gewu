@@ -2,6 +2,7 @@
 # lint-arch：单体模块化依赖规则守护（P8-4，零依赖：go list + grep）。
 #
 # 模块地图与依赖规则（docs/architecture.md §依赖规则）：
+#   api（接口层）→ agent/rag/business（只读展示）/支撑域，禁止直接 import llm；
 #   agent（编排域）→ rag / llm / business（经接口）；
 #   rag / llm / business ↛ agent（反向禁止）；
 #   business 只经 agent.Tools（权限矩阵单一出口）被触达，不 import rag；
@@ -33,6 +34,16 @@ $hit
     fi
 }
 
+# 规则 0：api 接口层——只允许触达编排/检索/业务(只读展示)/支撑域，禁止绕过编排直接调 llm。
+allowed_api='gewu/internal/(agent|rag|business|budget|config|middleware|dates)\b'
+hit=$(go list -f '{{.Imports}}' ./internal/api | grep -oE "gewu/internal/[a-z_]+" | sort -u | grep -vE "$allowed_api" || true)
+if [ -n "$hit" ]; then
+    violations+="违规规则：api 只 import 接口层所需包（agent/rag/business/支撑域），不得直接调 llm
+$hit
+
+"
+fi
+
 # 规则 1：rag / llm / business 反向禁止 import agent。
 forbid "./internal/rag/..."      "internal/agent\b" "rag ↛ agent（rag/llm/business 不得 import 编排域）"
 forbid "./internal/llm/..."      "internal/agent\b" "llm ↛ agent（rag/llm/business 不得 import 编排域）"
@@ -47,10 +58,10 @@ for sup in budget config dates middleware; do
 done
 
 # 规则 4：cmd/server 只做装配——仅允许白名单内的 internal 包。
-allowed='gewu/internal/(agent|rag|llm|business|config|budget|middleware|dates)\b'
+allowed='gewu/internal/(api|agent|rag|llm|business|config|budget|middleware|dates)\b'
 hit=$(deps ./cmd/server | grep -oE "gewu/internal/[a-z_]+" | sort -u | grep -vE "$allowed" || true)
 if [ -n "$hit" ]; then
-    violations+="违规规则：cmd/server 只 import 装配白名单（agent/rag/llm/business/config/budget/middleware/dates）
+    violations+="违规规则：cmd/server 只 import 装配白名单（api/agent/rag/llm/business/config/budget/middleware/dates）
 $hit
 
 "
