@@ -91,10 +91,6 @@ const (
 	// NoDataAnswer 检索无命中。
 	NoDataAnswer = "知识库中暂时没有找到与这个问题相关的资料。" +
 		"如果你认为这属于校园政策/服务问题，欢迎换个说法再问一次。"
-
-	// DemoModeNote 零 key 演示模式说明。单体已去无 key（P6 阶段0），
-	// 仅微服务 orchestrator（本轮不迁移）仍在引用，微服务迁移时一并清理。
-	DemoModeNote = "（检索演示模式：未配置 LLM_API_KEY，以下为知识库检索结果节选，不经过模型生成）"
 )
 
 // isQuestionMark 含中英文问号（classify_reply 启发式用）。
