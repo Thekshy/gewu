@@ -3,7 +3,8 @@
 #
 # 模块地图与依赖规则（docs/architecture.md §依赖规则）：
 #   api（接口层）→ agent/rag/business（只读展示）/支撑域，禁止直接 import llm；
-#   agent（编排域）→ rag / llm / business（经接口）；
+#   agent（编排域）→ routing / rag / llm / business（经接口）；
+#   routing（路由域）只依赖 llm，不得反向依赖编排/检索/业务/接口层；
 #   rag / llm / business ↛ agent（反向禁止）；
 #   business 只经 agent.Tools（权限矩阵单一出口）被触达，不 import rag；
 #   支撑域（budget/config/dates/middleware）可被任何域用，但不 import 业务域；
@@ -44,6 +45,15 @@ $hit
 "
 fi
 
+# 规则 0.5：routing 路由域——只许依赖 llm（含标准库），其余 internal 包全部禁止。
+hit=$(go list -f '{{.Imports}}' ./internal/agent/routing | grep -oE "gewu/internal/[a-z_/]+" | sort -u | grep -vE 'gewu/internal/llm\b' || true)
+if [ -n "$hit" ]; then
+    violations+="违规规则：routing 只 import llm（路由域是叶子，不得依赖编排/检索/业务/接口层）
+$hit
+
+"
+fi
+
 # 规则 1：rag / llm / business 反向禁止 import agent。
 forbid "./internal/rag/..."      "internal/agent\b" "rag ↛ agent（rag/llm/business 不得 import 编排域）"
 forbid "./internal/llm/..."      "internal/agent\b" "llm ↛ agent（rag/llm/business 不得 import 编排域）"
@@ -72,4 +82,4 @@ if [ -n "$violations" ]; then
 $violations"
     exit 1
 fi
-echo "lint-arch：依赖规则全部通过（agent→rag/llm/business 单向；支撑域无业务依赖；cmd/server 仅装配）"
+echo "lint-arch：依赖规则全部通过（api→编排/检索；agent→routing/rag/llm/business 单向；routing 仅 llm；支撑域无业务依赖；cmd/server 仅装配）"

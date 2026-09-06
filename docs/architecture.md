@@ -60,20 +60,24 @@ flowchart TB
 
 | 域 | 包 | 职责 |
 | --- | --- | --- |
-| 编排 | `internal/agent` | pipeline（RunChat 总编排）、cascade_router / triage（双路由）、react（ReAct 引擎）、transaction（知行执行层）、memory（长期记忆）、query_rewrite（指代补全）、tools（权限矩阵）、session（办理会话） |
+| 接口 | `internal/api` | HTTP 层：路由注册、请求校验、SSE 事件写出——只做 HTTP 语义，不含业务逻辑 |
+| 编排 | `internal/agent` | pipeline（RunChat 总编排）、react（ReAct 引擎）、transaction（知行执行层）、memory（长期记忆）、query_rewrite（指代补全）、tools（权限矩阵）、session（办理会话） |
+| 路由 | `internal/agent/routing` | 意图路由/执行策略分流：cascade 三级级联、triage 三策略、classic 基线、启发式；路由提示词随域内聚 |
 | 检索 | `internal/rag` | hierarchical（父子块切分与检索）、bm25、向量余弦、RRF 融合、rerank、SQLite 存储 |
 | 模型访问 | `internal/llm` | chat / stream / embed，OpenAI 兼容双 provider，工具调用 |
 | 业务 | `internal/business` | mock 校内业务：场馆预约（容量/冲突/限额）+ 请假审批（分级） |
 | 支撑 | `internal/config` `budget` `dates` `middleware` | 配置、token 预算、确定性中文日期、限流与 trace-id |
-| 装配 | `cmd/server` | flag/env、依赖注入、路由与中间件装配——**不含业务逻辑** |
+| 装配 | `cmd/server` | 组装根：flag/env、依赖注入——**不含 HTTP 与业务逻辑** |
 
 依赖规则（`make lint-arch` 断言，违规即非零退出，CI 门禁）：
 
-1. `agent → rag/llm/business`，且只经接口（Retriever / LLMer / Tools）；
-2. `rag / llm / business ↛ agent`（反向禁止——编排域是唯一的上游）；
-3. `business ↛ rag / agent`（业务系统只经 `agent.Tools` 权限矩阵单一出口被触达）；
-4. 支撑域可被任何域用，但不 import 业务域；
-5. `cmd/server` 只 import 装配白名单内的 internal 包。
+1. `api → agent/rag/business（只读展示）/支撑域`，禁止直接 import llm（接口层不得绕过编排调模型）；
+2. `agent → routing/rag/llm/business`，rag/llm/business 只经接口（Retriever / LLMer / Tools）；
+3. `routing` 只依赖 llm——路由域是叶子，不得反向依赖编排/检索/业务/接口层；
+4. `rag / llm / business ↛ agent`（反向禁止——编排域是唯一的上游）；
+5. `business ↛ rag / agent`（业务系统只经 `agent.Tools` 权限矩阵单一出口被触达）；
+6. 支撑域可被任何域用，但不 import 业务域；
+7. `cmd/server` 只 import 装配白名单内的 internal 包。
 
 lint 实现为 `scripts/lint-arch.sh`（go list + grep，零依赖）；带健康检查：go list
 本身失败（编译错误 / import cycle）时报错而非静默通过；已用注入违规 import 的方式
