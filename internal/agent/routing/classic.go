@@ -1,12 +1,15 @@
-package agent
+package routing
 
 import (
 	"context"
+	"log"
 	"regexp"
 	"strings"
 
 	"gewu/internal/llm"
 )
+
+// classic 模式：单次小模型五分类（可回退基线，PARITY §5）。
 
 // RouteResult 路由结论。
 type RouteResult struct {
@@ -29,6 +32,7 @@ var (
 )
 
 // HeuristicRoute 免 LLM 的降级路由（PARITY §5.2，顺序判定不可调换）。
+// cascade 的 L1 失败与 triage 的无 LLM 兜底都复用这套规则。
 func HeuristicRoute(question string) RouteResult {
 	q := question
 	if txVerbsRe.MatchString(q) {
@@ -61,7 +65,7 @@ var validRoutes = map[string]bool{
 	"factual": true, "research": true, "refusal": true, "transaction": true, "hybrid": true,
 }
 
-// RouteQuestion 问题路由：优先 LLM 分类，无 key 或调用失败时降级为启发式规则。
+// RouteQuestion classic 模式：单次 LLM 五分类，无 key 或调用失败降级启发式。
 func (d *Deps) RouteQuestion(ctx context.Context, question string) RouteResult {
 	if d.LLM == nil || !d.LLM.HasKey() {
 		return HeuristicRoute(question)
@@ -82,7 +86,7 @@ func (d *Deps) RouteQuestion(ctx context.Context, question string) RouteResult {
 			}
 		}
 	} else {
-		logf(ctx, "路由器 LLM 调用失败，降级启发式路由：%v", err)
+		log.Printf("[routing] classic 分类调用失败，降级启发式：%v", err)
 	}
 	return HeuristicRoute(question)
 }

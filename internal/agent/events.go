@@ -4,7 +4,11 @@
 // 与确认阶段，用户下一条消息优先按流程回复解释，切话题则自动放弃流程。
 package agent
 
-import "encoding/json"
+import (
+	"encoding/json"
+
+	"gewu/internal/agent/routing"
+)
 
 // Citation 引用条目（citations 事件 items 元素）。
 type Citation struct {
@@ -118,7 +122,7 @@ func routeEvt(route, reason string, byLLM bool) routeEvent {
 }
 
 // routeDecisionEvt 决策包 → route 事件（级联模式下带 layer/confidence）。
-func routeDecisionEvt(dec RouteDecision) routeEvent {
+func routeDecisionEvt(dec routing.RouteDecision) routeEvent {
 	ev := routeEvent{Type: "route", Route: dec.Route, Reason: dec.Reason, ByLLM: dec.ByLLM, Layer: dec.Layer}
 	if dec.Layer != "" {
 		conf := dec.Confidence

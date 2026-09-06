@@ -109,34 +109,6 @@ var tomorrowISO = func() string { return dates.Today().AddDate(0, 0, 1).Format("
 
 // ---------- 路由启发式（对应 Python test_router.py） ----------
 
-func TestHeuristicRouter(t *testing.T) {
-	if r := HeuristicRoute("我挂过一门课，还能申请转专业吗，转完学分怎么算"); r.Route != "research" {
-		t.Errorf("复合问题应 research: %+v", r)
-	}
-	if r := HeuristicRoute("请问学校对于本科生申请国际交换项目的绩点要求和语言成绩要求分别是什么？"); r.Route != "research" {
-		t.Errorf("长问题应 research: %+v", r)
-	}
-	if r := HeuristicRoute("图书馆几点开门"); r.Route != "factual" {
-		t.Errorf("简单事实应 factual: %+v", r)
-	}
-	if r := HeuristicRoute("校园卡丢了怎么补办"); r.Route != "factual" {
-		t.Errorf("简单事实应 factual: %+v", r)
-	}
-	if r := HeuristicRoute("帮我预约明天晚上的羽毛球馆"); r.Route != "transaction" {
-		t.Errorf("办理诉求应 transaction: %+v", r)
-	}
-	if r := HeuristicRoute("帮我预约场馆，有什么要求吗"); r.Route != "hybrid" {
-		t.Errorf("办理+咨询应 hybrid: %+v", r)
-	}
-	// 「请假一周找谁批」无第一人称请求词、含咨询词「谁」→ 落入知识问答（factual），
-	// 与 Python 行为一致：启发式刻意不把「咨询政策」判为办理。
-	if r := HeuristicRoute("我请假一周需要找谁审批？"); r.Route != "factual" {
-		t.Errorf("仅咨询政策应落知识问答: %+v", r)
-	}
-}
-
-// ---------- 工具层权限（对应 Python test_tools.py） ----------
-
 func TestToolsPermissionMatrix(t *testing.T) {
 	d := testDeps(t)
 	if r := d.CallTool("pending_leaves", map[string]string{}, "student", "demo-student"); r.OK || r.Err != "permission" {

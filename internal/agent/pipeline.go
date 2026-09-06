@@ -6,6 +6,7 @@ import (
 	"strings"
 	"time"
 
+	"gewu/internal/agent/routing"
 	"gewu/internal/business"
 	"gewu/internal/config"
 	"gewu/internal/llm"
@@ -129,7 +130,7 @@ func (d *Deps) runChatInner(ctx context.Context, emit emitFn, question, mode, se
 
 	// 4) 分发。ReAct 引擎（P6 阶段5）两种入口：
 	//    mode=react 显式指定；REACT_MODE=on 时"目标明确但路径不定"的办理问题自动转自主循环。
-	if mode == "react" || (d.Settings.ReactMode == "on" && dec.Route == "transaction" && reactPlanRe.MatchString(q)) {
+	if mode == "react" || (d.Settings.ReactMode == "on" && dec.Route == "transaction" && routing.ReactPlanSignal(q)) {
 		if err := d.RunReAct(ctx, emit, q, role, user, sessionID, dec.Toolset); err != nil {
 			return err
 		}
@@ -187,42 +188,17 @@ func (d *Deps) runChatInner(ctx context.Context, emit emitFn, question, mode, se
 	return nil
 }
 
-// decideRoute 按 ROUTER_MODE 产出路由决策包。
-// cascade（默认）：L0/L1/L2 五分类级联；classic：旧单次分类；
-// agent-first：三选一执行策略（refusal/direct/agent，见 triage.go）。
-func (d *Deps) decideRoute(ctx context.Context, question, mode string) RouteDecision {
+// decideRoute 产出路由决策包：用户显式指定 direct/research 直接构造；
+// 其余（含显式 react）按 ROUTER_MODE 交给 routing.Decide——cascade 级联 /
+// classic 旧分类 / agent-first 三策略，见 internal/agent/routing。
+func (d *Deps) decideRoute(ctx context.Context, question, mode string) routing.RouteDecision {
 	if mode == "direct" || mode == "research" {
-		dec := RouteDecision{Route: mode, Layer: "user-specified", Reason: "用户指定 " + mode, PreRAG: true}
-		dec.fillPolicy()
+		dec := routing.RouteDecision{Route: mode, Layer: "user-specified", Reason: "用户指定 " + mode, PreRAG: true}
+		dec.FillPolicy()
 		return dec
 	}
-	if mode == "react" {
-		// 显式 ReAct 也要先拿决策包约束工具集。
-		return d.routeDecision(ctx, question)
-	}
-	if d.Settings.RouterMode == "agent-first" {
-		return d.TriageRoute(ctx, question)
-	}
-	if d.Settings.RouterMode == "classic" {
-		r := d.RouteQuestion(ctx, question)
-		return decisionFromClassic(r)
-	}
-	return d.CascadeRoute(ctx, question)
-}
-
-// routeDecision classic/cascade 之外需要决策包但 mode 已定的入口复用。
-func (d *Deps) routeDecision(ctx context.Context, question string) RouteDecision {
-	if d.Settings.RouterMode == "classic" {
-		return decisionFromClassic(d.RouteQuestion(ctx, question))
-	}
-	return d.CascadeRoute(ctx, question)
-}
-
-// decisionFromClassic 旧 RouteResult → 决策包（classic 模式的适配层）。
-func decisionFromClassic(r RouteResult) RouteDecision {
-	dec := RouteDecision{Route: r.Route, Layer: "classic", Reason: r.Reason, ByLLM: r.ByLLM}
-	dec.fillPolicy()
-	return dec
+	rd := routing.Deps{LLM: d.LLM, Mode: d.Settings.RouterMode}
+	return rd.Decide(ctx, question)
 }
 
 // flowLabel 工具 → 流程中文名（续轮 route 事件的 reason 用）。

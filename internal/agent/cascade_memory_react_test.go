@@ -307,119 +307,6 @@ func TestMemoryBlockFactsCapped(t *testing.T) {
 
 // ---------- P6 阶段2：级联路由 ----------
 
-func TestCascadeRouteL0Rule(t *testing.T) {
-	d := testDeps(t) // L0 命中不依赖 LLM
-	dec := d.CascadeRoute(context.Background(), "帮我预约明天晚上的羽毛球馆")
-	if dec.Route != "transaction" || dec.Layer != "L0-rule" || dec.Confidence != 1.0 {
-		t.Fatalf("dec = %+v", dec)
-	}
-	if dec.PreRAG || len(dec.Toolset) == 0 || dec.ModelTier != "small" {
-		t.Errorf("决策包策略字段 = %+v", dec)
-	}
-	// 办理 + 政策咨询并存 → hybrid（与冻结基线启发式同规则）
-	dec2 := d.CascadeRoute(context.Background(), "帮我提交明天一天的病假申请；另外请假超过 7 天是不是要教务处审批？")
-	if dec2.Route != "hybrid" || dec2.Layer != "L0-rule" {
-		t.Fatalf("办理+咨询应 L0 判 hybrid: %+v", dec2)
-	}
-	// 近似但不满足强信号的问句不走 L0
-	dec3 := d.CascadeRoute(context.Background(), "预约场馆有什么要求")
-	if dec3.Layer == "L0-rule" {
-		t.Errorf("咨询类问题不应命中 L0: %+v", dec3)
-	}
-}
-
-func TestCascadeRouteL1HighConfidence(t *testing.T) {
-	d := testDeps(t)
-	d.LLM = &scriptedLLM{resps: []string{
-		`{"scores":{"factual":0.9,"research":0.05,"transaction":0.02,"hybrid":0.02,"refusal":0.01},"reason":"单一事实"}`,
-	}}
-	dec := d.CascadeRoute(context.Background(), "图书馆几点开门")
-	if dec.Route != "factual" || dec.Layer != "L1-llm" || dec.Confidence != 0.9 || !dec.PreRAG {
-		t.Fatalf("dec = %+v", dec)
-	}
-	if !dec.ByLLM {
-		t.Error("L1 判定应标记 by_llm")
-	}
-}
-
-func TestCascadeRouteMarginTriggersL2(t *testing.T) {
-	d := testDeps(t)
-	d.LLM = &scriptedLLM{resps: []string{
-		// L1：top1=0.5、margin=0.08 → 类别纠缠，升级 L2
-		`{"scores":{"factual":0.5,"research":0.42,"transaction":0.05,"hybrid":0.02,"refusal":0.01},"reason":"拿不准"}`,
-		// L2：主模型判定
-		`{"route":"research","reason":"涉及多份文件"}`,
-	}}
-	dec := d.CascadeRoute(context.Background(), "转专业后绩点怎么算，影响保研吗")
-	if dec.Route != "research" || dec.Layer != "L2-main" {
-		t.Fatalf("dec = %+v", dec)
-	}
-	if dec.ModelTier != "flagship" {
-		t.Errorf("ModelTier = %s", dec.ModelTier)
-	}
-}
-
-func TestCascadeRouteL2UncertainFallsBack(t *testing.T) {
-	d := testDeps(t)
-	d.LLM = &scriptedLLM{resps: []string{
-		`{"scores":{"factual":0.3,"research":0.25,"transaction":0.2,"hybrid":0.15,"refusal":0.1},"reason":"完全拿不准"}`,
-		`这不是JSON输出`, // L2 解析失败
-	}}
-	dec := d.CascadeRoute(context.Background(), "随便说点什么")
-	if dec.Route != "factual" || dec.Layer != "L2-uncertain" || dec.ModelTier != "flagship" {
-		t.Fatalf("dec = %+v", dec)
-	}
-}
-
-func TestCascadeRouteRefusalSafetyNet(t *testing.T) {
-	d := testDeps(t)
-	d.LLM = &scriptedLLM{resps: []string{
-		// L1 高置信 refusal，但问题带办理强动词 → 强制升级 L2 复核
-		`{"scores":{"factual":0.05,"research":0.03,"transaction":0.02,"hybrid":0.02,"refusal":0.88},"reason":"误判"}`,
-		// L2 主模型纠正为 transaction
-		`{"route":"transaction","reason":"明确办理诉求"}`,
-	}}
-	dec := d.CascadeRoute(context.Background(), "帮我请下周一到下周二的事假")
-	if dec.Route != "transaction" || dec.Layer != "L2-main" {
-		t.Fatalf("refusal 安全网应升级 L2 并纠正: %+v", dec)
-	}
-	// 领域词安全网：无办理动词但含校园实体词的 refusal 同样升级 L2
-	d2 := testDeps(t)
-	d2.LLM = &scriptedLLM{resps: []string{
-		`{"scores":{"factual":0.04,"research":0.03,"transaction":0.02,"hybrid":0.01,"refusal":0.9},"reason":"误判"}`,
-		`{"route":"factual","reason":"转专业政策咨询"}`,
-	}}
-	dec2 := d2.CascadeRoute(context.Background(), "我的情况符合转专业申请条件吗？")
-	if dec2.Route != "factual" || dec2.Layer != "L2-main" {
-		t.Fatalf("领域词 refusal 应升级 L2: %+v", dec2)
-	}
-	// 无强动词且无领域词的 refusal 维持 L1 直判
-	d3 := testDeps(t)
-	d3.LLM = &scriptedLLM{resps: []string{
-		`{"scores":{"factual":0.02,"research":0.02,"transaction":0.02,"hybrid":0.02,"refusal":0.92},"reason":"无关问题"}`,
-	}}
-	dec3 := d3.CascadeRoute(context.Background(), "今天A股行情怎么样")
-	if dec3.Route != "refusal" || dec3.Layer != "L1-llm" {
-		t.Fatalf("无关问题 refusal 应直接采信 L1: %+v", dec3)
-	}
-}
-
-func TestCascadeRouteMiddleBandAccepted(t *testing.T) {
-	d := testDeps(t)
-	d.LLM = &scriptedLLM{resps: []string{
-		// top1=0.6（介于 low/high 之间）但 margin=0.3 足够 → 直接采信 L1，不升级 L2
-		`{"scores":{"factual":0.6,"research":0.3,"transaction":0.05,"hybrid":0.03,"refusal":0.02},"reason":"偏事实"}`,
-	}}
-	dec := d.CascadeRoute(context.Background(), "奖学金什么时候评定")
-	if dec.Route != "factual" || dec.Layer != "L1-llm" {
-		t.Fatalf("dec = %+v", dec)
-	}
-	// 只调用了一次 LLM（无 L2）
-	if n := len(d.LLM.(*scriptedLLM).chatLog()); n != 1 {
-		t.Errorf("L1 直接采信时应只有 1 次 LLM 调用, got %d", n)
-	}
-}
-
 func TestRouteEventCarriesLayer(t *testing.T) {
 	d := depsWithLLM(t, nil)
 	sl := &scriptedLLM{
@@ -757,5 +644,50 @@ func TestReActWriteToolGoesConfirmFlow(t *testing.T) {
 	}
 	if ar == nil || !ar.Success || ar.Receipt == nil || !strings.HasPrefix(*ar.Receipt, "VE-") {
 		t.Fatalf("action_result = %+v", ar)
+	}
+}
+
+// ---------- agent-first：pipeline 集成（triage 单元测试在 routing 包） ----------
+
+func TestPipelineAgentFirstDispatch(t *testing.T) {
+	// direct：triage 后走 AnswerDirect（流式 + 引用）
+	sl := &scriptedLLM{resps: []string{
+		`{"choice":"direct","reason":"单点查询"}`, // triage
+		`查询改写结果`,                              // rag 改写
+	}, stream: "依据资料作答[1]。"}
+	d := depsWithLLM(t, sl)
+	d.Settings.RouterMode = "agent-first"
+	d.Settings.QueryRewrite = "off"
+	events := ask(t, d, "s-af1", "图书馆几点开门", "student")
+	route := firstEvent(events, "route").(routeEvent)
+	if route.Route != "factual" || route.Layer != "triage-llm" {
+		t.Fatalf("route = %+v", route)
+	}
+	if !strings.Contains(answerText(events), "依据资料作答") {
+		t.Errorf("direct 应走 AnswerDirect 流式: %q", answerText(events))
+	}
+}
+
+func TestPipelineAgentFirstReActPath(t *testing.T) {
+	// agent：triage 后走 RunReAct（原生 tool-calling 调一次读工具后作答）
+	sl := &scriptedLLM{resps: []string{
+		`{"choice":"agent","reason":"实时业务数据"}`, // triage
+	}, comps: []*llm.Completion{
+		toolCall("c1", "my_bookings", `{}`),
+		finalAnswer("你目前没有有效预约。"),
+	}}
+	d := depsWithLLM(t, sl)
+	d.Settings.RouterMode = "agent-first"
+	d.Settings.QueryRewrite = "off"
+	events := ask(t, d, "s-af2", "查一下我的预约", "student")
+	route := firstEvent(events, "route").(routeEvent)
+	if route.Route != "agent" {
+		t.Fatalf("route = %+v", route)
+	}
+	if !strings.Contains(answerText(events), "没有有效预约") {
+		t.Errorf("agent 链路应完成工具调用后作答: %q", answerText(events))
+	}
+	if len(eventsOf(events, "status")) != 1 {
+		t.Errorf("应有一次工具调用 status 事件")
 	}
 }
