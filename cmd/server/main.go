@@ -147,10 +147,15 @@ func llmState(c *llm.Client) string {
 	return "未启用（零 key 演示模式）"
 }
 
-// newRouter 装配全部路由与中间件（顺序：限流最前，再 CORS）。
+// newRouter 装配全部路由与中间件（顺序：限流最前，再 CORS；trace-id 供日志关联）。
 func (s *server) newRouter() *gin.Engine {
 	r := gin.New()
-	r.Use(gin.Logger(), gin.Recovery())
+	r.Use(gin.LoggerWithFormatter(func(p gin.LogFormatterParams) string {
+		return fmt.Sprintf("[gin %s] %s %s %d %s %s\n",
+			p.TimeStamp.Format("2006/01/02 15:04:05"), p.Method, p.Path, p.StatusCode,
+			p.Latency, traceIDOrDash(p.Keys))
+	}), gin.Recovery())
+	r.Use(middleware.TraceID())
 	r.Use(middleware.NewRateLimiter(s.settings.RateLimitPerMinute).Handler())
 	r.Use(cors())
 
@@ -175,6 +180,14 @@ func cors() gin.HandlerFunc {
 		}
 		c.Next()
 	}
+}
+
+// traceIDOrDash gin 日志取 trace-id（TraceID 中间件写入 Keys）。
+func traceIDOrDash(keys map[any]any) string {
+	if id, ok := keys["trace_id"].(string); ok && id != "" {
+		return "trace=" + id
+	}
+	return "trace=-"
 }
 
 // ---------- 处理器 ----------

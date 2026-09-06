@@ -3,7 +3,6 @@ package agent
 import (
 	"context"
 	"fmt"
-	"log"
 	"strings"
 
 	"gewu/internal/llm"
@@ -36,7 +35,7 @@ func (d *Deps) plan(ctx context.Context, question string) []string {
 			}
 		}
 	} else {
-		log.Printf("[agent] 子问题拆解失败，退化为单路检索：%v", err)
+		logf(ctx, "子问题拆解失败，退化为单路检索：%v", err)
 	}
 	return []string{question}
 }

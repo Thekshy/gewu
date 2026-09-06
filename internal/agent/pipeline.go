@@ -3,7 +3,6 @@ package agent
 import (
 	"context"
 	"fmt"
-	"log"
 	"strings"
 	"time"
 
@@ -79,7 +78,7 @@ func (d *Deps) RunChat(ctx context.Context, emit emitFn, question, mode, session
 	// 本轮对办理会话的全部修改（槽位/阶段/完成清除）落库：SQLite 后端据此
 	// 跨重启续办；内存版为 no-op。失败只告警，不影响已发出的回答。
 	if err := d.Sessions.Sync(); err != nil {
-		log.Printf("[agent] 会话状态落库失败（不影响本轮回答）：%v", err)
+		logf(ctx, "会话状态落库失败（不影响本轮回答）：%v", err)
 	}
 	d.consolidateAsync(ctx, user, sessionID, question, answerSB.String())
 }

@@ -2,7 +2,6 @@ package agent
 
 import (
 	"context"
-	"log"
 
 	"gewu/internal/llm"
 )
@@ -58,7 +57,7 @@ func (d *Deps) TriageRoute(ctx context.Context, question string) RouteDecision {
 		{Role: "user", Content: question},
 	}, llm.Options{JSONMode: true, Temperature: 0, MaxTokens: 150, Small: true})
 	if err != nil {
-		log.Printf("[agent] triage 调用失败，fail-open 到 agent：%v", err)
+		logf(ctx, "triage 调用失败，fail-open 到 agent：%v", err)
 		return triageDecision("agent", 0, "triage-open", "分流器不可用，交给 agent 自主处理")
 	}
 	obj, perr := parseJSONObject(raw)

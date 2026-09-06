@@ -2,7 +2,6 @@ package agent
 
 import (
 	"context"
-	"log"
 	"regexp"
 	"sort"
 
@@ -125,7 +124,7 @@ func (d *Deps) l1Classify(ctx context.Context, q string) (RouteDecision, float64
 		{Role: "user", Content: q},
 	}, llm.Options{JSONMode: true, Temperature: 0, MaxTokens: 200, Small: true})
 	if err != nil {
-		log.Printf("[agent] L1 分类调用失败，降级启发式：%v", err)
+		logf(ctx, "L1 分类调用失败，降级启发式：%v", err)
 		h := HeuristicRoute(q)
 		return RouteDecision{Route: h.Route, Layer: "heuristic-fallback", Reason: h.Reason,
 			ModelTier: "small"}, hConf, 0
@@ -141,7 +140,7 @@ func (d *Deps) l2Arbitrate(ctx context.Context, q string) (RouteDecision, bool) 
 		{Role: "user", Content: q},
 	}, llm.Options{JSONMode: true, Temperature: 0, MaxTokens: 200})
 	if err != nil {
-		log.Printf("[agent] L2 二次判定调用失败：%v", err)
+		logf(ctx, "L2 二次判定调用失败：%v", err)
 		return RouteDecision{}, false
 	}
 	obj, perr := parseJSONObject(raw)

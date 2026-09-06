@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"log"
 	"sort"
 	"strings"
 	"sync"
@@ -160,7 +159,7 @@ func (d *Deps) runAgentCall(ctx context.Context, emit emitFn, tools map[string]A
 		sess, missing, ready := d.agentConfirmSession(sessionID, role, user, call.Name, args)
 		if ready {
 			seen[fp]++
-			log.Printf("[agent] ReAct 写操作转确认流 session=%s user=%s tool=%s", sessionID, user, call.Name)
+			logf(ctx, "ReAct 写操作转确认流 session=%s user=%s tool=%s", sessionID, user, call.Name)
 			if err := emit(statusEvt("已整理办理信息，等待确认…")); err != nil {
 				return "", false, err
 			}
@@ -181,7 +180,7 @@ func (d *Deps) runAgentCall(ctx context.Context, emit emitFn, tools map[string]A
 		out = "工具执行失败：" + runErr.Error() // 错误回填为 observation，不断链
 	}
 	*observations = append(*observations, call.Name+"："+truncate(out, observationLimit))
-	log.Printf("[agent] ReAct session=%s user=%s tool=%s", sessionID, user, call.Name)
+	logf(ctx, "ReAct session=%s user=%s tool=%s", sessionID, user, call.Name)
 	return truncate(out, observationLimit), false, nil
 }
 

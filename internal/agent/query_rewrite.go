@@ -3,7 +3,6 @@ package agent
 import (
 	"context"
 	"fmt"
-	"log"
 	"regexp"
 	"strings"
 
@@ -67,23 +66,23 @@ func (d *Deps) ResolveQuery(ctx context.Context, question, userID, sessionID str
 		{Role: "user", Content: sb.String()},
 	}, llm.Options{JSONMode: true, Temperature: 0, MaxTokens: 200, Small: true})
 	if err != nil {
-		log.Printf("[agent] 上下文补全失败，使用原问题：%v", err)
+		logf(ctx, "上下文补全失败，使用原问题：%v", err)
 		return question, false
 	}
 	obj, perr := parseJSONObject(raw)
 	if perr != nil {
-		log.Printf("[agent] 上下文补全输出非法 JSON，回退原问题：%s", truncate(raw, 120))
+		logf(ctx, "上下文补全输出非法 JSON，回退原问题：%s", truncate(raw, 120))
 		return question, false
 	}
 	rewritten := strings.TrimSpace(jsonStr(obj, "rewritten"))
 	if rewritten == "" || rewritten == question {
 		if rewritten == "" {
-			log.Printf("[agent] 上下文补全返回空，回退原问题")
+			logf(ctx, "上下文补全返回空，回退原问题")
 		}
 		return question, false
 	}
 	if n := len([]rune(rewritten)); n < 2 || n > d.Settings.MaxQuestionChars {
-		log.Printf("[agent] 上下文补全输出长度异常（%d rune），回退原问题", n)
+		logf(ctx, "上下文补全输出长度异常（%d rune），回退原问题", n)
 		return question, false
 	}
 	return rewritten, true

@@ -2,7 +2,6 @@ package agent
 
 import (
 	"context"
-	"log"
 	"regexp"
 	"strings"
 
@@ -83,7 +82,7 @@ func (d *Deps) RouteQuestion(ctx context.Context, question string) RouteResult {
 			}
 		}
 	} else {
-		log.Printf("[agent] 路由器 LLM 调用失败，降级启发式路由：%v", err)
+		logf(ctx, "路由器 LLM 调用失败，降级启发式路由：%v", err)
 	}
 	return HeuristicRoute(question)
 }

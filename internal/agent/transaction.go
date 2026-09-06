@@ -4,7 +4,6 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
-	"log"
 	"regexp"
 	"strconv"
 	"strings"
@@ -307,7 +306,7 @@ func (d *Deps) llmExtractTool(ctx context.Context, question, role string) string
 		{Role: "user", Content: question},
 	}, llm.Options{JSONMode: true, Temperature: 0, MaxTokens: 100, Small: true})
 	if err != nil {
-		log.Printf("[agent] 工具识别 LLM 调用失败：%v", err)
+		logf(ctx, "工具识别 LLM 调用失败：%v", err)
 		return ""
 	}
 	obj, err := parseJSONObject(raw)
@@ -469,7 +468,7 @@ func (d *Deps) llmExtractSlots(ctx context.Context, tool, text string, collected
 		{Role: "user", Content: userMsg},
 	}, llm.Options{JSONMode: true, Temperature: 0, MaxTokens: 300, Small: true})
 	if err != nil {
-		log.Printf("[agent] 槽位抽取 LLM 调用失败，退化为启发式：%v", err)
+		logf(ctx, "槽位抽取 LLM 调用失败，退化为启发式：%v", err)
 		return map[string]string{}
 	}
 	obj, err := parseJSONObject(raw)
@@ -672,7 +671,7 @@ func (d *Deps) ClassifyReply(ctx context.Context, userText string, sess *TxSessi
 				}
 			}
 		} else {
-			log.Printf("[agent] 续轮意图 LLM 调用失败，退化为启发式：%v", err)
+			logf(ctx, "续轮意图 LLM 调用失败，退化为启发式：%v", err)
 		}
 	}
 

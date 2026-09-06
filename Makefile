@@ -29,7 +29,7 @@ test:
 lint: fmt vet
 
 fmt:
-	gofmt -l -w cmd internal pkg
+	gofmt -l -w cmd internal scripts
 
 vet:
 	go vet ./...
@@ -49,4 +49,4 @@ clean:
 
 # 架构依赖规则守护（P8-4）：违规即非零退出
 lint-arch:
-	./scripts/lint-arch.sh
+	bash scripts/lint-arch.sh
