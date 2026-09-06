@@ -34,8 +34,14 @@ var toolPatterns = []struct {
 	{"my_bookings", regexp.MustCompile(`我的预约|我预约了|我订了`)},
 	{"query_venues", regexp.MustCompile(`(有|哪些|什么|能).*(场馆|场地|研讨间)|场馆.*(有|能|可)`)},
 	{"submit_leave", regexp.MustCompile(`请假|事假|病假|销假|休.*假|请.*天.*假`)},
-	{"book_venue", regexp.MustCompile(`预约|预订|订.*(馆|场|间)`)},
+	// book_venue 必须是"办理动词 + 场馆类宾语共现"：裸 `预约` 会把
+	// "预约心理咨询/预约挂号"一切"预约X"都误选成场馆工具（P7 修复）。
+	{"book_venue", regexp.MustCompile(`(预约|预订|订).*(馆|场|间|羽毛球|篮球|游泳|乒乓|网球|健身|研讨|教室|场地)`)},
 }
+
+// nonVenueRe 负向双保险：咨询/就医类词与"预约"共现时，即使句式像
+// "预约X"也不选场馆工具（跳过候选继续匹配，最终落知识库）。
+var nonVenueRe = regexp.MustCompile(`心理咨询|心理辅导|心理咨询室|挂号|看医生|校医|咨询老师|辅导员`)
 
 // readTools 读工具集（直接执行，不进确认流）。
 var readTools = map[string]bool{
@@ -63,11 +69,16 @@ func phraseDays(text string) (int, bool) {
 }
 
 // DetectTool 启发式工具识别（确定性强，LLM 只兜底口语化表述）。
+// book_venue 候选遇 nonVenueRe（咨询/就医类）时跳过——宁可落知识库也不误入办理流。
 func DetectTool(question string) string {
 	for _, tp := range toolPatterns {
-		if tp.re.MatchString(question) {
-			return tp.name
+		if !tp.re.MatchString(question) {
+			continue
 		}
+		if tp.name == "book_venue" && nonVenueRe.MatchString(question) {
+			continue
+		}
+		return tp.name
 	}
 	return ""
 }
@@ -244,7 +255,7 @@ func (d *Deps) StartFlow(ctx context.Context, emit emitFn, question, role, user,
 		tool = d.llmExtractTool(ctx, question, role)
 	}
 	if _, known := d.Tools[tool]; !known {
-		return d.fallbackKnowledge(ctx, emit, question)
+		return d.fallbackKnowledge(ctx, emit, question, user, sessionID)
 	}
 
 	if _, inFlows := flowDefs[tool]; readTools[tool] || !inFlows {
@@ -290,7 +301,9 @@ func receiptPtr(r business.Result) *string {
 func (d *Deps) llmExtractTool(ctx context.Context, question, role string) string {
 	raw, err := d.LLM.Chat(ctx, []llm.Message{
 		{Role: "system", Content: fmt.Sprintf(
-			"根据用户消息选择最匹配的工具，只输出工具名 JSON：{\"tool\": \"...\"}。可选工具：\n%s", d.ToolDescriptions(role))},
+			"根据用户消息选择最匹配的工具，只输出工具名 JSON：{\"tool\": \"...\"}。可选工具：\n%s\n\n"+
+				"可选工具中没有语义匹配的工具时，必须返回 {\"tool\": \"\"}，"+
+				"禁止挑选最相近的工具强行办理（例如咨询类诉求不是任何工具）。", d.ToolDescriptions(role))},
 		{Role: "user", Content: question},
 	}, llm.Options{JSONMode: true, Temperature: 0, MaxTokens: 100, Small: true})
 	if err != nil {
@@ -302,6 +315,11 @@ func (d *Deps) llmExtractTool(ctx context.Context, question, role string) string
 		return ""
 	}
 	name := jsonStr(obj, "tool")
+	if name == "book_venue" && nonVenueRe.MatchString(question) {
+		// 负向双保险对 LLM 路径同样生效：句中带咨询/就医类词时，
+		// LLM 强行挑 book_venue 一律不采信，落知识库（P7-1）。
+		return ""
+	}
 	if _, ok := d.Tools[name]; ok {
 		return name
 	}
@@ -309,11 +327,11 @@ func (d *Deps) llmExtractTool(ctx context.Context, question, role string) string
 }
 
 // fallbackKnowledge 工具未识别 → 转知识库检索。
-func (d *Deps) fallbackKnowledge(ctx context.Context, emit emitFn, question string) error {
+func (d *Deps) fallbackKnowledge(ctx context.Context, emit emitFn, question, user, sessionID string) error {
 	if err := emit(answerEvt("这个问题我理解为你想咨询校园信息，为你转知识库检索：")); err != nil {
 		return err
 	}
-	return d.AnswerDirect(ctx, emit, question, d.Retriever.K)
+	return d.AnswerDirect(ctx, emit, question, d.Retriever.K, user, sessionID)
 }
 
 // advance collect 阶段：吸收新信息 → 齐了进确认，缺则追问。

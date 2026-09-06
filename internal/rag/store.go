@@ -3,21 +3,26 @@ package rag
 import (
 	"database/sql"
 	"encoding/binary"
+	"fmt"
 	"math"
 	"sort"
+	"strconv"
 	"sync"
 
 	_ "modernc.org/sqlite" // 纯 Go SQLite 驱动，免 CGO
 )
 
 // Hit 一条检索命中：chunk 及其所属文档元信息。
+// hierarchical 模式下 Text 为父块文本（自带 breadcrumb），SectionPath 为命中子块
+// 所在 section 的标题路径；flat 模式与旧版一致（SectionPath 为空）。
 type Hit struct {
-	ChunkID int
-	DocID   string
-	Seq     int
-	Text    string
-	Title   string
-	Source  string
+	ChunkID     int
+	DocID       string
+	Seq         int
+	Text        string
+	Title       string
+	Source      string
+	SectionPath string
 }
 
 // Scored 带分数的 chunk id（BM25 / 向量两路召回的中间形态）。
@@ -42,11 +47,25 @@ type DocMeta struct {
 	Updated string
 }
 
-// ChunkRow chunk 基本行。
+// ChunkRow chunk 基本行（P6 起含父子块字段；flat 模式 ParentID 为空串）。
 type ChunkRow struct {
-	DocID string
-	Seq   int
-	Text  string
+	DocID       string
+	Seq         int
+	Text        string
+	ParentID    string
+	SectionPath string
+	IsParent    bool
+}
+
+// ChunkRecord 入库的单块记录：文本 + 检索属性 + 可选向量。
+// ParentIdx 指向同批 records 中父块的下标（父块自身为 -1），由 UpsertDoc
+// 换算成父块真实 chunk id 写入 parent_id 列——避免调用方预知自增 id 造成错位。
+type ChunkRecord struct {
+	Text        string
+	SectionPath string
+	IsParent    bool
+	ParentIdx   int // -1 = 无父（父块自身或 flat 模式）
+	Vec         []float64
 }
 
 // Stats 索引规模统计（/api/health）。
@@ -87,8 +106,9 @@ func Open(path string) (*Store, error) {
 func (s *Store) Close() error { return s.db.Close() }
 
 // UpsertDoc 幂等入库：同一 doc_id 重复导入时先清旧 chunk 与向量。
-// vectors 为 nil 表示仅 BM25；否则按 chunk 顺序一一对应。
-func (s *Store) UpsertDoc(docID, title, source, updated string, chunkTexts []string, vectors [][]float64) error {
+// records 按序写入；父块（IsParent=true）不写向量；子块 Vec 非 nil 时写向量。
+// 子块的 ParentIdx 必须指向本批中先于它出现的父块下标。
+func (s *Store) UpsertDoc(docID, title, source, updated string, records []ChunkRecord) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	tx, err := s.db.Begin()
@@ -128,20 +148,34 @@ func (s *Store) UpsertDoc(docID, title, source, updated string, chunkTexts []str
 	); err != nil {
 		return err
 	}
-	for seq, text := range chunkTexts {
-		res, err := tx.Exec("INSERT INTO chunks (doc_id, seq, text) VALUES (?, ?, ?)", docID, seq, text)
+	// ids[i] = 第 i 条 record 落库后的 chunk id（子块写 parent_id 时回查）。
+	ids := make([]int64, len(records))
+	for seq, rec := range records {
+		var parentID any // nil → SQL NULL（父块自身 / flat 模式）
+		if rec.ParentIdx >= 0 {
+			if rec.ParentIdx >= len(ids) || ids[rec.ParentIdx] == 0 {
+				return fmt.Errorf("chunk %d 的父块下标 %d 非法（父块须先于子块写入）", seq, rec.ParentIdx)
+			}
+			parentID = strconv.FormatInt(ids[rec.ParentIdx], 10)
+		}
+		res, err := tx.Exec(
+			"INSERT INTO chunks (doc_id, seq, text, parent_id, section_path, is_parent) VALUES (?, ?, ?, ?, ?, ?)",
+			docID, seq, rec.Text, parentID, rec.SectionPath, boolToInt(rec.IsParent),
+		)
 		if err != nil {
 			return err
 		}
-		if vectors != nil && seq < len(vectors) {
-			cid, err := res.LastInsertId()
-			if err != nil {
-				return err
-			}
-			blob, dim := packVector(vectors[seq])
-			if _, err := tx.Exec("INSERT INTO vectors (chunk_id, dim, data) VALUES (?, ?, ?)", cid, dim, blob); err != nil {
-				return err
-			}
+		cid, err := res.LastInsertId()
+		if err != nil {
+			return err
+		}
+		ids[seq] = cid
+		if rec.IsParent || len(rec.Vec) == 0 {
+			continue // 父块只入库不建向量；子块无向量（-no-embed）同样跳过
+		}
+		blob, dim := packVector(rec.Vec)
+		if _, err := tx.Exec("INSERT INTO vectors (chunk_id, dim, data) VALUES (?, ?, ?)", cid, dim, blob); err != nil {
+			return err
 		}
 	}
 	if err := tx.Commit(); err != nil {
@@ -150,6 +184,13 @@ func (s *Store) UpsertDoc(docID, title, source, updated string, chunkTexts []str
 	s.bm = nil
 	s.vec = nil
 	return nil
+}
+
+func boolToInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
 }
 
 // packVector float64 列表 → (float32 小端字节, 维度)，与 numpy tobytes 兼容。
@@ -175,13 +216,14 @@ func unpackVector(blob []byte, dim int) ([]float32, bool) {
 // ---------- BM25 ----------
 
 // ensureBM25 懒构建倒排索引；需持有 mu（读或写）。并发首查可能重复构建一次，
-// 结果幂等，最终一致。
+// 结果幂等，最终一致。只索引子块（is_parent=0）——父块仅供回取，进了倒排
+// 会被直接命中、破坏"子块匹配/父块回答"的漏斗。
 func (s *Store) ensureBM25() error {
 	if s.bm != nil {
 		return nil
 	}
 	idx := NewBM25Index()
-	rows, err := s.db.Query("SELECT id, text FROM chunks")
+	rows, err := s.db.Query("SELECT id, text FROM chunks WHERE is_parent = 0")
 	if err != nil {
 		return err
 	}
@@ -315,16 +357,41 @@ func (s *Store) VectorSearch(queryVec []float64, k int) ([]Scored, error) {
 
 // ---------- 读取 ----------
 
-// ChunkRows 批量取 chunk 行。
+// ChunkRows 批量取 chunk 行（含父子块字段）。
 func (s *Store) ChunkRows(ids []int) (map[int]ChunkRow, error) {
 	out := make(map[int]ChunkRow, len(ids))
 	for _, cid := range ids {
 		var r ChunkRow
 		var id int
-		err := s.db.QueryRow("SELECT id, doc_id, seq, text FROM chunks WHERE id = ?", cid).
-			Scan(&id, &r.DocID, &r.Seq, &r.Text)
+		var parentID sql.NullString
+		err := s.db.QueryRow("SELECT id, doc_id, seq, text, parent_id, section_path, is_parent FROM chunks WHERE id = ?", cid).
+			Scan(&id, &r.DocID, &r.Seq, &r.Text, &parentID, &r.SectionPath, &r.IsParent)
 		if err == nil {
+			r.ParentID = parentID.String
 			out[id] = r
+		} else if err != sql.ErrNoRows {
+			return nil, err
+		}
+	}
+	return out, nil
+}
+
+// ParentRows 按 parent_id（父块 chunk id 的文本形式）批量取父块行。
+func (s *Store) ParentRows(parentIDs []string) (map[string]ChunkRow, error) {
+	out := make(map[string]ChunkRow, len(parentIDs))
+	for _, pid := range parentIDs {
+		cid, err := strconv.Atoi(pid)
+		if err != nil {
+			continue // 非法 id 直接跳过（不产生幽灵命中）
+		}
+		var r ChunkRow
+		var id int
+		var parentNull sql.NullString
+		err = s.db.QueryRow("SELECT id, doc_id, seq, text, parent_id, section_path, is_parent FROM chunks WHERE id = ?", cid).
+			Scan(&id, &r.DocID, &r.Seq, &r.Text, &parentNull, &r.SectionPath, &r.IsParent)
+		if err == nil {
+			r.ParentID = parentNull.String
+			out[pid] = r
 		} else if err != sql.ErrNoRows {
 			return nil, err
 		}

@@ -14,12 +14,25 @@ const Version = "0.1.0"
 
 // Settings 为模型无关的全局配置，进程内单例。
 type Settings struct {
-	LLMKey             string // LLM_API_KEY，空串 = 零 key 演示模式
+	LLMKey             string // LLM_API_KEY，chat 主端点密钥（启动时强制非空）
 	LLMBaseURL         string // 任意 OpenAI 兼容端点
 	LLMModel           string // 主答案模型
 	LLMSmallModel      string // 辅助调用（路由/抽取/改写等）模型
-	EmbedModel         string
 	LLMDisableThinking bool
+
+	// Embed 独立通道（P6 阶段0：chat=智谱 GLM，embedding=火山方舟）。
+	// EmbedAPIKey/EmbedBaseURL 缺省时回退 LLM_*（同供应商部署的场景零配置）。
+	EmbedAPIKey  string // EMBED_API_KEY
+	EmbedBaseURL string // EMBED_BASE_URL
+	EmbedModel   string // EMBED_MODEL
+	EmbedMode    string // EMBED_MODE：text（标准 /embeddings）| ark_multimodal（火山多模态，不支持批量）
+
+	// P6 行为开关（默认开启新链路，旧实现保留可回退）。
+	RouterMode   string // ROUTER_MODE：cascade（默认，级联路由）| classic（旧单次 LLM 分类）
+	ChunkMode    string // CHUNK_MODE：hierarchical（默认，父子块）| flat（旧单层切分）
+	RerankMode   string // RERANK_MODE：on（默认，LLM 精排）| off
+	ReactMode    string // REACT_MODE：off（默认，纯 workflow）| on（路径不定的办理问题转 ReAct）
+	QueryRewrite string // QUERY_REWRITE：on（默认，多轮指代消解补全）| off（路由/检索只见裸问题）
 
 	DataDir   string
 	CorpusDir string // 缺省 {DataDir}/corpus
@@ -39,6 +52,12 @@ func Default() *Settings {
 		LLMModel:           "glm-5.3",
 		LLMSmallModel:      "glm-5.3-flash",
 		EmbedModel:         "embedding-3",
+		EmbedMode:          "text",
+		RouterMode:         "cascade",
+		ChunkMode:          "hierarchical",
+		RerankMode:         "on",
+		ReactMode:          "off",
+		QueryRewrite:       "on",
 		DataDir:            "data",
 		RateLimitPerMinute: 20,
 		DailyTokenBudget:   2_000_000,
@@ -102,7 +121,9 @@ func applyEnvFile(s *Settings, path string) {
 
 func applyOSEnv(s *Settings) {
 	for _, key := range []string{
-		"LLM_API_KEY", "LLM_BASE_URL", "LLM_MODEL", "LLM_SMALL_MODEL", "EMBED_MODEL",
+		"LLM_API_KEY", "LLM_BASE_URL", "LLM_MODEL", "LLM_SMALL_MODEL",
+		"EMBED_API_KEY", "EMBED_BASE_URL", "EMBED_MODEL", "EMBED_MODE",
+		"ROUTER_MODE", "CHUNK_MODE", "RERANK_MODE", "REACT_MODE", "QUERY_REWRITE",
 		"LLM_DISABLE_THINKING", "DATA_DIR", "CORPUS_DIR", "INDEX_PATH",
 		"RATE_LIMIT_PER_MINUTE", "DAILY_TOKEN_BUDGET", "RETRIEVAL_K", "MAX_QUESTION_CHARS",
 	} {
@@ -122,8 +143,24 @@ func setField(s *Settings, key, val string) {
 		s.LLMModel = val
 	case "LLM_SMALL_MODEL":
 		s.LLMSmallModel = val
+	case "EMBED_API_KEY":
+		s.EmbedAPIKey = val
+	case "EMBED_BASE_URL":
+		s.EmbedBaseURL = val
 	case "EMBED_MODEL":
 		s.EmbedModel = val
+	case "EMBED_MODE":
+		s.EmbedMode = val
+	case "ROUTER_MODE":
+		s.RouterMode = val
+	case "CHUNK_MODE":
+		s.ChunkMode = val
+	case "RERANK_MODE":
+		s.RerankMode = val
+	case "REACT_MODE":
+		s.ReactMode = val
+	case "QUERY_REWRITE":
+		s.QueryRewrite = val
 	case "LLM_DISABLE_THINKING":
 		s.LLMDisableThinking = parseBool(val)
 	case "DATA_DIR":

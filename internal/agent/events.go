@@ -17,10 +17,12 @@ type Citation struct {
 // 各事件的字段集与 JSON 形状是前端与评测的契约（PARITY §3），逐字段对照实现。
 
 type routeEvent struct {
-	Type   string `json:"type"`
-	Route  string `json:"route"`
-	Reason string `json:"reason"`
-	ByLLM  bool   `json:"by_llm"`
+	Type   string   `json:"type"`
+	Route  string   `json:"route"`
+	Reason string   `json:"reason"`
+	ByLLM  bool     `json:"by_llm"`
+	Layer  string   `json:"layer,omitempty"`      // P6 级联路由层级（classic/续轮路径为空，形状不变）
+	Conf   *float64 `json:"confidence,omitempty"` // 指针区分 0 与未提供
 }
 
 type statusEvent struct {
@@ -113,6 +115,16 @@ type doneEvent struct {
 
 func routeEvt(route, reason string, byLLM bool) routeEvent {
 	return routeEvent{Type: "route", Route: route, Reason: reason, ByLLM: byLLM}
+}
+
+// routeDecisionEvt 决策包 → route 事件（级联模式下带 layer/confidence）。
+func routeDecisionEvt(dec RouteDecision) routeEvent {
+	ev := routeEvent{Type: "route", Route: dec.Route, Reason: dec.Reason, ByLLM: dec.ByLLM, Layer: dec.Layer}
+	if dec.Layer != "" {
+		conf := dec.Confidence
+		ev.Conf = &conf
+	}
+	return ev
 }
 
 func statusEvt(text string) statusEvent { return statusEvent{Type: "status", Text: text} }

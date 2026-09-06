@@ -265,20 +265,32 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="格物离线评测（HTTP 客户端）")
     parser.add_argument("--type", dest="type_", choices=["factual", "multi_hop", "refusal", "transaction", "hybrid"])
     parser.add_argument("--limit", type=int)
+    parser.add_argument("--dataset", default="eval/dataset.jsonl",
+                        help="数据集路径（相对仓库根或绝对路径），如 eval/dataset-agent.jsonl")
+    parser.add_argument("--tag", default="", help="报告标签（写入文件名与表头，如 agent-first）")
     args = parser.parse_args()
 
     h = health()
-    dataset_path = ROOT / "eval" / "dataset.jsonl"
+    dataset_path = Path(args.dataset)
+    if not dataset_path.is_absolute():
+        dataset_path = ROOT / dataset_path
     items = [json.loads(line) for line in dataset_path.read_text("utf-8").splitlines() if line.strip()]
     if args.type_:
         items = [it for it in items if it["type"] == args.type_]
     if args.limit:
         items = items[: args.limit]
 
+    def budget_used() -> int:
+        try:
+            return int(health().get("budget", {}).get("used", 0))
+        except Exception:  # noqa: BLE001
+            return -1
+
     rows = []
     for item in items:
         sid = f"eval-{item['id']}"
         multi = "turns" in item
+        used0 = budget_used()
         try:
             if multi:
                 business_reset()
@@ -290,11 +302,12 @@ def main() -> int:
         except Exception as exc:  # noqa: BLE001
             agg = RunAgg(errors=[f"{type(exc).__name__}: {exc}"])
             s = {"pass": False, "kw": None, "cite": None}
+        tokens = budget_used() - used0
 
-        rows.append({"item": item, "agg": agg, "score": s, "multi": multi})
+        rows.append({"item": item, "agg": agg, "score": s, "multi": multi, "tokens": max(tokens, 0)})
         flag = "✓" if s["pass"] else "✗"
         extra = f" routes={sorted(agg.routes)}" if multi else ""
-        print(f"  {flag} {item['id']:<12} {agg.latency_ms:>5}ms{extra}")
+        print(f"  {flag} {item['id']:<12} {agg.latency_ms:>5}ms  {max(tokens, 0):>6}tk{extra}")
 
     def sel(t: str) -> list:
         return [r for r in rows if r["item"]["type"] == t]
@@ -313,6 +326,9 @@ def main() -> int:
     def avg_latency(rs) -> str:
         return f"{sum(r['agg'].latency_ms for r in rs) / len(rs):.0f}ms" if rs else "-"
 
+    def avg_tokens(rs) -> str:
+        return f"{sum(r['tokens'] for r in rs) / len(rs):.0f}" if rs else "-"
+
     types = ["factual", "multi_hop", "refusal", "transaction", "hybrid"]
     lines = [
         "# 评测报告",
@@ -320,9 +336,11 @@ def main() -> int:
         f"- 时间：{dt.datetime.now().strftime('%Y-%m-%d %H:%M')}",
         f"- 端点：{BASE_URL}（版本 {h.get('version')}，LLM {'启用' if h.get('llm') else '未启用（离线确定性链路）'}）",
         f"- 数据集：{len(rows)} 题（" + "，".join(f"{t} {len(sel(t))}" for t in types if sel(t)) + "）",
+        f"- 链路标签：{args.tag or '默认（cascade workflow）'}",
+        f"- token 消耗（/api/health 预算差值，含全部 LLM 调用）：总 {sum(r['tokens'] for r in rows)}",
         "",
-        "| 类型 | 通过率 | 关键词命中 | 引用召回 | 平均延迟 |",
-        "| --- | --- | --- | --- | --- |",
+        "| 类型 | 通过率 | 关键词命中 | 引用召回 | 平均延迟 | 平均 token |",
+        "| --- | --- | --- | --- | --- | --- |",
     ]
     label = {"transaction": "transaction（办理）", "hybrid": "hybrid（问答+办理）"}
     for t in types:
@@ -330,9 +348,9 @@ def main() -> int:
         if not rs:
             continue
         kw, cite = ("-", "-") if t in ("refusal", "transaction", "hybrid") else (kw_rate(rs), cite_rate(rs))
-        lines.append(f"| {label.get(t, t)} | {rate(rs)} | {kw} | {cite} | {avg_latency(rs)} |")
+        lines.append(f"| {label.get(t, t)} | {rate(rs)} | {kw} | {cite} | {avg_latency(rs)} | {avg_tokens(rs)} |")
 
-    lines += ["", "## 明细", "", "| ID | 类型 | 多轮 | 通过 | 延迟 | 说明 |", "| --- | --- | --- | --- | --- | --- |"]
+    lines += ["", "## 明细", "", "| ID | 类型 | 多轮 | 通过 | 延迟 | token | 说明 |", "| --- | --- | --- | --- | --- | --- | --- |"]
     for r in rows:
         it = r["item"]
         note = []
@@ -342,12 +360,13 @@ def main() -> int:
             note.append(f"错误：{r['agg'].errors[0][:40]}")
         lines.append(
             f"| {it['id']} | {it['type']} | {'✓' if r['multi'] else '-'} | "
-            f"{'✓' if r['score']['pass'] else '✗'} | {r['agg'].latency_ms}ms | {'；'.join(note)} |"
+            f"{'✓' if r['score']['pass'] else '✗'} | {r['agg'].latency_ms}ms | {r['tokens']} | {'；'.join(note)} |"
         )
 
     report_dir = ROOT / "eval" / "reports"
     report_dir.mkdir(exist_ok=True)
-    out = report_dir / f"report-{dt.datetime.now().strftime('%Y%m%d-%H%M')}.md"
+    stamp = dt.datetime.now().strftime("%Y%m%d-%H%M")
+    out = report_dir / (f"report-{args.tag + '-' if args.tag else ''}{stamp}.md" if args.tag else f"report-{stamp}.md")
     out.write_text("\n".join(lines) + "\n", "utf-8")
     print(f"\n报告已写入：{out}")
     return 0

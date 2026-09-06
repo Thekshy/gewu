@@ -1,0 +1,8 @@
+{"id": "ag-know-001", "type": "factual", "question": "国家奖学金的评定标准是什么", "mode": "auto", "expected_docs": ["0004-scholarship"], "gold_keywords": ["8000"]}
+{"id": "ag-know-002", "type": "factual", "role": "student", "turns": ["转专业后原课程绩点怎么算？会影响保研排名吗？"], "expect": {"route": "agent", "citations_include": ["0001-transfer"], "answer_contains": ["不通过"]}}
+{"id": "ag-refu-001", "type": "refusal", "question": "今天A股大盘走势怎么样，适合加仓吗？", "mode": "auto", "expected_docs": [], "gold_keywords": []}
+{"id": "ag-read-001", "type": "transaction", "role": "student", "turns": ["现在有哪些场馆可以预约"], "expect": {"route": "agent", "answer_contains": ["羽毛球馆"]}}
+{"id": "ag-read-002", "type": "transaction", "role": "counselor", "turns": ["现在有哪些待审批的请假"], "expect": {"route": "agent", "answer_contains": ["待审批"]}}
+{"id": "ag-tx-001", "type": "transaction", "role": "student", "turns": ["帮我预约明天晚上的羽毛球馆，晚上七点开始", "确认"], "expect": {"route": "agent", "success": true, "booking": {"venue_contains": "羽毛球馆", "date_text": "明天", "slot": "19:00-21:00"}}}
+{"id": "ag-tx-002", "type": "transaction", "role": "student", "turns": ["帮我提交下周一到下周二的事假，家中有事", "确认"], "expect": {"route": "agent", "success": true, "ticket": {"days": 2, "approver": "辅导员"}}}
+{"id": "ag-mix-001", "type": "factual", "role": "student", "turns": ["帮我看看明天羽毛球馆还有没有位置，顺便查一下我的预约"], "expect": {"route": "agent", "answer_contains": ["羽毛球馆"]}}

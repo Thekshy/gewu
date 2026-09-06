@@ -3,6 +3,7 @@ package agent
 import (
 	"context"
 	"fmt"
+	"strings"
 	"time"
 
 	"gewu/internal/business"
@@ -11,25 +12,37 @@ import (
 	"gewu/internal/rag"
 )
 
+// LLMer 编排层对 LLM 访问层的最小依赖（rag.LLMer 超集：多流式与原生工具调用）。
+// 单体注入 *llm.Client 原样工作；单测注入 mock 实现，不发真实网络请求。
+type LLMer interface {
+	HasKey() bool
+	Chat(ctx context.Context, messages []llm.Message, o llm.Options) (string, error)
+	ChatStream(ctx context.Context, messages []llm.Message, o llm.Options, onDelta func(string) error) error
+	ChatWithTools(ctx context.Context, messages []llm.Message, o llm.Options, tools []llm.ToolDef) (*llm.Completion, error)
+	Embed(ctx context.Context, texts []string) ([][]float64, error)
+}
+
 // Deps 聚合编排层依赖，进程内单例（由 cmd/server 装配）。
 // 业务系统只能经 Tools（工具层）访问——权限矩阵的单一出口。
 type Deps struct {
 	Settings  *config.Settings
-	LLM       *llm.Client // nil 或未配 key = 零 key 演示模式
+	LLM       LLMer // nil 或未配 key = 调用会失败（启动时已强制有 key，此兜底为测试/健壮性保留）
 	Retriever *rag.Retriever
 	Business  *business.Business
 	Sessions  *SessionStore
 	Tools     map[string]Tool
+	Memory    *MemoryStore // 长期记忆（nil = 不启用；单测可省）
 }
 
-// NewDeps 装配编排层。
-func NewDeps(s *config.Settings, lc *llm.Client, r *rag.Retriever, b *business.Business) *Deps {
+// NewDeps 装配编排层。lc 为 *llm.Client（生产）或测试 mock（满足 LLMer）。
+func NewDeps(s *config.Settings, lc LLMer, r *rag.Retriever, b *business.Business, mem *MemoryStore) *Deps {
 	d := &Deps{
 		Settings:  s,
 		LLM:       lc,
 		Retriever: r,
 		Business:  b,
 		Sessions:  NewSessionStore(),
+		Memory:    mem,
 	}
 	d.Tools = toolsFor(d)
 	return d
@@ -47,12 +60,22 @@ func (d *Deps) RunChat(ctx context.Context, emit emitFn, question, mode, session
 	if user == "" {
 		user = "demo-" + role
 	}
-	if err := d.runChatInner(ctx, emit, question, mode, sessionID, role, user, t0); err != nil {
+	// 捕获本轮回答文本，供会话结束后异步固化长期记忆（不阻塞回答路径）。
+	var answerSB strings.Builder
+	wrapped := func(ev any) error {
+		if a, ok := ev.(answerDeltaEvent); ok {
+			answerSB.WriteString(a.Text)
+		}
+		return emit(ev)
+	}
+	err := d.runChatInner(ctx, wrapped, question, mode, sessionID, role, user, t0)
+	if err != nil {
 		// 异常兜底：error 事件 + done（与 Python 的 except 行为一致）。
 		// emit 失败（客户端已断开）在此静默忽略。
 		_ = emit(errorEvt(err.Error()))
 		_ = emit(doneEvt(elapsedMS(t0)))
 	}
+	d.consolidateAsync(ctx, user, sessionID, question, answerSB.String())
 }
 
 func elapsedMS(t0 time.Time) int64 { return time.Since(t0).Milliseconds() }
@@ -83,19 +106,32 @@ func (d *Deps) runChatInner(ctx context.Context, emit emitFn, question, mode, se
 		}
 	}
 
-	// 2) 路由
-	var result RouteResult
-	if mode == "direct" || mode == "research" {
-		result = RouteResult{Route: mode, Reason: "用户指定 " + mode, ByLLM: false}
-	} else {
-		result = d.RouteQuestion(ctx, question)
+	// 2) 上下文补全（多轮指代消解）：补全后的问题贯通路由与检索两个环节；
+	//    原始问题保留给记忆存档（RunChat 的 consolidate 用原话）与用户可见层。
+	q := question
+	if resolved, ok := d.ResolveQuery(ctx, question, user, sessionID); ok {
+		q = resolved
 	}
-	if err := emit(routeEvt(result.Route, result.Reason, result.ByLLM)); err != nil {
+
+	// 3) 路由：产出路由决策包（cascade 级联 / classic 旧单次分类 / 用户指定模式）
+	dec := d.decideRoute(ctx, q, mode)
+	if q != question {
+		dec.Reason += "；已结合会话上下文补全指代"
+	}
+	if err := emit(routeDecisionEvt(dec)); err != nil {
 		return err
 	}
 
-	// 3) 分发
-	switch result.Route {
+	// 4) 分发。ReAct 引擎（P6 阶段5）两种入口：
+	//    mode=react 显式指定；REACT_MODE=on 时"目标明确但路径不定"的办理问题自动转自主循环。
+	if mode == "react" || (d.Settings.ReactMode == "on" && dec.Route == "transaction" && reactPlanRe.MatchString(q)) {
+		if err := d.RunReAct(ctx, emit, q, role, user, sessionID, dec.Toolset); err != nil {
+			return err
+		}
+		return emit(doneEvt(elapsedMS(t0)))
+	}
+
+	switch dec.Route {
 	case "refusal":
 		if err := emit(answerEvt(RefusalAnswer)); err != nil {
 			return err
@@ -104,41 +140,84 @@ func (d *Deps) runChatInner(ctx context.Context, emit emitFn, question, mode, se
 			return err
 		}
 	case "factual":
-		if err := d.AnswerDirect(ctx, emit, question, d.Retriever.K); err != nil {
+		if err := d.AnswerDirect(ctx, emit, q, d.Retriever.K, user, sessionID); err != nil {
 			return err
 		}
 	case "research":
-		if err := d.RunResearch(ctx, emit, question, 5); err != nil {
+		if err := d.RunResearch(ctx, emit, q, 5, user, sessionID); err != nil {
 			return err
 		}
 	case "hybrid":
 		if err := emit(statusEvt("先回答你的政策问题…")); err != nil {
 			return err
 		}
-		if err := d.AnswerDirect(ctx, emit, question, d.Retriever.K); err != nil {
+		if err := d.AnswerDirect(ctx, emit, q, d.Retriever.K, user, sessionID); err != nil {
 			return err
 		}
 		if err := emit(statusEvt("接下来为你办理业务…")); err != nil {
 			return err
 		}
-		if err := d.StartFlow(ctx, emit, question, role, user, sessionID); err != nil {
+		if err := d.StartFlow(ctx, emit, q, role, user, sessionID); err != nil {
 			return err
 		}
 	case "transaction":
-		if err := d.StartFlow(ctx, emit, question, role, user, sessionID); err != nil {
+		if err := d.StartFlow(ctx, emit, q, role, user, sessionID); err != nil {
+			return err
+		}
+	case "agent":
+		// agent-first：ReAct 引擎自主组合工具（写操作外挂确认流）。
+		if err := d.RunReAct(ctx, emit, q, role, user, sessionID, dec.Toolset); err != nil {
 			return err
 		}
 	default:
-		if err := emit(errorEvt(fmt.Sprintf("未知路由：%s", result.Route))); err != nil {
+		if err := emit(errorEvt(fmt.Sprintf("未知路由：%s", dec.Route))); err != nil {
 			return err
 		}
 	}
 
-	// 4) done
+	// 5) done
 	if err := emit(doneEvt(elapsedMS(t0))); err != nil {
 		return err
 	}
 	return nil
+}
+
+// decideRoute 按 ROUTER_MODE 产出路由决策包。
+// cascade（默认）：L0/L1/L2 五分类级联；classic：旧单次分类；
+// agent-first：三选一执行策略（refusal/direct/agent，见 triage.go）。
+func (d *Deps) decideRoute(ctx context.Context, question, mode string) RouteDecision {
+	if mode == "direct" || mode == "research" {
+		dec := RouteDecision{Route: mode, Layer: "user-specified", Reason: "用户指定 " + mode, PreRAG: true}
+		dec.fillPolicy()
+		return dec
+	}
+	if mode == "react" {
+		// 显式 ReAct 也要先拿决策包约束工具集。
+		return d.routeDecision(ctx, question)
+	}
+	if d.Settings.RouterMode == "agent-first" {
+		return d.TriageRoute(ctx, question)
+	}
+	if d.Settings.RouterMode == "classic" {
+		r := d.RouteQuestion(ctx, question)
+		return decisionFromClassic(r)
+	}
+	return d.CascadeRoute(ctx, question)
+}
+
+// routeDecision classic/cascade 之外需要决策包但 mode 已定的入口复用。
+func (d *Deps) routeDecision(ctx context.Context, question string) RouteDecision {
+	if d.Settings.RouterMode == "classic" {
+		return decisionFromClassic(d.RouteQuestion(ctx, question))
+	}
+	return d.CascadeRoute(ctx, question)
+}
+
+// decisionFromClassic 旧 RouteResult → 决策包（classic 模式的适配层）。
+func decisionFromClassic(r RouteResult) RouteDecision {
+	dec := RouteDecision{Route: r.Route, Layer: "classic", Reason: r.Reason, ByLLM: r.ByLLM}
+	dec.fillPolicy()
+	return dec
 }
 
 // flowLabel 工具 → 流程中文名（续轮 route 事件的 reason 用）。

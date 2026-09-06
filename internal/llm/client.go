@@ -14,6 +14,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"gewu/internal/budget"
@@ -23,10 +24,51 @@ import (
 // ErrNoKey 未配置密钥（零 key 演示模式）时调用模型。
 var ErrNoKey = errors.New("未配置 LLM_API_KEY，无法调用模型")
 
-// Message 一条对话消息（system/user/assistant）。
+// Message 一条对话消息（system/user/assistant/tool）。
+// ToolCalls / ToolCallID 仅供原生 tool-calling 多轮协议使用（agent-first 链路）：
+// assistant 消息回填 tool_calls，tool 结果消息携带 tool_call_id。
 type Message struct {
-	Role    string `json:"role"`
-	Content string `json:"content"`
+	Role       string        `json:"role"`
+	Content    string        `json:"content"`
+	ToolCalls  []ToolCallMsg `json:"tool_calls,omitempty"`
+	ToolCallID string        `json:"tool_call_id,omitempty"`
+}
+
+// ToolDef 原生 tool-calling 的工具定义（OpenAI 兼容形状，GLM 支持）。
+type ToolDef struct {
+	Type     string       `json:"type"` // "function"
+	Function ToolFunction `json:"function"`
+}
+
+// ToolFunction 工具的名称/描述/参数 JSON Schema。
+type ToolFunction struct {
+	Name        string         `json:"name"`
+	Description string         `json:"description"`
+	Parameters  map[string]any `json:"parameters"`
+}
+
+// ToolCallMsg assistant 消息里回填的工具调用（id 用于配对 tool 结果）。
+type ToolCallMsg struct {
+	ID       string `json:"id"`
+	Type     string `json:"type"` // "function"
+	Function struct {
+		Name      string `json:"name"`
+		Arguments string `json:"arguments"` // JSON 编码的参数字符串
+	} `json:"function"`
+}
+
+// ToolCall ChatWithTools 解析后的单次调用（Arguments 已是字符串原文，调用方自行 Unmarshal）。
+type ToolCall struct {
+	ID        string
+	Name      string
+	Arguments string
+}
+
+// Completion ChatWithTools 的结果：文本与工具调用并存
+// （模型可能在同一条消息里既说话又发起调用；无调用时 ToolCalls 为空，Content 即最终回答）。
+type Completion struct {
+	Content   string
+	ToolCalls []ToolCall
 }
 
 // Options 单次补全的调节参数。
@@ -85,6 +127,8 @@ type chatRequest struct {
 	Stream         bool        `json:"stream,omitempty"`
 	ResponseFormat *respFormat `json:"response_format,omitempty"`
 	Thinking       *thinking   `json:"thinking,omitempty"`
+	Tools          []ToolDef   `json:"tools,omitempty"`       // 原生 tool-calling（agent-first）
+	ToolChoice     string      `json:"tool_choice,omitempty"` // 缺省 auto
 }
 
 type respFormat struct {
@@ -94,7 +138,8 @@ type respFormat struct {
 type chatResponse struct {
 	Choices []struct {
 		Message struct {
-			Content string `json:"content"`
+			Content   string        `json:"content"`
+			ToolCalls []ToolCallMsg `json:"tool_calls"`
 		} `json:"message"`
 	} `json:"choices"`
 	Usage *struct {
@@ -131,7 +176,78 @@ const requestTimeout = 10 * time.Minute
 
 // url 拼接端点地址（base 以/结尾或未带/均可）。
 func (c *Client) url(path string) string {
-	return strings.TrimRight(c.s.LLMBaseURL, "/") + path
+	return endpointURL(c.s.LLMBaseURL, path)
+}
+
+// endpointURL 按 base 拼路径（chat 与 embed 通道各自传 base）。
+func endpointURL(base, path string) string {
+	return strings.TrimRight(base, "/") + path
+}
+
+// embedBase embed 通道端点：EMBED_BASE_URL 优先，缺省回退 LLM_BASE_URL。
+func (c *Client) embedBase() string {
+	if c.s.EmbedBaseURL != "" {
+		return c.s.EmbedBaseURL
+	}
+	return c.s.LLMBaseURL
+}
+
+// embedKey embed 通道密钥：EMBED_API_KEY 优先，缺省回退 LLM_API_KEY。
+func (c *Client) embedKey() string {
+	if c.s.EmbedAPIKey != "" {
+		return c.s.EmbedAPIKey
+	}
+	return c.s.LLMKey
+}
+
+// HasEmbedKey embed 通道是否可用（ingest 启动校验用）。
+func (c *Client) HasEmbedKey() bool { return c.embedKey() != "" }
+
+// ChatWithTools 原生 tool-calling 补全：请求携带工具清单，响应解析 content 与
+// tool_calls 并存。模型不再发起调用时 ToolCalls 为空——Content 即最终回答
+// （agent 循环的唯一终止判据）。用量同样计入预算；不用 JSONMode
+// （response_format 与 tools 在部分端点互斥）。
+func (c *Client) ChatWithTools(ctx context.Context, messages []Message, o Options, tools []ToolDef) (*Completion, error) {
+	if !c.HasKey() {
+		return nil, ErrNoKey
+	}
+	if err := c.budget.Ensure(); err != nil {
+		return nil, err
+	}
+	o.applyDefaults()
+	body := chatRequest{
+		Model:       c.model(o.Small),
+		Messages:    messages,
+		Temperature: o.Temperature,
+		MaxTokens:   o.MaxTokens,
+		Tools:       tools,
+	}
+	if c.s.LLMDisableThinking {
+		body.Thinking = &thinking{Type: "disabled"}
+	}
+	var resp chatResponse
+	if err := c.postJSON(ctx, c.url("/chat/completions"), body, &resp); err != nil {
+		return nil, err
+	}
+	if resp.Usage != nil {
+		c.budget.Add(resp.Usage.TotalTokens)
+	}
+	if len(resp.Choices) == 0 {
+		return nil, fmt.Errorf("模型响应缺少 choices")
+	}
+	msg := resp.Choices[0].Message
+	out := &Completion{Content: msg.Content}
+	for _, tc := range msg.ToolCalls {
+		if tc.Function.Name == "" {
+			continue // 端点偶发占位调用
+		}
+		out.ToolCalls = append(out.ToolCalls, ToolCall{
+			ID:        tc.ID,
+			Name:      tc.Function.Name,
+			Arguments: tc.Function.Arguments,
+		})
+	}
+	return out, nil
 }
 
 // Chat 同步补全，返回完整文本；实际用量计入每日预算。
@@ -192,7 +308,7 @@ func (c *Client) ChatStream(ctx context.Context, messages []Message, o Options, 
 	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
 	defer cancel()
 
-	req, err := c.newRequest(ctx, http.MethodPost, c.url("/chat/completions"), body)
+	req, err := c.newRequest(ctx, http.MethodPost, c.url("/chat/completions"), c.s.LLMKey, body)
 	if err != nil {
 		return err
 	}
@@ -236,27 +352,67 @@ func (c *Client) ChatStream(ctx context.Context, messages []Message, o Options, 
 	return nil
 }
 
+// mmInputItem 火山多模态向量接口的 input 元素（非标准形状）。
+type mmInputItem struct {
+	Type string `json:"type"`
+	Text string `json:"text"`
+}
+
+type mmEmbedRequest struct {
+	Model          string        `json:"model"`
+	EncodingFormat string        `json:"encoding_format"`
+	Input          []mmInputItem `json:"input"`
+}
+
+// mmEmbedResponse 火山多模态接口响应：data 是对象（data.embedding），非数组，
+// 且不支持批量（多个 text 只返回一个联合向量）——必须逐条请求。
+type mmEmbedResponse struct {
+	Data struct {
+		Embedding []float64 `json:"embedding"`
+	} `json:"data"`
+	Usage *struct {
+		TotalTokens int64 `json:"total_tokens"`
+	} `json:"usage"`
+}
+
+// embedConcurrency 多模态逐条请求的并发度（火山限流友好，ingest 千级 chunk 足够）。
+const embedConcurrency = 4
+
+// embedTimeout 单条 embedding 请求的独立超时：小请求被卡不必等 chat 的 10 分钟。
+const embedTimeout = 45 * time.Second
+
 // Embed 文本向量化（调用方自行做归一化），结果按输入顺序返回。
+// 双通道：EMBED_MODE=ark_multimodal 走火山 /embeddings/multimodal（逐条、并发 4、保序）；
+// 其余（text/空）走标准 /embeddings 批量接口。chat 与 embed 的 base/key 相互独立，
+// EMBED_* 缺省时回退 LLM_*。
 func (c *Client) Embed(ctx context.Context, texts []string) ([][]float64, error) {
-	if !c.HasKey() {
+	if len(texts) == 0 {
+		return nil, nil
+	}
+	if !c.HasEmbedKey() {
 		return nil, ErrNoKey
 	}
 	if err := c.budget.Ensure(); err != nil {
 		return nil, err
 	}
+	if c.s.EmbedMode == "ark_multimodal" {
+		return c.embedMultimodal(ctx, texts)
+	}
+	return c.embedText(ctx, texts)
+}
+
+// embedText 标准 OpenAI 兼容批量向量化（按 data[].index 归位）。
+func (c *Client) embedText(ctx context.Context, texts []string) ([][]float64, error) {
 	var resp embedResponse
-	err := c.postJSON(ctx, c.url("/embeddings"), embedRequest{Model: c.s.EmbedModel, Input: texts}, &resp)
+	err := c.postJSONWithKeyTimeout(ctx, c.url("/embeddings"), c.embedKey(),
+		embedRequest{Model: c.s.EmbedModel, Input: texts}, &resp, embedTimeout)
 	if err != nil {
 		return nil, err
 	}
 	if resp.Usage != nil {
 		c.budget.Add(resp.Usage.TotalTokens)
 	} else {
-		var total int64
-		for _, t := range texts {
-			total += int64(len([]rune(t)))
-		}
-		c.budget.Add(total / 2)
+		c.estimateEmbedUsage(texts)
 	}
 	out := make([][]float64, len(texts))
 	for _, d := range resp.Data {
@@ -264,14 +420,108 @@ func (c *Client) Embed(ctx context.Context, texts []string) ([][]float64, error)
 			out[d.Index] = d.Embedding
 		}
 	}
+	// 与 multimodal 通道一致：供应商漏回某个 index 时不静默，明确报错。
+	for i, v := range out {
+		if len(v) == 0 {
+			return nil, fmt.Errorf("第 %d 条向量缺失（响应未返回 index=%d）", i, i)
+		}
+	}
 	return out, nil
 }
 
-// postJSON 发送 JSON 请求并把响应解析到 out。
-func (c *Client) postJSON(ctx context.Context, url string, body any, out any) error {
-	ctx, cancel := context.WithTimeout(ctx, requestTimeout)
+// embedMultimodal 火山 /embeddings/multimodal：接口不支持批量，逐条发请求。
+//
+// 固定 worker pool（在飞请求数 = embedConcurrency，与 len(texts) 无关——
+// 千级 chunk 不会瞬间建上千个阻塞协程）；任一条失败记 firstErr 后立即 cancel
+// 其余在途请求（首错即停，不再烧完整批配额）；按输入下标保序回填，
+// 整体失败不产出半截结果。
+func (c *Client) embedMultimodal(ctx context.Context, texts []string) ([][]float64, error) {
+	out := make([][]float64, len(texts))
+	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
-	req, err := c.newRequest(ctx, http.MethodPost, url, body)
+	var (
+		wg       sync.WaitGroup
+		mu       sync.Mutex
+		firstErr error
+		jobs     = make(chan int, len(texts)) // 带缓冲：worker 提前退出时投递不阻塞
+	)
+	for i := range texts {
+		jobs <- i
+	}
+	close(jobs)
+	worker := func() {
+		defer wg.Done()
+		for i := range jobs {
+			if ctx.Err() != nil {
+				return // 已有失败取消：快速退出，不再发新请求
+			}
+			var resp mmEmbedResponse
+			err := c.postJSONWithKeyTimeout(ctx, endpointURL(c.embedBase(), "/embeddings/multimodal"), c.embedKey(),
+				mmEmbedRequest{Model: c.s.EmbedModel, EncodingFormat: "float",
+					Input: []mmInputItem{{Type: "text", Text: texts[i]}}}, &resp, embedTimeout)
+			if err == nil && len(resp.Data.Embedding) == 0 {
+				err = fmt.Errorf("向量响应为空")
+			}
+			if err != nil {
+				err = fmt.Errorf("第 %d 条向量化失败: %w", i, err)
+				mu.Lock()
+				if firstErr == nil {
+					firstErr = err
+					cancel() // 首错即停
+				}
+				mu.Unlock()
+				return
+			}
+			out[i] = resp.Data.Embedding // 各 worker 写互不相同的下标，无数据竞争
+			if resp.Usage != nil {
+				c.budget.Add(resp.Usage.TotalTokens)
+			} else {
+				c.estimateEmbedUsage([]string{texts[i]})
+			}
+		}
+	}
+	wg.Add(embedConcurrency)
+	for w := 0; w < embedConcurrency; w++ {
+		go worker()
+	}
+	wg.Wait()
+	if firstErr != nil {
+		return nil, firstErr
+	}
+	for i, v := range out {
+		if len(v) == 0 {
+			return nil, fmt.Errorf("第 %d 条向量响应为空", i)
+		}
+	}
+	return out, nil
+}
+
+// estimateEmbedUsage 响应缺 usage 时按 rune 数/2 保守估算入账。
+func (c *Client) estimateEmbedUsage(texts []string) {
+	var total int64
+	for _, t := range texts {
+		total += int64(len([]rune(t)))
+	}
+	c.budget.Add(total / 2)
+}
+
+// postJSON 发送 JSON 请求并把响应解析到 out（chat 通道，LLM key，10min 超时）。
+func (c *Client) postJSON(ctx context.Context, url string, body any, out any) error {
+	return c.postJSONWithKeyTimeout(ctx, url, c.s.LLMKey, body, out, requestTimeout)
+}
+
+// postJSONWithKey 发送 JSON 请求并把响应解析到 out（key 由调用方指定，
+// chat 传 LLMKey、embed 传 embedKey——两家供应商密钥互不相通）。
+func (c *Client) postJSONWithKey(ctx context.Context, url, key string, body any, out any) error {
+	return c.postJSONWithKeyTimeout(ctx, url, key, body, out, requestTimeout)
+}
+
+// postJSONWithKeyTimeout 带调用方指定超时的底层 POST：chat 长流式用
+// requestTimeout(10min)，embedding 小请求用 embedTimeout(45s) 独立限时。
+func (c *Client) postJSONWithKeyTimeout(ctx context.Context, url, key string, body any, out any, timeout time.Duration) error {
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	req, err := c.newRequest(ctx, http.MethodPost, url, key, body)
 	if err != nil {
 		return err
 	}
@@ -290,7 +540,7 @@ func (c *Client) postJSON(ctx context.Context, url string, body any, out any) er
 	return nil
 }
 
-func (c *Client) newRequest(ctx context.Context, method, url string, body any) (*http.Request, error) {
+func (c *Client) newRequest(ctx context.Context, method, url, key string, body any) (*http.Request, error) {
 	buf, err := json.Marshal(body)
 	if err != nil {
 		return nil, err
@@ -300,7 +550,7 @@ func (c *Client) newRequest(ctx context.Context, method, url string, body any) (
 		return nil, err
 	}
 	req.Header.Set("Content-Type", "application/json")
-	req.Header.Set("Authorization", "Bearer "+c.s.LLMKey)
+	req.Header.Set("Authorization", "Bearer "+key)
 	return req, nil
 }
 

@@ -2,12 +2,14 @@ package main
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
 	"net/http/httptest"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 
 	"gewu/internal/agent"
@@ -18,9 +20,75 @@ import (
 	"gewu/internal/rag"
 )
 
-// newTestServer 构造零 key 模式的完整 HTTP 服务（临时数据目录）。
+// mockLLM 无状态 LLM mock：按 system 提示词内容分发响应，避免 goroutine
+// （记忆固化）与断言争抢脚本队列。同时满足 agent.LLMer 与 rag.LLMer。
+type mockLLM struct {
+	mu     sync.Mutex
+	seen   []string // 各次 Chat 的 system 片段（断言用）
+	stream string   // ChatStream 输出
+	// onChat 可选内容钩子（测试按需定制特定提示词的响应，如槽位抽取）。
+	onChat func(system, user string) (string, bool)
+}
+
+func (m *mockLLM) HasKey() bool { return true }
+
+func (m *mockLLM) record(system string) {
+	m.mu.Lock()
+	m.seen = append(m.seen, system)
+	m.mu.Unlock()
+}
+
+func (m *mockLLM) Chat(_ context.Context, messages []llm.Message, _ llm.Options) (string, error) {
+	system, user := "", ""
+	if len(messages) > 0 {
+		system = messages[0].Content
+	}
+	if len(messages) > 1 {
+		user = messages[len(messages)-1].Content
+	}
+	m.record(system)
+	if m.onChat != nil {
+		if resp, ok := m.onChat(system, user); ok {
+			return resp, nil
+		}
+	}
+	switch {
+	case strings.Contains(system, "问题分类器"): // 级联 L1
+		return `{"scores":{"factual":0.92,"research":0.03,"transaction":0.02,"hybrid":0.02,"refusal":0.01},"reason":"单点查询"}`, nil
+	case strings.Contains(system, "抽取关于该用户"): // 记忆固化
+		return `{"facts":[]}`, nil
+	case strings.Contains(system, "相关性打分器"): // rerank（未接入，防御）
+		return `{"scores":[]}`, nil
+	}
+	return "", nil
+}
+
+func (m *mockLLM) ChatStream(_ context.Context, _ []llm.Message, _ llm.Options, onDelta func(string) error) error {
+	return onDelta(m.stream)
+}
+
+func (m *mockLLM) ChatWithTools(_ context.Context, _ []llm.Message, _ llm.Options, _ []llm.ToolDef) (*llm.Completion, error) {
+	return &llm.Completion{Content: ""}, nil
+}
+
+func (m *mockLLM) Embed(_ context.Context, texts []string) ([][]float64, error) {
+	out := make([][]float64, len(texts))
+	for i := range out {
+		out[i] = []float64{1, 0}
+	}
+	return out, nil
+}
+
+// newTestServer 构造带 mock LLM 的完整 HTTP 服务（临时数据目录）。
 func newTestServer(t *testing.T, rateLimit int) (*server, *httptest.Server) {
+	return newTestServerWithMock(t, rateLimit, nil)
+}
+
+func newTestServerWithMock(t *testing.T, rateLimit int, mock *mockLLM) (*server, *httptest.Server) {
 	t.Helper()
+	if mock == nil {
+		mock = &mockLLM{}
+	}
 	dir := t.TempDir()
 	settings := config.Default()
 	settings.DataDir = dir
@@ -32,9 +100,9 @@ func newTestServer(t *testing.T, rateLimit int) (*server, *httptest.Server) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = store.Close() })
-	// 种两条可检索语料
+	// 种一条可检索语料（带向量——P6 起向量缺失会明确报错）
 	if err := store.UpsertDoc("0001-transfer", "转专业管理办法", "教务处", "2026-01-01",
-		[]string{"申请转专业的条件：绩点排名前 20%，无不及格课程。"}, nil); err != nil {
+		[]rag.ChunkRecord{{Text: "申请转专业的条件：绩点排名前 20%，无不及格课程。", Vec: []float64{1, 0}, ParentIdx: -1}}); err != nil {
 		t.Fatal(err)
 	}
 	biz, err := business.Open(filepath.Join(dir, "business.db"))
@@ -42,11 +110,19 @@ func newTestServer(t *testing.T, rateLimit int) (*server, *httptest.Server) {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() { _ = biz.Close() })
+	mem, err := agent.OpenMemory(filepath.Join(dir, "memory.db"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { _ = mem.Close() })
 
 	tb := budget.New(filepath.Join(dir, "usage.json"), settings.DailyTokenBudget)
-	lc := llm.New(settings, tb) // 无 key → 零 key 模式
-	deps := agent.NewDeps(settings, lc, rag.NewRetriever(store, settings.RetrievalK, lc), biz)
-	srv := &server{deps: deps, store: store, budget: tb, llm: lc, settings: settings}
+	if mock.stream == "" {
+		mock.stream = "依据资料：绩点排名前 20%[1]。"
+	}
+	lc := mock
+	deps := agent.NewDeps(settings, lc, rag.NewRetriever(store, settings.RetrievalK, lc), biz, mem)
+	srv := &server{deps: deps, store: store, budget: tb, settings: settings}
 	ts := httptest.NewServer(srv.newRouter())
 	t.Cleanup(ts.Close)
 	return srv, ts
@@ -85,7 +161,7 @@ func TestHealthEndpoint(t *testing.T) {
 	defer resp.Body.Close()
 	var h map[string]any
 	_ = json.NewDecoder(resp.Body).Decode(&h)
-	if h["status"] != "ok" || h["llm"] != false || h["version"] != "0.1.0" {
+	if h["status"] != "ok" || h["llm"] != true || h["embeddings"] != true || h["version"] != "0.1.0" {
 		t.Errorf("health = %v", h)
 	}
 	if _, ok := h["budget"].(map[string]any); !ok {
@@ -137,7 +213,7 @@ func TestSearchValidation(t *testing.T) {
 	}
 }
 
-func TestChatSSEZeroKeyFactual(t *testing.T) {
+func TestChatSSEFactualWithLLM(t *testing.T) {
 	_, ts := newTestServer(t, 100)
 	code, events := sseEvents(t, ts.URL, `{"question": "转专业需要什么条件", "mode": "auto"}`)
 	if code != http.StatusOK {
@@ -146,11 +222,12 @@ func TestChatSSEZeroKeyFactual(t *testing.T) {
 	if len(events) < 3 {
 		t.Fatalf("events = %v", events)
 	}
-	if events[0]["type"] != "route" || events[0]["route"] != "factual" {
-		t.Errorf("首事件应为 route/factual: %v", events[0])
+	first := events[0]
+	if first["type"] != "route" || first["route"] != "factual" {
+		t.Errorf("首事件应为 route/factual: %v", first)
 	}
-	if events[0]["by_llm"] != false {
-		t.Errorf("零 key 应 by_llm=false: %v", events[0])
+	if first["by_llm"] != true || first["layer"] != "L1-llm" {
+		t.Errorf("级联路由应带 layer/by_llm: %v", first)
 	}
 	var answer string
 	var hasCitations bool
@@ -166,8 +243,8 @@ func TestChatSSEZeroKeyFactual(t *testing.T) {
 			}
 		}
 	}
-	if !strings.Contains(answer, "检索演示模式") {
-		t.Errorf("零 key 应走演示模式: %q", answer)
+	if !strings.Contains(answer, "绩点排名前 20%") {
+		t.Errorf("应走 LLM 流式生成: %q", answer)
 	}
 	if !hasCitations {
 		t.Error("缺 citations 事件")
@@ -183,18 +260,33 @@ func TestChatSSEZeroKeyFactual(t *testing.T) {
 }
 
 func TestChatSSETransactionFlow(t *testing.T) {
-	_, ts := newTestServer(t, 100)
-	// 第一轮：预约（信息一次给全 → 直接确认）
+	// 有 key 时 advance() 走 LLM 槽位抽取分支；mock 对抽取提示词返回确定性槽位，
+	// 再经 normalizeSlot 的同一套解析器归一（与真实 GLM 路径一致）。
+	mock := &mockLLM{onChat: func(system, user string) (string, bool) {
+		if strings.Contains(system, "参数抽取器") && strings.Contains(user, "book_venue") {
+			return `{"slots":{"venue":"羽毛球馆","date":"明天","slot":"晚上"}}`, true
+		}
+		return "", false
+	}}
+	_, ts := newTestServerWithMock(t, 100, mock)
+	// 第一轮：预约（信息一次给全 → 直接确认）。L0 规则快路径，无需 LLM。
 	code, events := sseEvents(t, ts.URL,
 		`{"question": "帮我预约明天晚上的羽毛球馆", "session_id": "s1"}`)
 	if code != http.StatusOK {
 		t.Fatal(code)
 	}
+	var route map[string]any
 	var pending map[string]any
 	for _, ev := range events {
+		if ev["type"] == "route" {
+			route = ev
+		}
 		if ev["type"] == "pending_action" {
 			pending = ev
 		}
+	}
+	if route == nil || route["route"] != "transaction" || route["layer"] != "L0-rule" {
+		t.Fatalf("route = %v（应命中 L0 规则快路径）", route)
 	}
 	if pending == nil || pending["tool"] != "book_venue" {
 		t.Fatalf("pending = %v", pending)

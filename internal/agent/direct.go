@@ -22,7 +22,8 @@ func numberedContext(hits []rag.Hit) (string, []Citation) {
 
 // AnswerDirect RAG 直答：单轮混合检索 → 带引用流式生成。
 // 产出事件流：answer_delta* → citations。
-func (d *Deps) AnswerDirect(ctx context.Context, emit emitFn, question string, k int) error {
+// userID/sessionID 用于分层装配长期记忆（P6 阶段4）。
+func (d *Deps) AnswerDirect(ctx context.Context, emit emitFn, question string, k int, userID, sessionID string) error {
 	hits, err := d.Retriever.Search(ctx, question, k)
 	if err != nil {
 		return err
@@ -36,22 +37,7 @@ func (d *Deps) AnswerDirect(ctx context.Context, emit emitFn, question string, k
 
 	context, citations := numberedContext(hits)
 
-	if d.LLM == nil || !d.LLM.HasKey() {
-		// 演示模式：返回检索节选
-		var excerpts []string
-		for i, h := range firstN(hits, 3) {
-			excerpts = append(excerpts, fmt.Sprintf("[%d] 《%s》：%s…", i+1, h.Title, truncate(h.Text, 180)))
-		}
-		if err := emit(answerEvt(DemoModeNote + "\n\n" + strings.Join(excerpts, "\n\n"))); err != nil {
-			return err
-		}
-		return emit(citationsEvt(citations))
-	}
-
-	messages := []llm.Message{
-		{Role: "system", Content: AnswerSystem},
-		{Role: "user", Content: fmt.Sprintf("参考资料：\n\n%s\n\n问题：%s", context, question)},
-	}
+	messages := d.assembleMessages(userID, sessionID, question, context)
 	streamErr := d.LLM.ChatStream(ctx, messages, llm.Options{}, func(text string) error {
 		return emit(answerEvt(text))
 	})
@@ -59,6 +45,25 @@ func (d *Deps) AnswerDirect(ctx context.Context, emit emitFn, question string, k
 		return streamErr
 	}
 	return emit(citationsEvt(citations))
+}
+
+// assembleMessages 消息分层装配（P6 阶段4，顺序固定，稳定内容前置以利 prompt cache）：
+//  1. system（引用式作答准则）
+//  2. 长期记忆（用户事实 + 本会话近期对话要点）——仅当存在记忆数据
+//  3. user（参考资料 + 问题）
+//
+// 无记忆数据时与历史版本逐字一致（两条消息），保证无记忆基线不回归。
+// 每轮对话只装配一次（直答/深研每轮恰走其一）。
+func (d *Deps) assembleMessages(userID, sessionID, question, context string) []llm.Message {
+	msgs := []llm.Message{{Role: "system", Content: AnswerSystem}}
+	if mem := d.memoryBlock(userID, sessionID); mem != "" {
+		msgs = append(msgs, llm.Message{Role: "system", Content: "已知用户信息：\n" + mem})
+	}
+	msgs = append(msgs, llm.Message{
+		Role:    "user",
+		Content: fmt.Sprintf("参考资料：\n\n%s\n\n问题：%s", context, question),
+	})
+	return msgs
 }
 
 // truncate 按 rune 截断。

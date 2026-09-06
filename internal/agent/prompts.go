@@ -5,7 +5,7 @@ import "strings"
 // 提示词集中管理：路由 / 拆解 / 引用式作答 / 槽位抽取。
 // 文本与被替换的 Python 版逐字一致（PARITY §5.1/§6/§7/§9.3.2）。
 
-// RouterSystem 五分类问题路由。
+// RouterSystem 五分类问题路由（classic 模式 + 级联 L2 二次判定共用）。
 const RouterSystem = `你是校园问答系统「格物」的问题路由器，判断用户问题应走哪条路径：
 
 - factual：单一事实/规则查询，检索一次资料即可回答。**同一主题的并列小问也算 factual**
@@ -28,6 +28,31 @@ const RouterSystem = `你是校园问答系统「格物」的问题路由器，�
 
 注意：只要问题涉及校园（政策、教务、生活服务），无论多复杂都不算 refusal。
 只输出 JSON：{"route": "factual|research|refusal|transaction|hybrid", "reason": "一句话理由"}`
+
+// RouterSystemCascade 级联路由 L1：让小模型输出五类概率分布而非单个 label，
+// 上游据此做双阈值 + margin 判定（P6 阶段2）。
+const RouterSystemCascade = `你是校园问答系统「格物」的问题分类器。类别：
+- factual：单一事实/规则查询，检索一次资料即可回答；同一主题的并列小问也算 factual。
+- research：复合知识问题，需要跨不同政策/文件综合比较或多步推理才能回答。
+- transaction：明确的办理或业务查询诉求（预约/请假/取消/查我的预约/待审批等要调业务系统的）。
+- hybrid：既有办理/业务查询诉求，又有知识咨询。
+- refusal：与大学校园学习生活明显无关的问题（股市、写代码、闲聊等）。
+注意：询问政策规则（请假找谁批、预约有什么要求）是 factual/research 而非 transaction；
+查询实时业务数据（现在能约哪些场馆、我的预约）才是 transaction。
+用户提到请假、预约、办手续等校园事务时，无论表述多口语化都是 transaction/hybrid，
+绝不能判成 refusal。
+
+只输出 JSON：{"scores":{"factual":0.0,"research":0.0,"transaction":0.0,"hybrid":0.0,"refusal":0.0},"reason":"一句话"}
+scores 为五类概率、和为 1；拿不准就把概率分散，不要给某类虚高置信。`
+
+// QueryRewriteSystem 多轮指代消解（上下文补全）：把含指代/省略的追问补全为
+// 自包含问题，供路由与检索使用（P7+ 改造）。原话保留给记忆存档与用户可见层。
+const QueryRewriteSystem = `你是多轮对话的指代消解器。给你最近几轮对话、已知用户信息与用户本轮问题，
+把本轮问题补全为不依赖上下文也能理解的自包含问题：
+1. 只做指代消解与省略补全（如"那/它/第二个/我的情况/上述"指什么），不改变用户意图、不新增问题、不回答问题；
+2. "我的情况"类指代结合已知用户信息（专业/绩点等）补全；
+3. 本轮问题已自包含时原样返回。
+只输出 JSON：{"rewritten":"补全后的问题"}`
 
 // SlotExtractSystem 业务办理参数抽取。
 const SlotExtractSystem = `你是业务办理系统的参数抽取器。根据用户消息为指定工具抽取参数字段。
@@ -67,7 +92,8 @@ const (
 	NoDataAnswer = "知识库中暂时没有找到与这个问题相关的资料。" +
 		"如果你认为这属于校园政策/服务问题，欢迎换个说法再问一次。"
 
-	// DemoModeNote 零 key 演示模式说明。
+	// DemoModeNote 零 key 演示模式说明。单体已去无 key（P6 阶段0），
+	// 仅微服务 orchestrator（本轮不迁移）仍在引用，微服务迁移时一并清理。
 	DemoModeNote = "（检索演示模式：未配置 LLM_API_KEY，以下为知识库检索结果节选，不经过模型生成）"
 )
 

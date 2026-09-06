@@ -10,9 +10,10 @@ MS_SERVICES := gateway orchestrator conversation generate tool rag
 build:
 	go build -o $(BIN) ./cmd/server
 
-# 语料入库：有 LLM_API_KEY 时建「BM25+向量」混合索引，否则仅 BM25
+# 语料入库：真调 EMBED_*（火山方舟）出向量，建「BM25+向量」混合索引。
+# 可选参数：REBUILD=1 重建 / NO_EMBED=1 仅 BM25（显式手动选项）
 ingest:
-	go run ./cmd/server -ingest
+	go run ./cmd/server -ingest $(if $(REBUILD),-rebuild,) $(if $(NO_EMBED),-no-embed,)
 
 # 微服务侧入库（P3 起）：经 rag 服务 Redis Streams 流水线，阻塞至完成回执。
 # 服务需已启动（compose 或 run-ms）；可选 NO_EMBED=1 / REBUILD=1

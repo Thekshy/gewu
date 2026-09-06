@@ -42,7 +42,8 @@ func (d *Deps) plan(ctx context.Context, question string) []string {
 }
 
 // RunResearch 产出事件流：status / step* → answer_delta* → citations。
-func (d *Deps) RunResearch(ctx context.Context, emit emitFn, question string, k int) error {
+// userID/sessionID 用于分层装配长期记忆（P6 阶段4）。
+func (d *Deps) RunResearch(ctx context.Context, emit emitFn, question string, k int, userID, sessionID string) error {
 	if k <= 0 {
 		k = 5
 	}
@@ -96,20 +97,7 @@ func (d *Deps) RunResearch(ctx context.Context, emit emitFn, question string, k 
 		return err
 	}
 
-	if d.LLM == nil || !d.LLM.HasKey() {
-		head := strings.Join(firstN(blocks, 3), "\n\n")
-		text := fmt.Sprintf("%s\n\n围绕 %d 个子问题共检索到 %d 条相关段落，节选：\n\n%s",
-			DemoModeNote, len(subquestions), len(order), head)
-		if err := emit(answerEvt(text)); err != nil {
-			return err
-		}
-		return emit(citationsEvt(citations))
-	}
-
-	messages := []llm.Message{
-		{Role: "system", Content: AnswerSystem},
-		{Role: "user", Content: fmt.Sprintf("参考资料：\n\n%s\n\n问题：%s", strings.Join(blocks, "\n"), question)},
-	}
+	messages := d.assembleMessages(userID, sessionID, question, strings.Join(blocks, "\n"))
 	streamErr := d.LLM.ChatStream(ctx, messages, llm.Options{}, func(text string) error {
 		return emit(answerEvt(text))
 	})

@@ -4,8 +4,10 @@
 //
 //	gewu-api                    启动 HTTP 服务（:8000）
 //	gewu-api -ingest            语料入库后退出（等价 make ingest）
-//	gewu-api -ingest -no-embed  仅建 BM25 索引
+//	gewu-api -ingest -no-embed  仅建 BM25 索引（显式手动选项）
 //	gewu-api -ingest -rebuild   删除旧索引后重建
+//
+// P6 阶段0：强制有 key 启动——LLM_API_KEY 缺失直接 fatal，不再有零 key 演示模式。
 package main
 
 import (
@@ -36,14 +38,24 @@ func main() {
 		addr       string
 	)
 	flag.BoolVar(&ingestOnly, "ingest", false, "语料入库后退出（不启动服务）")
-	flag.BoolVar(&noEmbed, "no-embed", false, "入库时只建 BM25 索引")
+	flag.BoolVar(&noEmbed, "no-embed", false, "入库时只建 BM25 索引（显式手动选项）")
 	flag.BoolVar(&rebuild, "rebuild", false, "入库前删除旧索引文件")
 	flag.StringVar(&addr, "addr", ":8000", "HTTP 监听地址")
 	flag.Parse()
 
 	settings := config.Load()
+	// 启动校验：强制有 key（P6 去无 key——不再演示模式启动）。
+	if settings.LLMKey == "" {
+		fmt.Fprintln(os.Stderr, "启动失败：未配置 LLM_API_KEY（P6 起强制有 key，无演示模式）")
+		os.Exit(1)
+	}
 	tokenBudget := budget.New(settings.DataDir+"/usage.json", settings.DailyTokenBudget)
 	llmClient := llm.New(settings, tokenBudget)
+
+	if ingestOnly && !noEmbed && !llmClient.HasEmbedKey() {
+		fmt.Fprintln(os.Stderr, "入库失败：未配置 EMBED_API_KEY/EMBED_BASE_URL（确要仅建 BM25 索引请显式加 -no-embed）")
+		os.Exit(1)
+	}
 
 	if ingestOnly {
 		st, path, err := rag.Ingest(context.Background(), settings, llmClient, rag.IngestOptions{NoEmbed: noEmbed, Rebuild: rebuild})
@@ -55,7 +67,7 @@ func main() {
 		if st.Embedded {
 			emb = "是"
 		}
-		fmt.Printf("\n入库完成：%d 篇文档 / %d 个 chunk / 向量化=%s → %s\n", st.Docs, st.Chunks, emb, path)
+		fmt.Printf("\n入库完成：%d 篇文档 / %d 个 chunk（含父子块）/ 向量化=%s → %s\n", st.Docs, st.Chunks, emb, path)
 		return
 	}
 
@@ -86,9 +98,17 @@ func run(settings *config.Settings, llmClient *llm.Client, tokenBudget *budget.T
 		return err
 	}
 	defer biz.Close()
+	mem, err := agent.OpenMemory(settings.DataDir + "/memory.db")
+	if err != nil {
+		return err
+	}
+	defer mem.Close()
 
 	retriever := rag.NewRetriever(store, settings.RetrievalK, llmClient)
-	deps := agent.NewDeps(settings, llmClient, retriever, biz)
+	if settings.RerankMode != "off" {
+		retriever = retriever.WithReranker(rag.NewLLMReranker(llmClient))
+	}
+	deps := agent.NewDeps(settings, llmClient, retriever, biz, mem)
 
 	srv := &server{deps: deps, store: store, budget: tokenBudget, llm: llmClient, settings: settings}
 
@@ -96,7 +116,9 @@ func run(settings *config.Settings, llmClient *llm.Client, tokenBudget *budget.T
 		gin.SetMode(gin.ReleaseMode)
 	}
 	router := srv.newRouter()
-	fmt.Printf("格物 Gewu API %s 监听 %s（LLM %s）\n", config.Version, addr, llmState(llmClient))
+	fmt.Printf("格物 Gewu API %s 监听 %s（LLM %s，路由 %s，切分 %s，rerank %s，react %s，补全 %s）\n",
+		config.Version, addr, llmState(llmClient), settings.RouterMode, settings.ChunkMode,
+		settings.RerankMode, settings.ReactMode, settings.QueryRewrite)
 	return router.Run(addr)
 }
 
@@ -234,9 +256,9 @@ func (s *server) chat(c *gin.Context) {
 	switch req.Mode {
 	case "", "auto":
 		req.Mode = "auto"
-	case "direct", "research":
+	case "direct", "research", "react":
 	default:
-		unprocessable(c, "mode 必须为 auto/direct/research")
+		unprocessable(c, "mode 必须为 auto/direct/research/react")
 		return
 	}
 	switch req.Role {

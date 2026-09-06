@@ -26,7 +26,7 @@ func testDeps(t *testing.T) *Deps {
 	}
 	t.Cleanup(func() { _ = biz.Close() })
 	s := config.Default()
-	d := NewDeps(s, nil, rag.NewRetriever(store, s.RetrievalK, nil), biz)
+	d := NewDeps(s, nil, rag.NewRetriever(store, s.RetrievalK, nil), biz, nil)
 	resetAll(t, d)
 	return d
 }

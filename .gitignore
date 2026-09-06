@@ -13,6 +13,8 @@ node_modules/
 # 运行产物（语料在 data/corpus 下是受版本管理的）
 data/index.db
 data/business.db
+data/memory.db
+data/sessions.db
 data/usage.json
 # 评测报告默认忽略，但两份对照基线是交付物，需入库
 eval/reports/*

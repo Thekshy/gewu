@@ -122,12 +122,14 @@ func EmbedBatched(ctx context.Context, client LLMer, chunks []string) ([][]float
 
 // IngestOptions 入库 CLI 选项。
 type IngestOptions struct {
-	NoEmbed bool // 只建 BM25 索引
+	NoEmbed bool // 只建 BM25 索引（显式手动选项）
 	Rebuild bool // 删除旧索引文件后重建
 }
 
 // Ingest 语料入库：corpus/*.md → 解析 → 分块 →（可选）向量化 → SQLite。
-// 返回 (文档数, chunk 数, 是否向量化和索引路径)。无 key 自动降级为仅 BM25。
+// 返回 (文档数, chunk 数, 是否向量化和索引路径)。
+// P6 阶段0 去静默降级：非 -no-embed 时向量化失败直接报错退出，
+// 不再"假成功"成纯 BM25 索引（向量缺失在检索侧也会被明确拒绝）。
 func Ingest(ctx context.Context, s *config.Settings, client *llm.Client, opt IngestOptions) (Stats, string, error) {
 	if opt.Rebuild {
 		if _, err := os.Stat(s.IndexPath); err == nil {
@@ -145,7 +147,11 @@ func Ingest(ctx context.Context, s *config.Settings, client *llm.Client, opt Ing
 	}
 	defer store.Close()
 
-	useEmbed := !opt.NoEmbed && client != nil && client.HasKey()
+	hierarchical := s.ChunkMode != "flat"
+	useEmbed := !opt.NoEmbed
+	if useEmbed && (client == nil || !client.HasEmbedKey()) {
+		return Stats{}, s.IndexPath, fmt.Errorf("未配置 EMBED_API_KEY/LLM_API_KEY，无法向量化；确要仅建 BM25 请显式加 -no-embed")
+	}
 	files, err := filepath.Glob(filepath.Join(s.CorpusDir, "*.md"))
 	if err != nil {
 		return Stats{}, s.IndexPath, err
@@ -155,38 +161,101 @@ func Ingest(ctx context.Context, s *config.Settings, client *llm.Client, opt Ing
 		return Stats{}, s.IndexPath, fmt.Errorf("未找到语料文件：%s/*.md", s.CorpusDir)
 	}
 
+	modeLabel := "BM25+向量"
+	if !useEmbed {
+		modeLabel = "仅BM25（-no-embed）"
+	}
 	for _, f := range files {
 		doc, err := ParseDoc(f)
 		if err != nil {
 			return Stats{}, s.IndexPath, err
 		}
-		chunks := ChunkText(doc.Text, 450, 80)
-		var vectors [][]float64
-		if useEmbed && len(chunks) > 0 {
-			vectors, err = EmbedBatched(ctx, client, chunks)
-			if err != nil {
-				// 端点不支持/无额度时，后续文档不再重试（与 Python 版一致）
-				fmt.Printf("  !! 向量化不可用（%v），自动降级为仅 BM25 索引\n", err)
-				useEmbed = false
-				vectors = nil
-			}
-		}
 		docID := strings.TrimSuffix(filepath.Base(f), ".md")
+		records, err := buildRecords(ctx, docID, doc, client, useEmbed, hierarchical)
+		if err != nil {
+			return Stats{}, s.IndexPath, err
+		}
 		title := doc.Meta["title"]
 		if title == "" {
 			title = docID
 		}
-		if err := store.UpsertDoc(docID, title, doc.Meta["source"], doc.Meta["updated"], chunks, vectors); err != nil {
+		if err := store.UpsertDoc(docID, title, doc.Meta["source"], doc.Meta["updated"], records); err != nil {
 			return Stats{}, s.IndexPath, err
 		}
-		mode := "仅BM25"
-		if vectors != nil {
-			mode = "BM25+向量"
-		}
-		fmt.Printf("  ✓ %s  %d 块  [%s]\n", docID, len(chunks), mode)
+		fmt.Printf("  ✓ %s  %d 块（父 %d/子 %d）  [%s]\n", docID, len(records),
+			countParents(records), len(records)-countParents(records), modeLabel)
 	}
 	st, err := store.GetStats()
 	return st, s.IndexPath, err
+}
+
+// buildRecords 单文档切分 + 向量化：
+// hierarchical（默认）父子两层——只对子块向量化，父块仅入库供回取；
+// flat 旧路径逐字保留 ChunkText(450,80) 单层切分，行为与冻结基线一致。
+func buildRecords(ctx context.Context, docID string, doc ParsedDoc, client *llm.Client, useEmbed, hierarchical bool) ([]ChunkRecord, error) {
+	if !hierarchical {
+		texts := ChunkText(doc.Text, 450, 80)
+		var vectors [][]float64
+		if useEmbed && len(texts) > 0 {
+			var err error
+			vectors, err = EmbedBatched(ctx, client, texts)
+			if err != nil {
+				return nil, fmt.Errorf("向量化失败: %w", err)
+			}
+		}
+		records := make([]ChunkRecord, len(texts))
+		for i, t := range texts {
+			records[i] = ChunkRecord{Text: t, ParentIdx: -1}
+			if vectors != nil && i < len(vectors) {
+				records[i].Vec = vectors[i]
+			}
+		}
+		return records, nil
+	}
+	chunks := HierarchicalChunks(doc.Text, parentLimit, childLimit, hierOverlap)
+	var childTexts []string
+	childIdx := []int{}
+	for i, c := range chunks {
+		if !c.IsParent {
+			childTexts = append(childTexts, c.Text)
+			childIdx = append(childIdx, i)
+		}
+	}
+	var childVecs [][]float64
+	if useEmbed && len(childTexts) > 0 {
+		var err error
+		childVecs, err = EmbedBatched(ctx, client, childTexts)
+		if err != nil {
+			return nil, fmt.Errorf("子块向量化失败: %w", err)
+		}
+	}
+	records := make([]ChunkRecord, len(chunks))
+	vecAt := map[int][]float64{}
+	for j, idx := range childIdx {
+		if j < len(childVecs) {
+			vecAt[idx] = childVecs[j]
+		}
+	}
+	for i, c := range chunks {
+		records[i] = ChunkRecord{
+			Text:        c.Text,
+			SectionPath: c.SectionPath,
+			IsParent:    c.IsParent,
+			ParentIdx:   c.ParentIdx,
+			Vec:         vecAt[i],
+		}
+	}
+	return records, nil
+}
+
+func countParents(records []ChunkRecord) int {
+	n := 0
+	for _, r := range records {
+		if r.IsParent {
+			n++
+		}
+	}
+	return n
 }
 
 // CorpusFiles 列出语料文件（供测试与统计）。
