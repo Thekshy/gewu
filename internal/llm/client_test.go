@@ -493,3 +493,61 @@ func TestMessageToolProtocolRoundTrip(t *testing.T) {
 		t.Errorf("tool 消息 = %v", toolMsg)
 	}
 }
+
+// ---------- P10-1：响应侧 finish_reason + usage 三元组 ----------
+
+func TestChatWithToolsFinishReasonPassthrough(t *testing.T) {
+	for _, fr := range []string{"stop", "tool_calls", "length"} {
+		c, _ := testClient(t, func(w http.ResponseWriter, r *http.Request) {
+			_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"","tool_calls":[` +
+				`{"id":"c1","type":"function","function":{"name":"book_venue","arguments":"{}"}}` +
+				`]},"finish_reason":"` + fr + `"}],"usage":{"total_tokens":10}}`))
+		})
+		comp, err := c.ChatWithTools(context.Background(),
+			[]Message{{Role: "user", Content: "帮我预约"}}, Options{}, testTools())
+		if err != nil {
+			t.Fatalf("finish_reason=%s: %v", fr, err)
+		}
+		if comp.FinishReason != fr {
+			t.Errorf("FinishReason = %q, want %q", comp.FinishReason, fr)
+		}
+	}
+}
+
+func TestChatWithToolsFinishReasonAbsentIsEmpty(t *testing.T) {
+	// 兼容不回 finish_reason 字段的端点：解析后为空串，不影响既有行为
+	c, _ := testClient(t, func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"最终回答"}}]}`))
+	})
+	comp, err := c.ChatWithTools(context.Background(),
+		[]Message{{Role: "user", Content: "hi"}}, Options{}, testTools())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if comp.FinishReason != "" {
+		t.Errorf("缺字段时 FinishReason = %q, want 空串", comp.FinishReason)
+	}
+}
+
+func TestUsageTripleParsedBudgetTotalOnly(t *testing.T) {
+	var resp chatResponse
+	if err := json.Unmarshal([]byte(
+		`{"usage":{"prompt_tokens":30,"completion_tokens":18,"total_tokens":48}}`), &resp); err != nil {
+		t.Fatal(err)
+	}
+	if resp.Usage == nil || resp.Usage.PromptTokens != 30 ||
+		resp.Usage.CompletionTokens != 18 || resp.Usage.TotalTokens != 48 {
+		t.Fatalf("usage 三元组 = %+v, want 30/18/48", resp.Usage)
+	}
+	// 记账口径不变：budget 仍只入账 total_tokens
+	c, b := testClient(t, func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write([]byte(`{"choices":[{"message":{"content":"ok"}}],` +
+			`"usage":{"prompt_tokens":30,"completion_tokens":18,"total_tokens":48}}`))
+	})
+	if _, err := c.Chat(context.Background(), []Message{{Role: "user", Content: "q"}}, Options{}); err != nil {
+		t.Fatal(err)
+	}
+	if b.Used() != 48 {
+		t.Errorf("budget 入账 = %d, want 48（只吃 total_tokens）", b.Used())
+	}
+}

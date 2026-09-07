@@ -375,3 +375,15 @@ func TestParseSlotVariants(t *testing.T) {
 		}
 	}
 }
+
+// TestUserSpecifiedDirectRoutesToFactual 用户指定 mode=direct 归一为 factual 直答
+// （P9 拆包时 Route 直接取 "direct" 落进未知路由分支的回归守护）。
+func TestUserSpecifiedDirectRoutesToFactual(t *testing.T) {
+	d := testDeps(t)
+	if dec := d.decideRoute(context.Background(), "图书馆几点开门", "direct"); dec.Route != "factual" {
+		t.Fatalf("mode=direct 应归一为 factual, got %s", dec.Route)
+	}
+	if dec := d.decideRoute(context.Background(), "转专业政策", "research"); dec.Route != "research" {
+		t.Fatalf("mode=research 应保持 research, got %s", dec.Route)
+	}
+}

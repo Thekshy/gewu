@@ -193,7 +193,11 @@ func (d *Deps) runChatInner(ctx context.Context, emit emitFn, question, mode, se
 // classic 旧分类 / agent-first 三策略，见 internal/agent/routing。
 func (d *Deps) decideRoute(ctx context.Context, question, mode string) routing.RouteDecision {
 	if mode == "direct" || mode == "research" {
-		dec := routing.RouteDecision{Route: mode, Layer: "user-specified", Reason: "用户指定 " + mode, PreRAG: true}
+		route := mode
+		if mode == "direct" {
+			route = "factual" // direct 与 triage 同语义：直答即 factual（P9 拆包时丢失归一的回归修复）
+		}
+		dec := routing.RouteDecision{Route: route, Layer: "user-specified", Reason: "用户指定 " + mode, PreRAG: true}
 		dec.FillPolicy()
 		return dec
 	}

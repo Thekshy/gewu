@@ -66,9 +66,12 @@ type ToolCall struct {
 
 // Completion ChatWithTools 的结果：文本与工具调用并存
 // （模型可能在同一条消息里既说话又发起调用；无调用时 ToolCalls 为空，Content 即最终回答）。
+// FinishReason 透传端点的结束原因（stop/length/tool_calls/content_filter…）：
+// length 且带 ToolCalls 时参数可能不完整，调用方必须先于工具解析判断（P10）。
 type Completion struct {
-	Content   string
-	ToolCalls []ToolCall
+	Content      string
+	ToolCalls    []ToolCall
+	FinishReason string
 }
 
 // Options 单次补全的调节参数。
@@ -135,16 +138,25 @@ type respFormat struct {
 	Type string `json:"type"`
 }
 
+// usage 用量三元组（OpenAI 兼容）。记账口径不变：budget.Add 只吃 TotalTokens；
+// prompt/completion 两元解析暴露，供成本分析留口（P10）。
+type usage struct {
+	PromptTokens     int64 `json:"prompt_tokens"`
+	CompletionTokens int64 `json:"completion_tokens"`
+	TotalTokens      int64 `json:"total_tokens"`
+}
+
 type chatResponse struct {
 	Choices []struct {
 		Message struct {
 			Content   string        `json:"content"`
 			ToolCalls []ToolCallMsg `json:"tool_calls"`
 		} `json:"message"`
+		// FinishReason 输出为何终止：stop（自然结束）/ length（撞 max_tokens 截断）/
+		// tool_calls（正常发起调用）/ content_filter。缺字段端点为空串。
+		FinishReason string `json:"finish_reason"`
 	} `json:"choices"`
-	Usage *struct {
-		TotalTokens int64 `json:"total_tokens"`
-	} `json:"usage"`
+	Usage *usage `json:"usage"`
 }
 
 type embedRequest struct {
@@ -236,7 +248,7 @@ func (c *Client) ChatWithTools(ctx context.Context, messages []Message, o Option
 		return nil, fmt.Errorf("模型响应缺少 choices")
 	}
 	msg := resp.Choices[0].Message
-	out := &Completion{Content: msg.Content}
+	out := &Completion{Content: msg.Content, FinishReason: resp.Choices[0].FinishReason}
 	for _, tc := range msg.ToolCalls {
 		if tc.Function.Name == "" {
 			continue // 端点偶发占位调用
