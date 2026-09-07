@@ -61,10 +61,10 @@ flowchart TB
 | 域 | 包 | 职责 |
 | --- | --- | --- |
 | 接口 | `internal/api` | HTTP 层：路由注册、请求校验、SSE 事件写出——只做 HTTP 语义，不含业务逻辑 |
-| 编排 | `internal/agent` | pipeline（RunChat 总编排）、react（ReAct 引擎）、transaction（知行执行层）、memory（长期记忆）、query_rewrite（指代补全）、tools（权限矩阵）、session（办理会话） |
+| 编排 | `internal/agent` | pipeline（RunChat 总编排，done 单点收口带 reason）、react（ReAct 引擎 + 截断防御：finish_reason=length 且带 tool_calls 时一律不执行——参数可能不完整，合成错误 observation 回填交模型重发，Pi 式修复）、transaction（知行执行层）、memory（长期记忆）、query_rewrite（指代补全）、tools（权限矩阵）、session（办理会话） |
 | 路由 | `internal/agent/routing` | 意图路由/执行策略分流：cascade 三级级联、triage 三策略、classic 基线、启发式；路由提示词随域内聚 |
 | 检索 | `internal/rag` | hierarchical（父子块切分与检索）、bm25、向量余弦、RRF 融合、rerank、SQLite 存储 |
-| 模型访问 | `internal/llm` | chat / stream / embed，OpenAI 兼容双 provider，工具调用 |
+| 模型访问 | `internal/llm` | chat / stream / embed，OpenAI 兼容双 provider，工具调用；响应侧解析 finish_reason 与 usage 三元组（P10：length=截断判定依据；记账仍只入 total_tokens） |
 | 业务 | `internal/business` | mock 校内业务：场馆预约（容量/冲突/限额）+ 请假审批（分级） |
 | 支撑 | `internal/config` `budget` `dates` `middleware` | 配置、token 预算、确定性中文日期、限流与 trace-id |
 | 装配 | `cmd/server` | 组装根：flag/env、依赖注入——**不含 HTTP 与业务逻辑** |

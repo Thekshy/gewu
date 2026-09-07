@@ -51,5 +51,9 @@
 - [x] P7 真跑修复：误路由安全网 / 并发健壮性 / 父子块退化；多轮指代补全贯通路由与检索
 - [x] P8 微服务退役：会话持久化先吸收（P8-1）→ 六服务删除（P8-3）→ 单体模块化收口（P8-4，
       lint-arch 依赖规则守护 + X-Trace-Id 观测 + ADR-0009）
+- [x] P10 LLM 响应侧收口：finish_reason/usage 三元组解析（P10-1）→ ReAct 截断防御——
+      length 先于工具解析，不执行不完整调用、Pi 式合成 observation 回填（P10-2）→
+      流式截断 status + done.reason 单点收口（P10-3，completed/max_tokens/error/aborted，
+      SSE 契约只增不改）；报告见 eval/reports/P10-*.md 四份（基线/llm/ReAct/done）
 - [ ] agent-first 链路稳定化：flash 三分类与 ReAct 确认流的非确定性（已知短板，见 P8-retire-baseline.md §4）
 - [ ] 长期记忆消亡与用户侧可见性（当前仅注入不可管理）

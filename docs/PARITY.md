@@ -79,7 +79,7 @@ k/query 越界返回 422。【差异决定】FastAPI 的 pydantic 校验错误�
 | type | 字段 | 说明 |
 | --- | --- | --- |
 | `route` | `route`, `reason`, `by_llm` | 每轮第一个事件(续轮/取消分支除外也先发 route) |
-| `status` | `text` | 进度提示 |
+| `status` | `text` | 进度提示;主答案撞长度上限截断时,answer 流结束后追加"回答已达长度上限，可能被截断"(P10,不改 answer 正文) |
 | `step` | `index`(1 起), `subquestion`, `sources`(去重后的 title 列表,≤3) | 深研子问题 |
 | `answer_delta` | `text` | 答案增量,前端拼接 |
 | `citations` | `items: [{n, doc_id, title, source}]` | 引用列表,直答/深研最后必发(无数据时 items=[]) |
@@ -87,7 +87,7 @@ k/query 越界返回 422。【差异决定】FastAPI 的 pydantic 校验错误�
 | `pending_action` | `tool`, `label`, `args`(中文标签→值) | 待确认动作摘要 |
 | `action_result` | `tool`, `success`, `message`, `receipt`(可 null) | 工具执行结果 |
 | `error` | `message` | 兜底错误(含预算超限),后跟 done |
-| `done` | `latency_ms`(整型,本轮耗时) | 每轮最后一个事件 |
+| `done` | `latency_ms`(整型,本轮耗时), `reason`(可选,见 §4) | 每轮最后一个事件 |
 
 `route` 取值:`factual | research | refusal | transaction | hybrid`。
 
@@ -111,7 +111,10 @@ k/query 越界返回 422。【差异决定】FastAPI 的 pydantic 校验错误�
                → status "接下来为你办理业务…" → transaction.start_flow
    transaction → transaction.start_flow(见 §9)
    未知 route → error 事件 "未知路由：{route}"
-4. done 事件。
+4. done 事件(P10 起收口到 RunChat 单点发射,一轮恰一个;新增可选 `reason` 字段,
+   omitempty 向后兼容):正常 `completed`;主答案流式 finish_reason=length →
+   answer 后先发截断 status(见 §3)且 reason=`max_tokens`;链路错误 `error`;
+   客户端断开(ctx 取消) `aborted`——此时 done 发不出去属预期,服务端静默。
 异常:BudgetExceeded → error{message} → done;
      其他异常 → error{"{异常类名}: {msg}"} → done(Go 版为 Go 错误文案,见 §13)
 ```

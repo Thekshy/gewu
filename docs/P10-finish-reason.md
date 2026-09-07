@@ -244,3 +244,19 @@ done 事件无结束原因，且发射点散在 runChatInner 各路径 + RunChat
 >    描述补截断防御（判断顺序铁律：length 先于工具解析，Pi 式合成 observation 回填）；
 > 3) docs/roadmap.md：P10 条目（一行：动机 + 三个缺口 + 修复策略）；
 > 4) 汇总 eval/reports/P10-*.md 四份报告链接进本节，标注各阶段门禁结果。
+
+---
+
+## 8. 执行结果（2026-09-07 收口）
+
+四份报告与各阶段门禁结果：
+
+| 阶段 | 报告 | 门禁 | commit |
+| --- | --- | --- | --- |
+| P10-0 基线 | [P10-baseline.md](../eval/reports/P10-baseline.md) | cascade 28/28、agent-first 6/8（失败集 {ag-know-002, ag-tx-002} ⊆ §4.3 flaky） | 40b6b91（随 P10-1 入库） |
+| P10-1 llm 层 | [P10-llm-finish-reason.md](../eval/reports/P10-llm-finish-reason.md) | 全绿 + lint-arch；28 题 27/28→重跑 28/28（mtfact-002 已知 flaky）；真跑直答事件序列不变 | 40b6b91 |
+| P10-2 ReAct 防御 | [P10-react-truncation-guard.md](../eval/reports/P10-react-truncation-guard.md) | 全绿 + lint-arch；28 题 28/28；agent-first 5/8 两跑一致 ⊆ §4.3；冒烟确认流不变 | 337b4cc |
+| P10-3 done.reason | [P10-done-reason.md](../eval/reports/P10-done-reason.md) | 全绿 + lint-arch；28 题 28/28（评测脚本零改动）；agent-first 6/8 ⊆ §4.3；SSE 抓包 completed/深研收敛/断开无 panic | 8349f98 |
+
+附：真跑撞出并顺手修复 P9 既有回归——`mode=direct` 丢失 direct→factual 归一报
+"未知路由"（pipeline.go decideRoute + 守护测试，详见 P10-1 报告）。
