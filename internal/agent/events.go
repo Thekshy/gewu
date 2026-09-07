@@ -113,6 +113,10 @@ type errorEvent struct {
 type doneEvent struct {
 	Type      string `json:"type"`
 	LatencyMS int64  `json:"latency_ms"`
+	// Reason 结束原因（P10，omitempty 向后兼容）：
+	// completed（正常）| max_tokens（主答案撞长度上限截断）|
+	// error（链路错误）| aborted（客户端断开）。由 RunChat 单点计算。
+	Reason string `json:"reason,omitempty"`
 }
 
 // ---------- 构造器 ----------
@@ -163,4 +167,7 @@ func actionResultEvt(tool string, success bool, message string, receipt *string)
 
 func errorEvt(message string) errorEvent { return errorEvent{Type: "error", Message: message} }
 
-func doneEvt(ms int64) doneEvent { return doneEvent{Type: "done", LatencyMS: ms} }
+// doneReasonEvt done 事件唯一构造器（RunChat 单点发射，保持一次 chat 恰一个 done）。
+func doneReasonEvt(ms int64, reason string) doneEvent {
+	return doneEvent{Type: "done", LatencyMS: ms, Reason: reason}
+}

@@ -63,8 +63,11 @@ func (m *mockLLM) Chat(_ context.Context, messages []llm.Message, _ llm.Options)
 	return "", nil
 }
 
-func (m *mockLLM) ChatStream(_ context.Context, _ []llm.Message, _ llm.Options, onDelta func(string) error) error {
-	return onDelta(m.stream)
+func (m *mockLLM) ChatStream(_ context.Context, _ []llm.Message, _ llm.Options, onDelta func(string) error) (string, error) {
+	if err := onDelta(m.stream); err != nil {
+		return "", err
+	}
+	return "", nil
 }
 
 func (m *mockLLM) ChatWithTools(_ context.Context, _ []llm.Message, _ llm.Options, _ []llm.ToolDef) (*llm.Completion, error) {

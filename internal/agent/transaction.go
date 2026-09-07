@@ -246,15 +246,16 @@ var flowDefs = map[string]flowDef{
 // emitFn 事件发射器：返回错误时中止（客户端断开）。
 type emitFn func(any) error
 
-// StartFlow 路由判定为 transaction 后的入口。
-func (d *Deps) StartFlow(ctx context.Context, emit emitFn, question, role, user, sessionID string) error {
+// StartFlow 路由判定为 transaction 后的入口（outcome 贯通给 fallbackKnowledge
+// 的直答链路，供 done.reason 计算截断）。
+func (d *Deps) StartFlow(ctx context.Context, emit emitFn, question, role, user, sessionID string, outcome *chatOutcome) error {
 	// 启发式优先（确定性强），LLM 只兜底启发式没识别出口语化表述的情况
 	tool := DetectTool(question)
 	if tool == "" && d.LLM != nil && d.LLM.HasKey() {
 		tool = d.llmExtractTool(ctx, question, role)
 	}
 	if _, known := d.Tools[tool]; !known {
-		return d.fallbackKnowledge(ctx, emit, question, user, sessionID)
+		return d.fallbackKnowledge(ctx, emit, question, user, sessionID, outcome)
 	}
 
 	if _, inFlows := flowDefs[tool]; readTools[tool] || !inFlows {
@@ -326,11 +327,11 @@ func (d *Deps) llmExtractTool(ctx context.Context, question, role string) string
 }
 
 // fallbackKnowledge 工具未识别 → 转知识库检索。
-func (d *Deps) fallbackKnowledge(ctx context.Context, emit emitFn, question, user, sessionID string) error {
+func (d *Deps) fallbackKnowledge(ctx context.Context, emit emitFn, question, user, sessionID string, outcome *chatOutcome) error {
 	if err := emit(answerEvt("这个问题我理解为你想咨询校园信息，为你转知识库检索：")); err != nil {
 		return err
 	}
-	return d.AnswerDirect(ctx, emit, question, d.Retriever.K, user, sessionID)
+	return d.AnswerDirect(ctx, emit, question, d.Retriever.K, user, sessionID, outcome)
 }
 
 // advance collect 阶段：吸收新信息 → 齐了进确认，缺则追问。

@@ -18,9 +18,16 @@ import (
 type LLMer interface {
 	HasKey() bool
 	Chat(ctx context.Context, messages []llm.Message, o llm.Options) (string, error)
-	ChatStream(ctx context.Context, messages []llm.Message, o llm.Options, onDelta func(string) error) error
+	ChatStream(ctx context.Context, messages []llm.Message, o llm.Options, onDelta func(string) error) (string, error)
 	ChatWithTools(ctx context.Context, messages []llm.Message, o llm.Options, tools []llm.ToolDef) (*llm.Completion, error)
 	Embed(ctx context.Context, texts []string) ([][]float64, error)
+}
+
+// chatOutcome 一次 chat 的结果侧记：done.reason 的统一计算依据（P10）。
+// truncated 由直答/深研的流式 finish=="length" 置位（ReAct 截断有自我修复、
+// 最终仍收敛出答案，不置位——记为设计决策）。
+type chatOutcome struct {
+	truncated bool
 }
 
 // Deps 聚合编排层依赖，进程内单例（由 cmd/server 装配）。
@@ -55,7 +62,9 @@ func (d *Deps) HasKey() bool { return d.LLM != nil && d.LLM.HasKey() }
 // RunChat 会话编排入口（SSE 接口与评测复用同一入口，PARITY §4）。
 //
 // emit 逐事件回调（返回错误时立即中止——SSE 客户端断开时借 ctx 取消传播到
-// 上游 LLM 流）。整体耗时通过 done 事件的 latency_ms 返回。
+// 上游 LLM 流）。整体耗时通过 done 事件的 latency_ms 返回；done 在此单点发射
+// （一次 chat 恰一个 done），reason 统一计算：completed / max_tokens（主答案
+// 截断）/ error / aborted（客户端断开）。
 func (d *Deps) RunChat(ctx context.Context, emit emitFn, question, mode, sessionID, role, user string) {
 	t0 := time.Now()
 	if user == "" {
@@ -69,13 +78,24 @@ func (d *Deps) RunChat(ctx context.Context, emit emitFn, question, mode, session
 		}
 		return emit(ev)
 	}
-	err := d.runChatInner(ctx, wrapped, question, mode, sessionID, role, user, t0)
+	outcome := &chatOutcome{}
+	err := d.runChatInner(ctx, wrapped, question, mode, sessionID, role, user, outcome)
 	if err != nil {
-		// 异常兜底：error 事件 + done（与 Python 的 except 行为一致）。
+		// 异常兜底：error 事件（与 Python 的 except 行为一致）。
 		// emit 失败（客户端已断开）在此静默忽略。
 		_ = emit(errorEvt(err.Error()))
-		_ = emit(doneEvt(elapsedMS(t0)))
 	}
+	reason := "completed"
+	if outcome.truncated {
+		reason = "max_tokens"
+	}
+	if err != nil {
+		reason = "error"
+		if ctx.Err() == context.Canceled {
+			reason = "aborted" // 客户端断开导致的失败与链路自身错误区分
+		}
+	}
+	_ = emit(doneReasonEvt(elapsedMS(t0), reason))
 	// 本轮对办理会话的全部修改（槽位/阶段/完成清除）落库：SQLite 后端据此
 	// 跨重启续办；内存版为 no-op。失败只告警，不影响已发出的回答。
 	if err := d.Sessions.Sync(); err != nil {
@@ -86,7 +106,7 @@ func (d *Deps) RunChat(ctx context.Context, emit emitFn, question, mode, session
 
 func elapsedMS(t0 time.Time) int64 { return time.Since(t0).Milliseconds() }
 
-func (d *Deps) runChatInner(ctx context.Context, emit emitFn, question, mode, sessionID, role, user string, t0 time.Time) error {
+func (d *Deps) runChatInner(ctx context.Context, emit emitFn, question, mode, sessionID, role, user string, outcome *chatOutcome) error {
 	// 1) 办理流程进行中：优先把消息解释为对流程的回应
 	if sess := d.Sessions.Get(sessionID); sess != nil && (sess.Phase == PhaseCollect || sess.Phase == PhaseConfirm) {
 		switch d.ClassifyReply(ctx, question, sess) {
@@ -94,19 +114,13 @@ func (d *Deps) runChatInner(ctx context.Context, emit emitFn, question, mode, se
 			if err := emit(routeEvt("transaction", "继续办理："+flowLabel(sess.Tool), false)); err != nil {
 				return err
 			}
-			if err := d.HandleReply(ctx, emit, sess, question); err != nil {
-				return err
-			}
-			return emit(doneEvt(elapsedMS(t0)))
+			return d.HandleReply(ctx, emit, sess, question)
 		case "cancel":
 			d.Sessions.Clear(sessionID)
 			if err := emit(routeEvt("transaction", "用户取消办理", false)); err != nil {
 				return err
 			}
-			if err := emit(answerEvt("好的，已取消本次办理。有别的事随时找我。")); err != nil {
-				return err
-			}
-			return emit(doneEvt(elapsedMS(t0)))
+			return emit(answerEvt("好的，已取消本次办理。有别的事随时找我。"))
 		default:
 			d.Sessions.Clear(sessionID) // 切换新话题：放弃流程，走正常路由
 		}
@@ -131,10 +145,7 @@ func (d *Deps) runChatInner(ctx context.Context, emit emitFn, question, mode, se
 	// 4) 分发。ReAct 引擎（P6 阶段5）两种入口：
 	//    mode=react 显式指定；REACT_MODE=on 时"目标明确但路径不定"的办理问题自动转自主循环。
 	if mode == "react" || (d.Settings.ReactMode == "on" && dec.Route == "transaction" && routing.ReactPlanSignal(q)) {
-		if err := d.RunReAct(ctx, emit, q, role, user, sessionID, dec.Toolset); err != nil {
-			return err
-		}
-		return emit(doneEvt(elapsedMS(t0)))
+		return d.RunReAct(ctx, emit, q, role, user, sessionID, dec.Toolset)
 	}
 
 	switch dec.Route {
@@ -142,50 +153,30 @@ func (d *Deps) runChatInner(ctx context.Context, emit emitFn, question, mode, se
 		if err := emit(answerEvt(RefusalAnswer)); err != nil {
 			return err
 		}
-		if err := emit(citationsEvt(nil)); err != nil {
-			return err
-		}
+		return emit(citationsEvt(nil))
 	case "factual":
-		if err := d.AnswerDirect(ctx, emit, q, d.Retriever.K, user, sessionID); err != nil {
-			return err
-		}
+		return d.AnswerDirect(ctx, emit, q, d.Retriever.K, user, sessionID, outcome)
 	case "research":
-		if err := d.RunResearch(ctx, emit, q, 5, user, sessionID); err != nil {
-			return err
-		}
+		return d.RunResearch(ctx, emit, q, 5, user, sessionID, outcome)
 	case "hybrid":
 		if err := emit(statusEvt("先回答你的政策问题…")); err != nil {
 			return err
 		}
-		if err := d.AnswerDirect(ctx, emit, q, d.Retriever.K, user, sessionID); err != nil {
+		if err := d.AnswerDirect(ctx, emit, q, d.Retriever.K, user, sessionID, outcome); err != nil {
 			return err
 		}
 		if err := emit(statusEvt("接下来为你办理业务…")); err != nil {
 			return err
 		}
-		if err := d.StartFlow(ctx, emit, q, role, user, sessionID); err != nil {
-			return err
-		}
+		return d.StartFlow(ctx, emit, q, role, user, sessionID, outcome)
 	case "transaction":
-		if err := d.StartFlow(ctx, emit, q, role, user, sessionID); err != nil {
-			return err
-		}
+		return d.StartFlow(ctx, emit, q, role, user, sessionID, outcome)
 	case "agent":
 		// agent-first：ReAct 引擎自主组合工具（写操作外挂确认流）。
-		if err := d.RunReAct(ctx, emit, q, role, user, sessionID, dec.Toolset); err != nil {
-			return err
-		}
+		return d.RunReAct(ctx, emit, q, role, user, sessionID, dec.Toolset)
 	default:
-		if err := emit(errorEvt(fmt.Sprintf("未知路由：%s", dec.Route))); err != nil {
-			return err
-		}
+		return emit(errorEvt(fmt.Sprintf("未知路由：%s", dec.Route)))
 	}
-
-	// 5) done
-	if err := emit(doneEvt(elapsedMS(t0))); err != nil {
-		return err
-	}
-	return nil
 }
 
 // decideRoute 产出路由决策包：用户显式指定 direct/research 直接构造；

@@ -22,8 +22,10 @@ type scriptedLLM struct {
 	resps  []string // Chat 按序弹出；耗尽后返回 last
 	last   string
 	stream string // ChatStream 的固定输出
-	embedV []float64
-	chats  [][2]string // 记录 [system, user]
+	// streamFinish：ChatStream 返回的结束原因（P10 截断链路注入 "length" 用）。
+	streamFinish string
+	embedV       []float64
+	chats        [][2]string // 记录 [system, user]
 
 	// comps：ChatWithTools（原生 tool-calling）按序弹出的补全；耗尽后返回
 	// &Completion{Content: last}（即"不再调用工具，直接给最终回答"）。
@@ -89,8 +91,11 @@ func (s *scriptedLLM) chatLog() [][2]string {
 	return append([][2]string{}, s.chats...)
 }
 
-func (s *scriptedLLM) ChatStream(_ context.Context, _ []llm.Message, _ llm.Options, onDelta func(string) error) error {
-	return onDelta(s.stream)
+func (s *scriptedLLM) ChatStream(_ context.Context, _ []llm.Message, _ llm.Options, onDelta func(string) error) (string, error) {
+	if err := onDelta(s.stream); err != nil {
+		return "", err
+	}
+	return s.streamFinish, nil
 }
 
 func (s *scriptedLLM) Embed(_ context.Context, texts []string) ([][]float64, error) {
@@ -241,7 +246,7 @@ func (f *flakyAfterQueue) Chat(ctx context.Context, m []llm.Message, o llm.Optio
 	return f.inner.Chat(ctx, m, o)
 }
 
-func (f *flakyAfterQueue) ChatStream(ctx context.Context, m []llm.Message, o llm.Options, onDelta func(string) error) error {
+func (f *flakyAfterQueue) ChatStream(ctx context.Context, m []llm.Message, o llm.Options, onDelta func(string) error) (string, error) {
 	return f.inner.ChatStream(ctx, m, o, onDelta)
 }
 
@@ -262,8 +267,8 @@ func (flakyAlways) Chat(context.Context, []llm.Message, llm.Options) (string, er
 	return "", errors.New("网络错误")
 }
 
-func (flakyAlways) ChatStream(context.Context, []llm.Message, llm.Options, func(string) error) error {
-	return errors.New("网络错误")
+func (flakyAlways) ChatStream(context.Context, []llm.Message, llm.Options, func(string) error) (string, error) {
+	return "", errors.New("网络错误")
 }
 
 func (flakyAlways) Embed(context.Context, []string) ([][]float64, error) {
@@ -408,8 +413,8 @@ func (failingLLM) Chat(context.Context, []llm.Message, llm.Options) (string, err
 	return "", errors.New("网络错误")
 }
 
-func (failingLLM) ChatStream(context.Context, []llm.Message, llm.Options, func(string) error) error {
-	return errors.New("网络错误")
+func (failingLLM) ChatStream(context.Context, []llm.Message, llm.Options, func(string) error) (string, error) {
+	return "", errors.New("网络错误")
 }
 
 func (failingLLM) Embed(context.Context, []string) ([][]float64, error) {
@@ -784,5 +789,98 @@ func TestReActStopWithToolCallsStillExecutes(t *testing.T) {
 	}
 	if !strings.Contains(answerText(events), "场馆均可预约") {
 		t.Errorf("answer = %q", answerText(events))
+	}
+}
+
+// ---------- P10-3：流式截断可见性 + done.reason ----------
+
+// doneOf 取事件流里的 done 事件（要求恰好一个）。
+func doneOf(t *testing.T, events []any) doneEvent {
+	t.Helper()
+	var ds []doneEvent
+	for _, ev := range events {
+		if d, ok := ev.(doneEvent); ok {
+			ds = append(ds, d)
+		}
+	}
+	if len(ds) != 1 {
+		t.Fatalf("done 事件数 = %d, want 1: %v", len(ds), events)
+	}
+	return ds[0]
+}
+
+func TestDirectTruncatedMarksMaxTokensDone(t *testing.T) {
+	// 直答流式 finish=length：事件序列含截断 status，done.reason=max_tokens，
+	// answer 正文不被改动（避免影响评测判分）
+	sl := &scriptedLLM{resps: []string{
+		`{"scores":{"factual":0.95,"research":0.02,"transaction":0.01,"hybrid":0.01,"refusal":0.01},"reason":"单点"}`,
+	}, stream: "部分答案[1]。", streamFinish: "length"}
+	d := depsWithLLM(t, sl)
+	events := ask(t, d, "s-trunc", "转专业绩点要求", "student")
+	var sawTruncStatus bool
+	for _, ev := range events {
+		if s, ok := ev.(statusEvent); ok && strings.Contains(s.Text, "长度上限") {
+			sawTruncStatus = true
+		}
+	}
+	if !sawTruncStatus {
+		t.Fatalf("应 emit 截断 status: %v", events)
+	}
+	if ans := answerText(events); ans != "部分答案[1]。" {
+		t.Errorf("answer 正文不应被改动: %q", ans)
+	}
+	if done := doneOf(t, events); done.Reason != "max_tokens" {
+		t.Fatalf("done.reason = %q, want max_tokens", done.Reason)
+	}
+}
+
+func TestDirectNormalDoneReasonCompleted(t *testing.T) {
+	sl := &scriptedLLM{resps: []string{
+		`{"scores":{"factual":0.95,"research":0.02,"transaction":0.01,"hybrid":0.01,"refusal":0.01},"reason":"单点"}`,
+	}, stream: "依据资料回答[1]。"}
+	d := depsWithLLM(t, sl)
+	events := ask(t, d, "s-normal", "图书馆几点开门", "student")
+	if done := doneOf(t, events); done.Reason != "completed" {
+		t.Fatalf("done.reason = %q, want completed", done.Reason)
+	}
+}
+
+// streamFailLLM Chat 全部转发 inner（路由/检索正常），ChatStream 固定失败——
+// 直答链路中途出错的注入点。
+type streamFailLLM struct {
+	inner *scriptedLLM
+}
+
+func (s *streamFailLLM) HasKey() bool { return true }
+
+func (s *streamFailLLM) Chat(ctx context.Context, m []llm.Message, o llm.Options) (string, error) {
+	return s.inner.Chat(ctx, m, o)
+}
+
+func (s *streamFailLLM) ChatStream(context.Context, []llm.Message, llm.Options, func(string) error) (string, error) {
+	return "", errors.New("流式中断")
+}
+
+func (s *streamFailLLM) Embed(ctx context.Context, texts []string) ([][]float64, error) {
+	return s.inner.Embed(ctx, texts)
+}
+
+func (s *streamFailLLM) ChatWithTools(ctx context.Context, m []llm.Message, o llm.Options, tools []llm.ToolDef) (*llm.Completion, error) {
+	return s.inner.ChatWithTools(ctx, m, o, tools)
+}
+
+func TestErrorPathDoneReasonErrorSingleDone(t *testing.T) {
+	// 链路中途失败（直答流式中断）：error 事件后仍恰一个 done，reason=error
+	sl := &scriptedLLM{resps: []string{
+		`{"scores":{"factual":0.95,"research":0.02,"transaction":0.01,"hybrid":0.01,"refusal":0.01},"reason":"单点"}`,
+	}}
+	sl.embedV = []float64{1, 0}
+	d := depsWithLLMer(t, &streamFailLLM{inner: sl})
+	events := ask(t, d, "s-err", "转专业绩点要求", "student")
+	if len(eventsOf(events, "error")) == 0 {
+		t.Fatalf("应有 error 事件: %v", events)
+	}
+	if done := doneOf(t, events); done.Reason != "error" {
+		t.Fatalf("done.reason = %q, want error", done.Reason)
 	}
 }

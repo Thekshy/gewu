@@ -40,9 +40,10 @@ func (d *Deps) plan(ctx context.Context, question string) []string {
 	return []string{question}
 }
 
-// RunResearch 产出事件流：status / step* → answer_delta* → citations。
+// RunResearch 产出事件流：status / step* → answer_delta* → [截断 status] → citations。
+// 流式 finish=="length" 时置 outcome.truncated 并 emit 截断提示（见 direct.go markTruncated）。
 // userID/sessionID 用于分层装配长期记忆（P6 阶段4）。
-func (d *Deps) RunResearch(ctx context.Context, emit emitFn, question string, k int, userID, sessionID string) error {
+func (d *Deps) RunResearch(ctx context.Context, emit emitFn, question string, k int, userID, sessionID string, outcome *chatOutcome) error {
 	if k <= 0 {
 		k = 5
 	}
@@ -97,11 +98,14 @@ func (d *Deps) RunResearch(ctx context.Context, emit emitFn, question string, k 
 	}
 
 	messages := d.assembleMessages(userID, sessionID, question, strings.Join(blocks, "\n"))
-	streamErr := d.LLM.ChatStream(ctx, messages, llm.Options{}, func(text string) error {
+	finish, streamErr := d.LLM.ChatStream(ctx, messages, llm.Options{}, func(text string) error {
 		return emit(answerEvt(text))
 	})
 	if streamErr != nil {
 		return streamErr
+	}
+	if err := markTruncated(emit, outcome, finish); err != nil {
+		return err
 	}
 	return emit(citationsEvt(citations))
 }

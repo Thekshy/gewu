@@ -21,9 +21,10 @@ func numberedContext(hits []rag.Hit) (string, []Citation) {
 }
 
 // AnswerDirect RAG 直答：单轮混合检索 → 带引用流式生成。
-// 产出事件流：answer_delta* → citations。
-// userID/sessionID 用于分层装配长期记忆（P6 阶段4）。
-func (d *Deps) AnswerDirect(ctx context.Context, emit emitFn, question string, k int, userID, sessionID string) error {
+// 产出事件流：answer_delta* → [截断 status] → citations。
+// 流式 finish=="length" 时置 outcome.truncated 并 emit 截断提示（不动 answer
+// 正文，避免影响评测判分）；userID/sessionID 用于分层装配长期记忆（P6 阶段4）。
+func (d *Deps) AnswerDirect(ctx context.Context, emit emitFn, question string, k int, userID, sessionID string, outcome *chatOutcome) error {
 	hits, err := d.Retriever.Search(ctx, question, k)
 	if err != nil {
 		return err
@@ -38,13 +39,26 @@ func (d *Deps) AnswerDirect(ctx context.Context, emit emitFn, question string, k
 	context, citations := numberedContext(hits)
 
 	messages := d.assembleMessages(userID, sessionID, question, context)
-	streamErr := d.LLM.ChatStream(ctx, messages, llm.Options{}, func(text string) error {
+	finish, streamErr := d.LLM.ChatStream(ctx, messages, llm.Options{}, func(text string) error {
 		return emit(answerEvt(text))
 	})
 	if streamErr != nil {
 		return streamErr
 	}
+	if err := markTruncated(emit, outcome, finish); err != nil {
+		return err
+	}
 	return emit(citationsEvt(citations))
+}
+
+// markTruncated 主答案撞 max_tokens 截断时的可见性标记：置位 outcome（done.reason
+// = max_tokens 的依据）并 emit status 提示（直答/深研共用，status 是既有事件类型）。
+func markTruncated(emit emitFn, outcome *chatOutcome, finish string) error {
+	if finish != "length" {
+		return nil
+	}
+	outcome.truncated = true
+	return emit(statusEvt("回答已达长度上限，可能被截断"))
 }
 
 // assembleMessages 消息分层装配（P6 阶段4，顺序固定，稳定内容前置以利 prompt cache）：

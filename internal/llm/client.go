@@ -180,6 +180,9 @@ type streamChunk struct {
 		Delta struct {
 			Content string `json:"content"`
 		} `json:"delta"`
+		// FinishReason 只有末 chunk 携带（stop/length/…）；length 表示主答案撞
+		// max_tokens 截断（P10 流式截断可见性）。
+		FinishReason string `json:"finish_reason"`
 	} `json:"choices"`
 }
 
@@ -299,12 +302,14 @@ func (c *Client) Chat(ctx context.Context, messages []Message, o Options) (strin
 // ChatStream 流式补全：每个文本增量回调 onDelta（返回 error 时中断），
 // 结束后按「字符数/2」保守估算入账（rune 计数，与 Python len() 一致）。
 // ctx 取消（客户端断开）会立刻中止上游读取。
-func (c *Client) ChatStream(ctx context.Context, messages []Message, o Options, onDelta func(string) error) error {
+// 返回值 finishReason 为末 chunk 的结束原因（stop/length/…，端点不回则为空串）；
+// 出错时返回已捕获的值或空串，调用方可据此标记截断（P10）。
+func (c *Client) ChatStream(ctx context.Context, messages []Message, o Options, onDelta func(string) error) (string, error) {
 	if !c.HasKey() {
-		return ErrNoKey
+		return "", ErrNoKey
 	}
 	if err := c.budget.Ensure(); err != nil {
-		return err
+		return "", err
 	}
 	o.applyDefaults()
 	body := chatRequest{
@@ -322,19 +327,22 @@ func (c *Client) ChatStream(ctx context.Context, messages []Message, o Options, 
 
 	req, err := c.newRequest(ctx, http.MethodPost, c.url("/chat/completions"), c.s.LLMKey, body)
 	if err != nil {
-		return err
+		return "", err
 	}
 	resp, err := c.http.Do(req)
 	if err != nil {
-		return fmt.Errorf("LLM 流式请求失败: %w", err)
+		return "", fmt.Errorf("LLM 流式请求失败: %w", err)
 	}
 	defer resp.Body.Close()
 	if resp.StatusCode != http.StatusOK {
 		b, _ := io.ReadAll(io.LimitReader(resp.Body, 4096))
-		return fmt.Errorf("LLM 流式请求 HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(b)))
+		return "", fmt.Errorf("LLM 流式请求 HTTP %d: %s", resp.StatusCode, strings.TrimSpace(string(b)))
 	}
 
-	var runes int64
+	var (
+		runes  int64
+		finish string
+	)
 	account := func() { c.budget.Add(max64(1, runes/2)) }
 	err = scanSSE(resp.Body, func(data []byte) error {
 		if string(data) == "[DONE]" {
@@ -345,6 +353,9 @@ func (c *Client) ChatStream(ctx context.Context, messages []Message, o Options, 
 			return nil // 兼容端点插入的注释/心跳行
 		}
 		if len(chunk.Choices) > 0 {
+			if fr := chunk.Choices[0].FinishReason; fr != "" {
+				finish = fr // 逐 chunk 捕获最后一个非空值（末 chunk 才携带）
+			}
 			text := chunk.Choices[0].Delta.Content
 			if text != "" {
 				runes += int64(len([]rune(text)))
@@ -359,9 +370,9 @@ func (c *Client) ChatStream(ctx context.Context, messages []Message, o Options, 
 	// 否则长回答被中断时这部分真实消耗会漏计。
 	account()
 	if err != nil && !errors.Is(err, io.EOF) {
-		return err
+		return finish, err
 	}
-	return nil
+	return finish, nil
 }
 
 // mmInputItem 火山多模态向量接口的 input 元素（非标准形状）。

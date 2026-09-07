@@ -87,7 +87,7 @@ func TestChatStreamDeltasAndBudget(t *testing.T) {
 			"data: [DONE]\n\n"))
 	})
 	var sb strings.Builder
-	err := c.ChatStream(context.Background(), []Message{{Role: "user", Content: "hi"}}, Options{},
+	finish, err := c.ChatStream(context.Background(), []Message{{Role: "user", Content: "hi"}}, Options{},
 		func(s string) error { sb.WriteString(s); return nil })
 	if err != nil {
 		t.Fatalf("ChatStream: %v", err)
@@ -95,9 +95,30 @@ func TestChatStreamDeltasAndBudget(t *testing.T) {
 	if sb.String() != "你好，世界" {
 		t.Errorf("stream = %q", sb.String())
 	}
+	if finish != "" {
+		t.Errorf("无 finish_reason 的流应返回空串, got %q", finish)
+	}
 	// 5 个字符 / 2 = 2（下限 1）
 	if b.Used() != 2 {
 		t.Errorf("流式入账 = %d, want 2", b.Used())
+	}
+}
+
+func TestChatStreamFinishReasonCaptured(t *testing.T) {
+	// 末 chunk 携带 finish_reason=length（截断）：返回值透传给调用方标记
+	c, _ := testClient(t, func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "text/event-stream")
+		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"部分\"}}]}\n\n" +
+			"data: {\"choices\":[{\"delta\":{},\"finish_reason\":\"length\"}]}\n\n" +
+			"data: [DONE]\n\n"))
+	})
+	finish, err := c.ChatStream(context.Background(), []Message{{Role: "user", Content: "hi"}}, Options{},
+		func(string) error { return nil })
+	if err != nil {
+		t.Fatalf("ChatStream: %v", err)
+	}
+	if finish != "length" {
+		t.Errorf("finish = %q, want length", finish)
 	}
 }
 
@@ -106,7 +127,7 @@ func TestChatStreamPropagatesCallbackError(t *testing.T) {
 		w.Header().Set("Content-Type", "text/event-stream")
 		_, _ = w.Write([]byte("data: {\"choices\":[{\"delta\":{\"content\":\"a\"}}]}\n\ndata: [DONE]\n\n"))
 	})
-	err := c.ChatStream(context.Background(), nil, Options{}, func(string) error { return context.Canceled })
+	_, err := c.ChatStream(context.Background(), nil, Options{}, func(string) error { return context.Canceled })
 	if !errors.Is(err, context.Canceled) {
 		t.Fatalf("回调错误应向上传播, got %v", err)
 	}
