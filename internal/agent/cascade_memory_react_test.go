@@ -28,6 +28,8 @@ type scriptedLLM struct {
 	// comps：ChatWithTools（原生 tool-calling）按序弹出的补全；耗尽后返回
 	// &Completion{Content: last}（即"不再调用工具，直接给最终回答"）。
 	comps []*llm.Completion
+	// compMsgs：ChatWithTools 每次收到的完整消息（P10-2 截断回填断言用）。
+	compMsgs [][]llm.Message
 }
 
 func (s *scriptedLLM) HasKey() bool { return true }
@@ -59,6 +61,7 @@ func (s *scriptedLLM) Chat(_ context.Context, messages []llm.Message, _ llm.Opti
 func (s *scriptedLLM) ChatWithTools(_ context.Context, messages []llm.Message, _ llm.Options, tools []llm.ToolDef) (*llm.Completion, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.compMsgs = append(s.compMsgs, append([]llm.Message{}, messages...))
 	sys, usr := "", ""
 	if len(messages) > 0 {
 		sys = messages[0].Content
@@ -689,5 +692,97 @@ func TestPipelineAgentFirstReActPath(t *testing.T) {
 	}
 	if len(eventsOf(events, "status")) != 1 {
 		t.Errorf("应有一次工具调用 status 事件")
+	}
+}
+
+// ---------- P10-2：ReAct 截断防御（length 先于工具解析） ----------
+
+// truncatedCall 构造一次撞 max_tokens 截断的工具调用补全（测试 DSL）。
+func truncatedCall(id, name, argsJSON string) *llm.Completion {
+	c := toolCall(id, name, argsJSON)
+	c.FinishReason = "length"
+	return c
+}
+
+// stopCall 构造 finish_reason=stop 的正常工具调用补全。
+func stopCall(id, name, argsJSON string) *llm.Completion {
+	c := toolCall(id, name, argsJSON)
+	c.FinishReason = "stop"
+	return c
+}
+
+func TestReActTruncatedToolCallsNotExecuted(t *testing.T) {
+	// 第一轮截断（length + 不完整参数的读调用）→ 一律不执行、合成 observation
+	// 回填；第二轮模型重发完整调用后正常作答。
+	sl := &scriptedLLM{comps: []*llm.Completion{
+		truncatedCall("c1", "query_venues", `{"date":"2026-09`), // 不完整 JSON
+		stopCall("c2", "query_venues", `{"date":"2026-09-08"}`),
+		finalAnswer("2026-09-08 可预约场馆包括羽毛球馆、游泳馆。"),
+	}}
+	d := reActDeps(t, sl)
+	var events []any
+	err := d.RunReAct(context.Background(), func(ev any) error { events = append(events, ev); return nil },
+		"帮我看看 9 月 8 日有什么能约的", "student", "u1", "s1", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	// 截断轮不产生任何 status（工具 Run 从未被触发，无副作用）；
+	// 只有重发那一轮有一次"调用工具"status。
+	if n := len(eventsOf(events, "status")); n != 1 {
+		t.Fatalf("工具只应执行 1 次（截断轮不执行）: %d", n)
+	}
+	if !strings.Contains(answerText(events), "羽毛球馆") {
+		t.Errorf("第二轮重发后应正常作答: %q", answerText(events))
+	}
+	// 回填断言：第二轮收到的 messages 末两条 = assistant(带截断的 tool_calls) + tool(合成 observation)
+	msgs := sl.compMsgs[1]
+	if len(msgs) < 2 {
+		t.Fatalf("第二轮 messages = %d 条", len(msgs))
+	}
+	asst, toolMsg := msgs[len(msgs)-2], msgs[len(msgs)-1]
+	if asst.Role != "assistant" || len(asst.ToolCalls) != 1 || asst.ToolCalls[0].ID != "c1" {
+		t.Errorf("assistant 原样回填失败: %+v", asst)
+	}
+	if toolMsg.Role != "tool" || toolMsg.ToolCallID != "c1" ||
+		!strings.Contains(toolMsg.Content, "token 上限被截断") {
+		t.Errorf("合成 observation = %+v", toolMsg)
+	}
+}
+
+func TestReActLengthWithoutCallsStillTerminates(t *testing.T) {
+	// length 但无 tool_calls：最终回答被截断仍是回答，走既有终止分支
+	sl := &scriptedLLM{comps: []*llm.Completion{
+		{Content: "答案是 3.0（部分）", FinishReason: "length"},
+	}}
+	d := reActDeps(t, sl)
+	var events []any
+	err := d.RunReAct(context.Background(), func(ev any) error { events = append(events, ev); return nil },
+		"转专业绩点要求", "student", "u1", "s1", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(answerText(events), "3.0") {
+		t.Errorf("应按终止判据出答案: %q", answerText(events))
+	}
+}
+
+func TestReActStopWithToolCallsStillExecutes(t *testing.T) {
+	// finish_reason=stop + tool_calls：防御只针对 length，正常执行不受影响
+	sl := &scriptedLLM{comps: []*llm.Completion{
+		stopCall("c1", "query_venues", `{"date":"2026-09-08"}`),
+		finalAnswer("场馆均可预约。"),
+	}}
+	d := reActDeps(t, sl)
+	var events []any
+	err := d.RunReAct(context.Background(), func(ev any) error { events = append(events, ev); return nil },
+		"9 月 8 日有什么场馆", "student", "u1", "s1", nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if n := len(eventsOf(events, "status")); n != 1 {
+		t.Fatalf("stop + tool_calls 应正常执行 1 次: %d", n)
+	}
+	if !strings.Contains(answerText(events), "场馆均可预约") {
+		t.Errorf("answer = %q", answerText(events))
 	}
 }

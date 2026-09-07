@@ -91,6 +91,20 @@ func (d *Deps) RunReAct(ctx context.Context, emit emitFn, question, role, user, 
 		if err != nil {
 			return err
 		}
+		// 截断防御（判断顺序铁律：length 先于工具解析）：输出撞 max_tokens 截断时
+		// tool_calls 里可能携带不完整 JSON 参数，执行会产生真实副作用，一律不执行。
+		// 修复走 Pi 式回填——合成错误 observation 交模型下一轮重发完整调用，与既有
+		// "错误回填 observation 不断链"哲学一致。不记 seen 指纹（未执行过）：重发
+		// 同一调用不得被 reactRepeatLimit 误伤。
+		if comp.FinishReason == "length" && len(comp.ToolCalls) > 0 {
+			msgs = append(msgs, llm.Message{Role: "assistant", Content: comp.Content,
+				ToolCalls: callsToMsg(comp.ToolCalls)})
+			for _, call := range comp.ToolCalls {
+				msgs = append(msgs, llm.Message{Role: "tool", ToolCallID: call.ID,
+					Content: "输出达到 token 上限被截断，参数可能不完整，本次未执行。请重新发起完整调用。"})
+			}
+			continue // 消耗一个轮次预算，反复截断由 reactMaxTurns + 到顶兜底收口
+		}
 		if len(comp.ToolCalls) == 0 { // 唯一终止判据：无 tool_calls 即最终回答
 			final := strings.TrimSpace(comp.Content)
 			if final == "" && len(observations) > 0 {
