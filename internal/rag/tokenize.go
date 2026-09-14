@@ -1,7 +1,6 @@
-// Package rag 实现检索层：语料入库、BM25（中文字符二元语法）+ 向量余弦混合检索、RRF 融合。
-//
-// 设计取舍：校园知识库规模在千级 chunk，暴力余弦足够快，因此不引入外部向量数据库，
-// 换取零部署依赖。所有 SQL 均为静态语句 + 参数绑定。
+// Package rag 实现检索层：语料入库、关键词检索（PG 原生 FTS，中文二元语法分词
+// 下沉为 schema.go 的 rag_tokenize SQL 函数）+ pgvector halfvec HNSW 向量检索，
+// RRF 融合。Tokenize 是 rag_tokenize 的 Go 参考实现（语义集合等价，单测契约）。
 package rag
 
 import (
@@ -28,7 +27,7 @@ func Tokenize(text string) []string {
 	return tokens
 }
 
-// dedupKeepOrder 去重并保持首次出现顺序（BM25 查询侧、向量去重等场景）。
+// dedupKeepOrder 去重并保持首次出现顺序（测试对照 rag_tokenize、通用去重场景）。
 func dedupKeepOrder(tokens []string) []string {
 	seen := make(map[string]struct{}, len(tokens))
 	out := tokens[:0:0]

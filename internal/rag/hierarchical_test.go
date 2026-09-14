@@ -353,8 +353,8 @@ func TestRetrieverParentExpansionDedup(t *testing.T) {
 	childA := "绩点不低于 3.0。"
 	childB := "无不及格课程记录，艺术类原则上不得互转。"
 	if err := s.UpsertDoc("d1", "转专业管理办法", "教务处", "", []ChunkRecord{
-		{Text: parentText, SectionPath: "转专业 > 申请条件", IsParent: true, ParentIdx: -1, Vec: []float64{1, 0}},
-		{Text: childA, SectionPath: "转专业 > 申请条件", IsParent: false, ParentIdx: 0, Vec: []float64{1, 0}},
+		{Text: parentText, SectionPath: "转专业 > 申请条件", IsParent: true, ParentIdx: -1, Vec: UnitVec(0)},
+		{Text: childA, SectionPath: "转专业 > 申请条件", IsParent: false, ParentIdx: 0, Vec: UnitVec(0)},
 		{Text: childB, SectionPath: "转专业 > 申请条件", IsParent: false, ParentIdx: 0, Vec: UnitVec(1)},
 	}); err != nil {
 		t.Fatal(err)

@@ -122,14 +122,14 @@ func EmbedBatched(ctx context.Context, client LLMer, chunks []string) ([][]float
 
 // IngestOptions 入库 CLI 选项。
 type IngestOptions struct {
-	NoEmbed bool // 只建 BM25 索引（显式手动选项）
+	NoEmbed bool // 只建关键词（FTS）索引（显式手动选项）
 	Rebuild bool // 删除旧索引文件后重建
 }
 
 // Ingest 语料入库：corpus/*.md → 解析 → 分块 →（可选）向量化 → PostgreSQL。
 // 返回 (文档数, chunk 数, 是否向量化和 DSN)。
 // P6 阶段0 去静默降级：非 -no-embed 时向量化失败直接报错退出，
-// 不再"假成功"成纯 BM25 索引（向量缺失在检索侧也会被明确拒绝）。
+// 不再"假成功"成纯关键词索引（向量缺失在检索侧也会被明确拒绝）。
 func Ingest(ctx context.Context, s *config.Settings, client *llm.Client, opt IngestOptions) (Stats, string, error) {
 	store, err := Open(s.PGDSN)
 	if err != nil {
@@ -145,7 +145,7 @@ func Ingest(ctx context.Context, s *config.Settings, client *llm.Client, opt Ing
 	hierarchical := s.ChunkMode != "flat"
 	useEmbed := !opt.NoEmbed
 	if useEmbed && (client == nil || !client.HasEmbedKey()) {
-		return Stats{}, s.PGDSN, fmt.Errorf("未配置 EMBED_API_KEY/LLM_API_KEY，无法向量化；确要仅建 BM25 请显式加 -no-embed")
+		return Stats{}, s.PGDSN, fmt.Errorf("未配置 EMBED_API_KEY/LLM_API_KEY，无法向量化；确要仅建关键词（FTS）索引请显式加 -no-embed")
 	}
 	files, err := filepath.Glob(filepath.Join(s.CorpusDir, "*.md"))
 	if err != nil {
@@ -156,9 +156,9 @@ func Ingest(ctx context.Context, s *config.Settings, client *llm.Client, opt Ing
 		return Stats{}, s.PGDSN, fmt.Errorf("未找到语料文件：%s/*.md", s.CorpusDir)
 	}
 
-	modeLabel := "BM25+向量"
+	modeLabel := "FTS+向量"
 	if !useEmbed {
-		modeLabel = "仅BM25（-no-embed）"
+		modeLabel = "仅FTS（-no-embed）"
 	}
 	for _, f := range files {
 		doc, err := ParseDoc(f)

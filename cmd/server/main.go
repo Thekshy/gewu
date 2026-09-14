@@ -4,7 +4,7 @@
 //
 //	gewu-api                    启动 HTTP 服务（:8000）
 //	gewu-api -ingest            语料入库后退出（等价 make ingest）
-//	gewu-api -ingest -no-embed  仅建 BM25 索引（显式手动选项）
+//	gewu-api -ingest -no-embed  仅建关键词（FTS）索引（显式手动选项）
 //	gewu-api -ingest -rebuild   清空 PG 索引库后重建
 //
 // HTTP 语义（路由/handler/SSE）在 internal/api；强制有 key 启动（P6 起，
@@ -34,7 +34,7 @@ func main() {
 		addr       string
 	)
 	flag.BoolVar(&ingestOnly, "ingest", false, "语料入库后退出（不启动服务）")
-	flag.BoolVar(&noEmbed, "no-embed", false, "入库时只建 BM25 索引（显式手动选项）")
+	flag.BoolVar(&noEmbed, "no-embed", false, "入库时只建关键词（FTS）索引（显式手动选项）")
 	flag.BoolVar(&rebuild, "rebuild", false, "入库前清空 PG 索引库（TRUNCATE）后重建")
 	flag.StringVar(&addr, "addr", ":8000", "HTTP 监听地址")
 	flag.Parse()
@@ -49,7 +49,7 @@ func main() {
 
 	if ingestOnly {
 		if !noEmbed && !llmClient.HasEmbedKey() {
-			fmt.Fprintln(os.Stderr, "入库失败：未配置 EMBED_API_KEY/EMBED_BASE_URL（确要仅建 BM25 索引请显式加 -no-embed）")
+			fmt.Fprintln(os.Stderr, "入库失败：未配置 EMBED_API_KEY/EMBED_BASE_URL（确要仅建关键词（FTS）索引请显式加 -no-embed）")
 			os.Exit(1)
 		}
 		st, path, err := rag.Ingest(context.Background(), settings, llmClient, rag.IngestOptions{NoEmbed: noEmbed, Rebuild: rebuild})

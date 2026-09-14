@@ -30,6 +30,8 @@ jobs:
       - uses: actions/setup-go@v5
         with:
           go-version: "1.25"
+      - name: 建测试库 gewu_test（rag 测试用；pgvector 扩展由 execSchema 创建）
+        run: PGPASSWORD=gewu psql -h 127.0.0.1 -p 5433 -U gewu -d postgres -c "CREATE DATABASE gewu_test OWNER gewu;"
       - run: test -z "$(gofmt -l cmd internal)"
       - run: go vet ./...
       - run: go test ./... -race

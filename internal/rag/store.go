@@ -10,6 +10,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -410,8 +411,15 @@ const defaultTestDSN = "postgres://gewu:gewu@127.0.0.1:5433/gewu_test?sslmode=di
 // OpenTest 打开测试库并清空（agent/api 测试共用）。测试库不存在或 PG 不可达时
 // Skip——门禁口径是 make test（pg-up 前置）/CI service，裸 go test 允许跳过。
 // 测试库须预先建好（CI 有建库步骤；宿主 brew 路径见 runbook T1 备注）。
+//
+// 跨包并行共用测试库的串行化：进程级一次性会话锁（sync.Once + 专用连接持有到
+// 进程退出，连接断开 PG 自动释放）。不能按 Store 粒度加锁——同一测试可能构造
+// 多个 Store（如 agent 测试的 testDeps + depsWithLLM），两把锁会互相等待死锁。
 func OpenTest(t testing.TB) *Store {
 	t.Helper()
+	if err := lockTestDB(); err != nil {
+		t.Skipf("PG 测试库不可用（%v）——跳过 PG 依赖用例；门禁请跑 make test", err)
+	}
 	s, err := Open(testDSN())
 	if err != nil {
 		t.Skipf("PG 测试库不可用（%v）——跳过 PG 依赖用例；门禁请跑 make test", err)
@@ -422,6 +430,41 @@ func OpenTest(t testing.TB) *Store {
 	}
 	t.Cleanup(func() { _ = s.Close() })
 	return s
+}
+
+// testLockKey 测试库串行锁的固定 key（任意常量，全仓库唯一即可）。
+const testLockKey = 941012
+
+var (
+	testLockOnce sync.Once
+	testLockPool *pgxpool.Pool // 专用池：生命周期同进程（关掉它就等于放锁）
+	testLockConn *pgxpool.Conn // 专用连接：持锁到进程退出，断开自动释放
+	testLockErr  error
+)
+
+// lockTestDB 进程级一次：连测试库拿会话咨询锁并永不释放（进程退出即释放）。
+func lockTestDB() error {
+	testLockOnce.Do(func() {
+		pool, err := pgxpool.New(context.Background(), testDSN())
+		if err != nil {
+			testLockErr = err
+			return
+		}
+		conn, err := pool.Acquire(context.Background())
+		if err != nil {
+			pool.Close()
+			testLockErr = err
+			return
+		}
+		if _, err := conn.Exec(context.Background(), `SELECT pg_advisory_lock($1)`, testLockKey); err != nil {
+			conn.Release()
+			pool.Close()
+			testLockErr = err
+			return
+		}
+		testLockPool, testLockConn = pool, conn // 故意不关：进程退出 = 锁释放
+	})
+	return testLockErr
 }
 
 // testDSN 测试库连接串：PG_TEST_DSN > PG_DSN 的 <db>_test 变体 > 缺省。

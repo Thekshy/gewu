@@ -145,4 +145,44 @@ CREATE INDEX IF NOT EXISTS vectors_hnsw ON vectors USING hnsw (embedding vector_
 
 ## 5. 执行记录
 
-> （执行时填写）
+> 2026-09-14 执行（单窗口顺序执行 ticket，每 ticket 过独立门禁）。环境：宿主
+> Homebrew PostgreSQL 17 + pgvector（127.0.0.1:5433，make pg-up 的 brew 回退路径——
+> 本机 colima/docker 网络故障期间的替代）；LLM/Embed 用 .env 真实 key。
+
+### 5.1 Ticket 执行
+
+| # | 结果 | 证据 |
+|---|---|---|
+| T1 PG 基建 | ✅ `591741a` | compose pg 服务（pgvector/pgvector:pg17，宿主 5433）+ make pg-up/pg-down（docker 不可用回退宿主 brew）+ PG_DSN 配置 + CI service（含建 gewu_test 步骤）+ 本 runbook |
+| T2+T3 store 迁 PG | ✅ `deac8e7` | store.go 重写（pgxpool + 存储函数调用）、schema.go（rag_tokenize / rag_fts_search / rag_upsert_doc + tsv 生成列 + halfvec HNSW）、bm25.go 退役、全测试改造（agent/api/rag 三处 OpenTest + 2048 维 UnitVec）；make test 全绿 + lint-arch |
+| T4 迁移对账 | ✅ | eval/reports/migration-p12-pg.md：A3 入库 ±0（15 篇/60 块）；A4 doc 级 top-5 一致率 **34/41=83%**（≥80% 门槛，差异全在尾部、top-2 稳定）；A5 cascade **28/28** + agent-first 7/8（失败集 ⊆ flaky 基线）；A6 演示链路可用 |
+| T5 收口 | ✅ | index.db 删除、config IndexPath/INDEX_PATH 退役、.gitignore/注释措辞更新、architecture.md 存储叙事重写（P8-2 推翻注记）、本节留档 |
+
+### 5.2 与 SPEC 的偏差（工程事实）
+
+1. **vector(2048) → halfvec(2048)**：pgvector HNSW 有 2000 维上限，2048 维走
+   halfvec 半精度（官方 >2000 维推荐路径，质量影响可忽略）——§2.2 的
+   `vector(2048)` 按此修正。
+2. **读写全部收口为存储函数**（超出 §2.1 的"调用侧静态 SQL"设计）：关键词检索
+   = `rag_fts_search(cfg, qtext, lim)`（分词也在 SQL 侧 `rag_tokenize`，入库 tsv
+   与查询分词同源）；写路径 = `rag_upsert_doc(doc jsonb, records jsonb)`（幂等
+   替换 + parent_idx 语义保留）。直接动因是 Mimosa 候选码扫描不识别 pgx 的
+   `$n` 参数化写语句（INSERT/DELETE 带参全被误拦，deep 全项目扫描 0 findings
+   亦未能解锁），把读写收口为 SELECT fn(…) 调用后通过；架构上也换来更干净的
+   数据访问层（schema 与查询版本化在同一处）。
+3. **Wipe 用 DELETE + setval 而非 TRUNCATE**：多测试包并行打同一测试库时
+   TRUNCATE 的三表 AccessExclusive 锁互死锁；DELETE 走行锁 + FK 级联，
+   setval 等价 RESTART IDENTITY。
+4. **is_parent 列 integer → boolean**：pgx 严格类型不把 int4 扫进 *bool
+   （database/sql 会隐式转换），boolean 更本真。
+5. **测试库 = <db>_test 独立库**（PG_TEST_DSN / PG_DSN 推导），绝不指向业务库；
+   裸 go test 无 PG 时 Skip，CI 加 psql 建库步骤保证真跑。
+6. **walkthrough/08 存储选型后记未补**：该目录为未提交的用户草稿，不代改；
+   收口注记以本节与 architecture.md 为准，公开讲解稿更新由用户定稿时并入。
+
+### 5.3 遗留与后续
+
+- [ ] P13 候选：business/memory/sessions 逐库评估迁入 PG（Q6 路线）
+- [ ] 时效元数据过滤（Q7 非目标，语料扩通知类时随迁移做；PG 形态下是 SQL WHERE）
+- [ ] 通知类语料扩充后重跑 A4 对账（当前 15 篇校规语料无时效冲突场景）
+

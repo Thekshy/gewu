@@ -118,7 +118,7 @@ func TestBM25EmptyIndexReturnsNothing(t *testing.T) {
 
 // P12：FTS 的 OR 语义——只命中部分 token 的 chunk 也应被召回（不被 AND 过滤）。
 func TestBM25ORSemanticsPartialMatch(t *testing.T) {
-	s := testStore(t)
+	s := seedStore(t)
 	hits, err := s.BM25Search("图书馆 奖学金 gpa", 5)
 	if err != nil {
 		t.Fatal(err)
@@ -184,9 +184,7 @@ func TestVectorSearchCosine(t *testing.T) {
 		t.Fatal(err)
 	}
 	q := UnitVec(0)
-	for i := range q {
-		q[i] = 2 // 未归一化查询也应正确处理
-	}
+	q[0] = 2 // 未归一化查询也应正确处理（只放大首维，方向仍与 e0 同向）
 	hits, err := s.VectorSearch(q, 2)
 	if err != nil {
 		t.Fatal(err)

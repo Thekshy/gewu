@@ -26,8 +26,7 @@ flowchart TB
         RET[Retriever 混合检索]
         HIE[父子块层级检索]
         RR[LLM 精排]
-        ST[(index.db<br/>docs/chunks/vectors)]
-        BM25[BM25 内存索引]
+        ST[(PostgreSQL + pgvector<br/>FTS + halfvec HNSW)]
     end
     subgraph BIZ[internal/business · 业务域]
         BOOK[场馆预约]
@@ -42,7 +41,7 @@ flowchart TB
     UI -->|SSE| TR --> RL --> EP --> PIPE
     PIPE --> ROUTE & DIRECT & RES & REACT & TX
     ROUTE & DIRECT & RES -->|Retriever 接口| RET
-    RET --> HIE & RR & BM25 & ST
+    RET --> HIE & RR & ST
     REACT & TX -->|Tools 接口| BOOK & LEAVE
     PIPE & DIRECT & RES -->|LLMer 接口| LLMD --> LLM
     ROUTE & DIRECT & RES & REACT --> MEM & SESS
@@ -63,7 +62,7 @@ flowchart TB
 | 接口 | `internal/api` | HTTP 层：路由注册、请求校验、SSE 事件写出——只做 HTTP 语义，不含业务逻辑 |
 | 编排 | `internal/agent` | pipeline（RunChat 总编排，done 单点收口带 reason）、react（ReAct 引擎 + 截断防御：finish_reason=length 且带 tool_calls 时一律不执行——参数可能不完整，合成错误 observation 回填交模型重发，Pi 式修复）、transaction（知行执行层）、memory（长期记忆）、query_rewrite（指代补全）、tools（权限矩阵）、session（办理会话） |
 | 路由 | `internal/agent/routing` | 意图路由/执行策略分流：cascade 三级级联、triage 三策略、classic 基线、启发式；路由提示词随域内聚 |
-| 检索 | `internal/rag` | hierarchical（父子块切分与检索）、bm25、向量余弦、RRF 融合、rerank、SQLite 存储 |
+| 检索 | `internal/rag` | hierarchical（父子块切分与检索）、关键词检索（PG 原生 FTS，中文二元语法分词下沉 SQL 侧）、pgvector halfvec HNSW 向量检索、RRF 融合、rerank；读写收口为存储函数（rag_tokenize / rag_fts_search / rag_upsert_doc） |
 | 模型访问 | `internal/llm` | chat / stream / embed，OpenAI 兼容双 provider，工具调用；响应侧解析 finish_reason 与 usage 三元组（P10：length=截断判定依据；记账仍只入 total_tokens） |
 | 业务 | `internal/business` | mock 校内业务：场馆预约（容量/冲突/限额）+ 请假审批（分级） |
 | 支撑 | `internal/config` `budget` `dates` `middleware` | 配置、token 预算、确定性中文日期、限流与 trace-id |
@@ -107,11 +106,12 @@ lint 实现为 `scripts/lint-arch.sh`（go list + grep，零依赖）；带健�
 | `QUERY_REWRITE` | on / off | 多轮指代消解补全 |
 | `SESSION_STORE` | sqlite / memory | 办理会话持久化（data/sessions.db，重启续办）/ 进程内 map |
 
-存储后端的可换性是模块化叙事的一部分：当前 SQLite（15 文档/60 chunks 量级的最优解，
-零部署依赖）。**何时必须换**：知识库 chunk 到万级、或多副本/多写入方时，把
-`rag.Store` 换 PostgreSQL、向量侧换专业向量库（Milvus FLAT 等）——接口已收敛
-（`Store` / `VecStore`），历史上完整实现过并做过逐题对照（[docs/history/PARITY-MS.md](./history/PARITY-MS.md)，
-git tag `pre-ms-removal` 可回看全部源码）。
+检索存储 P12 起为 **PostgreSQL + pgvector**（生产形态对齐：一个库同时当关系库和向量库，
+后续 business/memory/sessions 按同一底座逐库评估迁入）。此前为 SQLite 自管双索引
+（进程内 BM25 + 暴力余弦）——P8-2 曾以"量级未触发"决策不换后端，P12 推翻该决策
+（动机与对账见 [docs/P12-storage-backend.md](./P12-storage-backend.md) 与
+eval/reports/migration-p12-pg.md）。专业向量库（Milvus）的触发线不变：chunk 十万级
+或需要服务端混排时另立项。
 
 ## 一次「深度研究」问答的完整流程
 
@@ -119,7 +119,7 @@ git tag `pre-ms-removal` 可回看全部源码）。
    （"那第二条是什么"→"转专业绩点要求是什么"），补全后贯通路由与检索两个环节。
 2. **路由**：cascade 级联或 agent-first 三策略（见上）。
 3. **拆解**：LLM 把复合问题拆成 2~4 个自包含子问题，消除指代。
-4. **多路检索**：每个子问题独立走混合检索（BM25 字符二元 + 向量余弦 + RRF + LLM 精排），命中以 `step` 事件推送。
+4. **多路检索**：每个子问题独立走混合检索（FTS 关键词 + 向量余弦 + RRF + LLM 精排），命中以 `step` 事件推送。
 5. **证据聚合**：跨子问题去重，最多保留 12 条，统一编号。
 6. **交叉综合**：LLM 只依据编号证据作答，事实点标注 `[n]`；证据不足明确声明。
 7. **事件流**：`route → status → step* → answer_delta* → citations → done` 的 SSE 序列，前端逐类渲染，评测端复用同一管线。
@@ -133,15 +133,18 @@ git tag `pre-ms-removal` 可回看全部源码）。
 复杂度仍然可控（原生 tool-calling 单主体，~300 行）——如果未来出现多主体协作或人工
 介入图，才值得引入框架。
 
-### 为什么 BM25 用字符二元语法而不是分词？
+### 为什么关键词检索用字符二元语法而不是分词？
 
-校园政策文本专有名词密度高（"推免""体测""学分认定"），通用分词器会把它们切碎；字符二元语法对这类词天然友好，且免去 jieba 等依赖与词表维护。BM25 与向量检索 RRF 融合后，字面精确匹配与语义泛化互补——GPA、日期、政策编号这类**必须精确**的信息由 BM25 兜底。
+校园政策文本专有名词密度高（"推免""体测""学分认定"），通用分词器会把它们切碎；字符二元语法对这类词天然友好，且免去 jieba 等依赖与词表维护。关键词路与向量检索 RRF 融合后，字面精确匹配与语义泛化互补——GPA、日期、政策编号这类**必须精确**的信息由关键词路兜底。P12 起分词下沉为 PG 侧的 rag_tokenize SQL 函数（入库 tsv 与查询分词同源），Go 侧 Tokenize 保留为参考实现与单测契约。
 
-### 为什么不用向量数据库 / PostgreSQL？
+### 为什么检索存储用 PostgreSQL + pgvector？
 
-语料规模千级 chunk，SQLite + 内存暴力余弦延迟毫秒级；四个 SQLite 库（索引/业务/记忆/会话）
-职责分离，"clone 即跑"零部署依赖。**触发线**：chunk 万级或多副本时换后端——接口已收敛，
-历史实现可复活（见"行为开关"节）。这是有意识的规模匹配决策，不是能力缺失。
+P12 起检索栈整体迁 PG（生产形态对齐，动机见 P12 runbook）：一个库同时承担关系存储
+（docs/chunks/元数据）与向量（pgvector halfvec HNSW）+ 关键词（tsvector/GIN FTS）
+三种检索形态，SQL 元数据过滤（时效性等）成为顺手能力。2048 维向量超出 HNSW 的
+2000 维上限，走 halfvec 半精度（官方 >2000 维推荐路径）。业务/记忆/会话三库仍是
+SQLite（P13 起逐库评估迁入）；Milvus 触发线不变：chunk 十万级或服务端混排需求。
+迁移对账：doc 级 top-5 命中一致率 83%、cascade 28/28，报告留档 eval/reports/。
 
 ### 引用与拒答怎么保证不是形式主义？
 

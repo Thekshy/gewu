@@ -25,8 +25,8 @@ pg-up:
 pg-down:
 	@docker compose stop pg 2>/dev/null || /opt/homebrew/opt/postgresql@17/bin/pg_ctl -D /opt/homebrew/var/postgresql@17 stop -m fast
 
-# 语料入库：真调 EMBED_*（火山方舟）出向量，建「BM25+向量」混合索引。
-# 可选参数：REBUILD=1 重建 / NO_EMBED=1 仅 BM25（显式手动选项）
+# 语料入库：真调 EMBED_*（火山方舟）出向量，建「FTS+向量」混合索引（PG+pgvector）。
+# 可选参数：REBUILD=1 清库重建 / NO_EMBED=1 仅 FTS（显式手动选项）
 ingest:
 	go run ./cmd/server -ingest $(if $(REBUILD),-rebuild,) $(if $(NO_EMBED),-no-embed,)
 
