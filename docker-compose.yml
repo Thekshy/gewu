@@ -1,12 +1,30 @@
-# 单体形态编排（P8 起）：仅前端容器；API 单体直接宿主运行（make run，:8000）。
+# 单体形态编排（P8 起）：前端容器 + 检索存储 PG（P12 起）；API 单体直接宿主运行（make run，:8000）。
 #
 # 常用：
+#   make pg-up                    # 起 PG（pgvector/pgvector:pg17，宿主 127.0.0.1:5433）
 #   docker compose up -d --build web   # 构建并启动前端（NEXT_PUBLIC_API_BASE 默认 :8000）
 #
 # 微服务编排（六服务 + pg/redis/milvus + monolith 对照）已随 P8 退役删除，
 # 历史形态见 docs/history/ 与 ADR（git tag pre-ms-removal 可回看全貌）。
 
 services:
+  pg:
+    # 检索索引存储（P12）：关系库 + pgvector 向量 + 原生 FTS 一个容器全包
+    image: pgvector/pgvector:pg17
+    environment:
+      POSTGRES_USER: gewu
+      POSTGRES_PASSWORD: gewu
+      POSTGRES_DB: gewu
+    ports:
+      - "127.0.0.1:5433:5432" # 宿主 5433 避开本机已有 PG；PG_DSN 可覆盖
+    volumes:
+      - pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U gewu -d gewu"]
+      interval: 3s
+      timeout: 3s
+      retries: 15
+
   web:
     build:
       context: .
@@ -16,3 +34,6 @@ services:
         NEXT_PUBLIC_API_BASE: ${NEXT_PUBLIC_API_BASE:-http://localhost:8000}
     ports:
       - "3100:3100"
+
+volumes:
+  pgdata:

@@ -41,6 +41,9 @@ type Settings struct {
 	CorpusDir string // 缺省 {DataDir}/corpus
 	IndexPath string // 缺省 {DataDir}/index.db
 
+	// PGDSN 检索索引存储连接串（P12：PostgreSQL + pgvector，make pg-up 起本地容器）。
+	PGDSN string // PG_DSN，缺省 postgres://gewu:gewu@127.0.0.1:5433/gewu?sslmode=disable
+
 	RateLimitPerMinute int
 	DailyTokenBudget   int64
 
@@ -80,6 +83,7 @@ func Load() *Settings {
 	applyOSEnv(s)
 	s.CorpusDir = firstNonEmpty(lookup("CORPUS_DIR"), filepath.Join(s.DataDir, "corpus"))
 	s.IndexPath = firstNonEmpty(lookup("INDEX_PATH"), filepath.Join(s.DataDir, "index.db"))
+	s.PGDSN = firstNonEmpty(lookup("PG_DSN"), "postgres://gewu:gewu@127.0.0.1:5433/gewu?sslmode=disable")
 	return s
 }
 
@@ -129,7 +133,7 @@ func applyOSEnv(s *Settings) {
 		"EMBED_API_KEY", "EMBED_BASE_URL", "EMBED_MODEL", "EMBED_MODE",
 		"ROUTER_MODE", "CHUNK_MODE", "RERANK_MODE", "REACT_MODE", "QUERY_REWRITE",
 		"SESSION_STORE",
-		"LLM_DISABLE_THINKING", "DATA_DIR", "CORPUS_DIR", "INDEX_PATH",
+		"LLM_DISABLE_THINKING", "DATA_DIR", "CORPUS_DIR", "INDEX_PATH", "PG_DSN",
 		"RATE_LIMIT_PER_MINUTE", "DAILY_TOKEN_BUDGET", "RETRIEVAL_K", "MAX_QUESTION_CHARS",
 	} {
 		if v, ok := os.LookupEnv(key); ok {
@@ -176,6 +180,8 @@ func setField(s *Settings, key, val string) {
 		s.CorpusDir = val
 	case "INDEX_PATH":
 		s.IndexPath = val
+	case "PG_DSN":
+		s.PGDSN = val
 	case "RATE_LIMIT_PER_MINUTE":
 		if n, err := strconv.Atoi(val); err == nil {
 			s.RateLimitPerMinute = n

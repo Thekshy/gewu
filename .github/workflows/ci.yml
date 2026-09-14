@@ -8,6 +8,23 @@ on:
 jobs:
   api:
     runs-on: ubuntu-latest
+    # P12：检索存储 PG（pgvector 镜像）——rag 域测试需要真 PG
+    services:
+      pg:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: gewu
+          POSTGRES_PASSWORD: gewu
+          POSTGRES_DB: gewu
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U gewu -d gewu"
+          --health-interval 3s
+          --health-timeout 3s
+          --health-retries 20
+    env:
+      PG_DSN: postgres://gewu:gewu@127.0.0.1:5433/gewu?sslmode=disable
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-go@v5
