@@ -8,6 +8,7 @@ import (
 	"strings"
 	"sync"
 	"testing"
+	"time"
 
 	"gewu/internal/business"
 	"gewu/internal/config"
@@ -112,20 +113,16 @@ func depsWithLLM(t *testing.T, sl *scriptedLLM) *Deps {
 	if sl == nil {
 		sl = &scriptedLLM{}
 	}
-	sl.embedV = []float64{1, 0}
+	sl.embedV = rag.UnitVec(0)
 	return depsWithLLMer(t, sl)
 }
 
 // depsWithLLMer 任意 LLMer 实现（failingLLM 等无 embed 能力的 mock）版本的装配。
 func depsWithLLMer(t *testing.T, lc LLMer) *Deps {
 	t.Helper()
-	store, err := rag.Open(filepath.Join(t.TempDir(), "index.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = store.Close() })
+	store := rag.OpenTest(t)
 	if err := store.UpsertDoc("d1", "转专业管理办法", "教务处", "", []rag.ChunkRecord{
-		{Text: "申请转专业要求绩点不低于 3.0，且无不及格课程记录。", Vec: []float64{1, 0}, ParentIdx: -1},
+		{Text: "申请转专业要求绩点不低于 3.0，且无不及格课程记录。", Vec: rag.UnitVec(0), ParentIdx: -1},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -617,12 +614,14 @@ func TestReActSearchRecordsCitations(t *testing.T) {
 func TestReActWriteToolGoesConfirmFlow(t *testing.T) {
 	// agent 发起参数齐全的写调用 → pending_action 确认流；下一轮「确认」
 	// 由既有 ClassifyReply/HandleReply 确定性接管 → 执行 → 回执。
+	// 日期用后天（相对当天计算）：业务层拒绝过去日期，写死日历日期会随时间过期。
+	future := time.Now().AddDate(0, 0, 2).Format("2006-01-02")
 	sl := &scriptedLLM{comps: []*llm.Completion{
-		toolCall("c1", "book_venue", `{"venue":"羽毛球馆","date":"2026-09-08","slot":"19:00-21:00","purpose":"社团活动"}`),
+		toolCall("c1", "book_venue", fmt.Sprintf(`{"venue":"羽毛球馆","date":%q,"slot":"19:00-21:00","purpose":"社团活动"}`, future)),
 	}}
 	d := reActDeps(t, sl)
 	d.Settings.RouterMode = "agent-first" // triage 规则快路径 → agent
-	events := ask(t, d, "s-confirm", "帮我预约 9 月 8 日晚上 19 点的羽毛球馆", "student")
+	events := ask(t, d, "s-confirm", "帮我预约后天晚上 19 点的羽毛球馆", "student")
 
 	var pending *pendingActionEvent
 	for _, ev := range events {
@@ -874,7 +873,7 @@ func TestErrorPathDoneReasonErrorSingleDone(t *testing.T) {
 	sl := &scriptedLLM{resps: []string{
 		`{"scores":{"factual":0.95,"research":0.02,"transaction":0.01,"hybrid":0.01,"refusal":0.01},"reason":"单点"}`,
 	}}
-	sl.embedV = []float64{1, 0}
+	sl.embedV = rag.UnitVec(0)
 	d := depsWithLLMer(t, &streamFailLLM{inner: sl})
 	events := ask(t, d, "s-err", "转专业绩点要求", "student")
 	if len(eventsOf(events, "error")) == 0 {

@@ -11,18 +11,12 @@ import (
 	"gewu/internal/llm"
 )
 
-func writeFile(path, content string) error {
-	return os.WriteFile(path, []byte(content), 0o644)
-}
+// PG 依赖用例统一走 OpenTest（测试库 gewu_test，PG 不可达时 Skip，
+// 门禁口径是 make test / CI service）。
 
 func testStore(t *testing.T) *Store {
 	t.Helper()
-	s, err := Open(filepath.Join(t.TempDir(), "index.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = s.Close() })
-	return s
+	return OpenTest(t)
 }
 
 func seedStore(t *testing.T) *Store {
@@ -122,6 +116,18 @@ func TestBM25EmptyIndexReturnsNothing(t *testing.T) {
 	}
 }
 
+// P12：FTS 的 OR 语义——只命中部分 token 的 chunk 也应被召回（不被 AND 过滤）。
+func TestBM25ORSemanticsPartialMatch(t *testing.T) {
+	s := testStore(t)
+	hits, err := s.BM25Search("图书馆 奖学金 gpa", 5)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(hits) == 0 {
+		t.Fatal("任一 token 命中即应召回（OR 语义），长 query 不应被过滤成空")
+	}
+}
+
 func TestRRFFusePrefersConsensus(t *testing.T) {
 	// chunk 2 在两路召回中都靠前（rank1+rank0），应压过只在一路靠前的 chunk 1（rank0+rank2）
 	got := RRFFuse([][]int{{1, 2}, {2, 3}}, 60)
@@ -156,17 +162,32 @@ func TestUpsertDocIsIdempotent(t *testing.T) {
 	}
 }
 
-func TestVectorSearchCosine(t *testing.T) {
+// 维度不符明确报错（换嵌入模型须整库重建的守卫）。
+func TestUpsertDocRejectsWrongDim(t *testing.T) {
 	s := testStore(t)
-	// 两个 chunk：一个与查询同向，一个正交
 	err := s.UpsertDoc("d1", "t", "s", "", []ChunkRecord{
 		{Text: "a", Vec: []float64{1, 0}, ParentIdx: -1},
-		{Text: "b", Vec: []float64{0, 1}, ParentIdx: -1},
+	})
+	if err == nil || !strings.Contains(err.Error(), "halfvec") {
+		t.Fatalf("err = %v, want 维度不符报错", err)
+	}
+}
+
+func TestVectorSearchCosine(t *testing.T) {
+	s := testStore(t)
+	// 两个 chunk：一个与查询同向，一个正交（UnitVec 构造 2048 维轴向量）
+	err := s.UpsertDoc("d1", "t", "s", "", []ChunkRecord{
+		{Text: "a", Vec: UnitVec(0), ParentIdx: -1},
+		{Text: "b", Vec: UnitVec(1), ParentIdx: -1},
 	})
 	if err != nil {
 		t.Fatal(err)
 	}
-	hits, err := s.VectorSearch([]float64{2, 0}, 2) // 未归一化查询也应正确处理
+	q := UnitVec(0)
+	for i := range q {
+		q[i] = 2 // 未归一化查询也应正确处理
+	}
+	hits, err := s.VectorSearch(q, 2)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -179,11 +200,18 @@ func TestVectorSearchCosine(t *testing.T) {
 	}
 }
 
-func TestVectorBlobNumpyCompatible(t *testing.T) {
-	// float32 小端字节序应与 numpy tobytes 一致：1.0 → 00 00 80 3F
-	blob, dim := packVector([]float64{1.0})
-	if dim != 1 || len(blob) != 4 || blob[0] != 0 || blob[1] != 0 || blob[2] != 0x80 || blob[3] != 0x3F {
-		t.Errorf("packVector(1.0) = % X dim=%d", blob, dim)
+func TestWipeResetsSequences(t *testing.T) {
+	s := seedStore(t)
+	if err := s.Wipe(); err != nil {
+		t.Fatal(err)
+	}
+	mustUpsert(t, s, "d1", "t", "s", []string{"重新开始"})
+	hits, err := s.BM25Search("重新开始", 5)
+	if err != nil || len(hits) != 1 {
+		t.Fatalf("hits = %v %v, want 1", hits, err)
+	}
+	if hits[0].ID != 1 {
+		t.Errorf("RESTART IDENTITY 后首个 chunk id 应为 1, got %d", hits[0].ID)
 	}
 }
 
@@ -217,7 +245,7 @@ func TestChunkTextAggregatesParagraphs(t *testing.T) {
 func TestParseDocFrontmatter(t *testing.T) {
 	f := filepath.Join(t.TempDir(), "0001-demo.md")
 	content := "---\ntitle: 演示文档\nsource: 教务处\nupdated: 2026-01-01\n---\n\n正文第一段。\n\n正文第二段。"
-	if err := writeFile(f, content); err != nil {
+	if err := os.WriteFile(f, []byte(content), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	doc, err := ParseDoc(f)
@@ -234,7 +262,7 @@ func TestParseDocFrontmatter(t *testing.T) {
 
 func TestParseDocDefaults(t *testing.T) {
 	f := filepath.Join(t.TempDir(), "0002-plain.md")
-	if err := writeFile(f, "没有 frontmatter 的正文。"); err != nil {
+	if err := os.WriteFile(f, []byte("没有 frontmatter 的正文。"), 0o644); err != nil {
 		t.Fatal(err)
 	}
 	doc, err := ParseDoc(f)
@@ -258,26 +286,21 @@ func TestRetrieverMissingVectorsErrors(t *testing.T) {
 
 func TestRetrieverBM25WithVectors(t *testing.T) {
 	s := seedStore(t)
-	// 与旧索引形态一致：每个 chunk 带同维向量（值不影响 BM25 命中结果）
-	docs, _ := s.ListDocs()
-	_ = docs
-	rows, err := s.ChunkRows(nil)
-	_ = rows
-	// 直接重灌带向量的同语料
+	// 与旧索引形态一致：每个 chunk 带同维向量（值不影响关键词命中结果）
 	if err := s.UpsertDoc("d1", "图书馆管理办法", "图书馆", "2026-01-01", []ChunkRecord{
-		{Text: "图书馆开放时间为周一至周五 7:30 至 22:30，周末 8:30 至 21:30。本科生外借上限 10 册，借期 30 天。", Vec: []float64{1, 0}, ParentIdx: -1},
+		{Text: "图书馆开放时间为周一至周五 7:30 至 22:30，周末 8:30 至 21:30。本科生外借上限 10 册，借期 30 天。", Vec: UnitVec(0), ParentIdx: -1},
 	}); err != nil {
 		t.Fatal(err)
 	}
 	if err := s.UpsertDoc("d2", "学生宿舍管理规定", "学生处", "2026-01-01", []ChunkRecord{
-		{Text: "宿舍门禁时间为 23:00 至次日 6:00，晚归需登记并告知辅导员。", Vec: []float64{1, 0}, ParentIdx: -1},
+		{Text: "宿舍门禁时间为 23:00 至次日 6:00，晚归需登记并告知辅导员。", Vec: UnitVec(0), ParentIdx: -1},
 	}); err != nil {
 		t.Fatal(err)
 	}
 	client := &mockLLM{embed: func(texts []string) [][]float64 {
 		out := make([][]float64, len(texts))
 		for i := range out {
-			out[i] = []float64{0.6, 0.8}
+			out[i] = UnitVec(0)
 		}
 		return out
 	}}

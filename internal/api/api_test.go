@@ -77,7 +77,7 @@ func (m *mockLLM) ChatWithTools(_ context.Context, _ []llm.Message, _ llm.Option
 func (m *mockLLM) Embed(_ context.Context, texts []string) ([][]float64, error) {
 	out := make([][]float64, len(texts))
 	for i := range out {
-		out[i] = []float64{1, 0}
+		out[i] = rag.UnitVec(0)
 	}
 	return out, nil
 }
@@ -95,17 +95,12 @@ func newTestServerWithMock(t *testing.T, rateLimit int, mock *mockLLM) (*Server,
 	dir := t.TempDir()
 	settings := config.Default()
 	settings.DataDir = dir
-	settings.IndexPath = filepath.Join(dir, "index.db")
 	settings.RateLimitPerMinute = rateLimit
 
-	store, err := rag.Open(settings.IndexPath)
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = store.Close() })
+	store := rag.OpenTest(t)
 	// 种一条可检索语料（带向量——P6 起向量缺失会明确报错）
 	if err := store.UpsertDoc("0001-transfer", "转专业管理办法", "教务处", "2026-01-01",
-		[]rag.ChunkRecord{{Text: "申请转专业的条件：绩点排名前 20%，无不及格课程。", Vec: []float64{1, 0}, ParentIdx: -1}}); err != nil {
+		[]rag.ChunkRecord{{Text: "申请转专业的条件：绩点排名前 20%，无不及格课程。", Vec: rag.UnitVec(0), ParentIdx: -1}}); err != nil {
 		t.Fatal(err)
 	}
 	biz, err := business.Open(filepath.Join(dir, "business.db"))

@@ -193,7 +193,7 @@ func TestHierarchicalIngestInvariants(t *testing.T) {
 	for i, c := range chunks {
 		records[i] = ChunkRecord{Text: c.Text, SectionPath: c.SectionPath, IsParent: c.IsParent, ParentIdx: c.ParentIdx}
 		if !c.IsParent {
-			records[i].Vec = []float64{1, 0} // 只有子块给向量
+			records[i].Vec = UnitVec(0) // 只有子块给向量
 		}
 	}
 	if err := s.UpsertDoc("d1", "图书馆管理办法", "图书馆", "", records); err != nil {
@@ -223,7 +223,7 @@ func TestHierarchicalIngestInvariants(t *testing.T) {
 	}
 
 	// 3) 向量只对应子块：VectorSearch 全量返回的 id 均非父块。
-	vecHits, err := s.VectorSearch([]float64{1, 0}, 100)
+	vecHits, err := s.VectorSearch(UnitVec(0), 100)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -318,8 +318,8 @@ func TestRerankScoresOrderAndFallback(t *testing.T) {
 func TestRetrieverRerankReorders(t *testing.T) {
 	s := testStore(t)
 	if err := s.UpsertDoc("d1", "t", "s", "", []ChunkRecord{
-		{Text: "甲：图书馆开放时间", Vec: []float64{1, 0}, ParentIdx: -1},
-		{Text: "乙：转专业绩点要求 3.0", Vec: []float64{1, 0}, ParentIdx: -1},
+		{Text: "甲：图书馆开放时间", Vec: UnitVec(0), ParentIdx: -1},
+		{Text: "乙：转专业绩点要求 3.0", Vec: UnitVec(0), ParentIdx: -1},
 	}); err != nil {
 		t.Fatal(err)
 	}
@@ -327,7 +327,7 @@ func TestRetrieverRerankReorders(t *testing.T) {
 	// rerank 分数 [1,10] 把甲提到最前
 	client := &mockLLM{
 		chat:  `{"scores":[1, 10]}`,
-		embed: func(texts []string) [][]float64 { return [][]float64{{1, 0}} },
+		embed: func(texts []string) [][]float64 { return [][]float64{UnitVec(0)} },
 	}
 	r := NewRetriever(s, 1, client).WithReranker(NewLLMReranker(client))
 	hits, err := r.Search(context.Background(), "转专业绩点", 1)
@@ -338,7 +338,7 @@ func TestRetrieverRerankReorders(t *testing.T) {
 		t.Fatalf("rerank 后首位应为甲: %+v", hits)
 	}
 	// rerank 解析失败 → 退回 RRF 顺序不阻断
-	clientFail := &mockLLM{chat: "不是JSON", embed: func(texts []string) [][]float64 { return [][]float64{{1, 0}} }}
+	clientFail := &mockLLM{chat: "不是JSON", embed: func(texts []string) [][]float64 { return [][]float64{UnitVec(0)} }}
 	r2 := NewRetriever(s, 1, clientFail).WithReranker(NewLLMReranker(clientFail))
 	hits2, err := r2.Search(context.Background(), "转专业绩点", 1)
 	if err != nil || len(hits2) != 1 || !strings.Contains(hits2[0].Text, "乙") {
@@ -355,11 +355,11 @@ func TestRetrieverParentExpansionDedup(t *testing.T) {
 	if err := s.UpsertDoc("d1", "转专业管理办法", "教务处", "", []ChunkRecord{
 		{Text: parentText, SectionPath: "转专业 > 申请条件", IsParent: true, ParentIdx: -1, Vec: []float64{1, 0}},
 		{Text: childA, SectionPath: "转专业 > 申请条件", IsParent: false, ParentIdx: 0, Vec: []float64{1, 0}},
-		{Text: childB, SectionPath: "转专业 > 申请条件", IsParent: false, ParentIdx: 0, Vec: []float64{0.9, 0.1}},
+		{Text: childB, SectionPath: "转专业 > 申请条件", IsParent: false, ParentIdx: 0, Vec: UnitVec(1)},
 	}); err != nil {
 		t.Fatal(err)
 	}
-	client := &mockLLM{embed: func(texts []string) [][]float64 { return [][]float64{{1, 0}} }}
+	client := &mockLLM{embed: func(texts []string) [][]float64 { return [][]float64{UnitVec(0)} }}
 	r := NewRetriever(s, 5, client)
 	hits, err := r.Search(context.Background(), "绩点 不及格", 5)
 	if err != nil {
@@ -383,12 +383,12 @@ func TestRetrieverFlatModeUnchanged(t *testing.T) {
 	s := testStore(t)
 	// flat 模式：parent_id 为空 → 命中即子块本身，逐字与旧行为一致
 	if err := s.UpsertDoc("d1", "图书馆管理办法", "图书馆", "", []ChunkRecord{
-		{Text: "图书馆开放时间为 7:30 至 22:30。", Vec: []float64{1, 0}, ParentIdx: -1},
-		{Text: "本科生外借上限 10 册，借期 30 天。", Vec: []float64{1, 0}, ParentIdx: -1},
+		{Text: "图书馆开放时间为 7:30 至 22:30。", Vec: UnitVec(0), ParentIdx: -1},
+		{Text: "本科生外借上限 10 册，借期 30 天。", Vec: UnitVec(0), ParentIdx: -1},
 	}); err != nil {
 		t.Fatal(err)
 	}
-	client := &mockLLM{embed: func(texts []string) [][]float64 { return [][]float64{{1, 0}} }}
+	client := &mockLLM{embed: func(texts []string) [][]float64 { return [][]float64{UnitVec(0)} }}
 	r := NewRetriever(s, 5, client)
 	hits, err := r.Search(context.Background(), "图书馆开放时间", 5)
 	if err != nil {

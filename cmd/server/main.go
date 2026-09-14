@@ -5,7 +5,7 @@
 //	gewu-api                    启动 HTTP 服务（:8000）
 //	gewu-api -ingest            语料入库后退出（等价 make ingest）
 //	gewu-api -ingest -no-embed  仅建 BM25 索引（显式手动选项）
-//	gewu-api -ingest -rebuild   删除旧索引后重建
+//	gewu-api -ingest -rebuild   清空 PG 索引库后重建
 //
 // HTTP 语义（路由/handler/SSE）在 internal/api；强制有 key 启动（P6 起，
 // LLM_API_KEY 缺失直接 fatal，无演示模式）。
@@ -35,7 +35,7 @@ func main() {
 	)
 	flag.BoolVar(&ingestOnly, "ingest", false, "语料入库后退出（不启动服务）")
 	flag.BoolVar(&noEmbed, "no-embed", false, "入库时只建 BM25 索引（显式手动选项）")
-	flag.BoolVar(&rebuild, "rebuild", false, "入库前删除旧索引文件")
+	flag.BoolVar(&rebuild, "rebuild", false, "入库前清空 PG 索引库（TRUNCATE）后重建")
 	flag.StringVar(&addr, "addr", ":8000", "HTTP 监听地址")
 	flag.Parse()
 
@@ -73,7 +73,7 @@ func main() {
 
 // run 装配依赖（存储/检索/编排/会话）并启动 HTTP 服务。
 func run(settings *config.Settings, llmClient *llm.Client, tokenBudget *budget.TokenBudget, addr string) error {
-	store, err := rag.Open(settings.IndexPath)
+	store, err := rag.Open(settings.PGDSN)
 	if err != nil {
 		return err
 	}

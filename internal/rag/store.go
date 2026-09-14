@@ -1,16 +1,25 @@
 package rag
 
 import (
-	"database/sql"
-	"encoding/binary"
+	"context"
+	"encoding/json"
 	"fmt"
 	"math"
+	"net/url"
+	"os"
 	"sort"
 	"strconv"
-	"sync"
+	"strings"
+	"testing"
+	"time"
 
-	_ "modernc.org/sqlite" // 纯 Go SQLite 驱动，免 CGO
+	"github.com/jackc/pgx/v5/pgxpool"
+	"github.com/pgvector/pgvector-go"
 )
+
+// EmbedDim 向量列维度（halfvec(2048)），与火山 doubao-embedding 输出对齐。
+// 换嵌入模型（维度不同）须整库重建——维度不符会在入库时明确报错。
+const EmbedDim = 2048
 
 // Hit 一条检索命中：chunk 及其所属文档元信息。
 // hierarchical 模式下 Text 为父块文本（自带 breadcrumb），SectionPath 为命中子块
@@ -58,14 +67,15 @@ type ChunkRow struct {
 }
 
 // ChunkRecord 入库的单块记录：文本 + 检索属性 + 可选向量。
-// ParentIdx 指向同批 records 中父块的下标（父块自身为 -1），由 UpsertDoc
-// 换算成父块真实 chunk id 写入 parent_id 列——避免调用方预知自增 id 造成错位。
+// ParentIdx 指向同批 records 中父块的下标（父块自身为 -1），由 rag_upsert_doc
+// 存储函数换算成父块真实 chunk id 写入 parent_id 列——避免调用方预知自增 id
+// 造成错位。json 标签即 rag_upsert_doc 的 JSONB 载荷契约。
 type ChunkRecord struct {
-	Text        string
-	SectionPath string
-	IsParent    bool
-	ParentIdx   int // -1 = 无父（父块自身或 flat 模式）
-	Vec         []float64
+	Text        string    `json:"text"`
+	SectionPath string    `json:"section_path"`
+	IsParent    bool      `json:"is_parent"`
+	ParentIdx   int       `json:"parent_idx"` // -1 = 无父（父块自身或 flat 模式）
+	Vec         []float64 `json:"vec,omitempty"`
 }
 
 // Stats 索引规模统计（/api/health）。
@@ -75,255 +85,129 @@ type Stats struct {
 	Embedded bool
 }
 
-// bm25IndexCache 等旧字段见 Store；BM25 倒排结构已提取到 BM25Index
-// （同一份公式代码，SQLite Store 与微服务 PG 数据源共用）。
-
-// Store SQLite 知识库存储：BM25 + 向量余弦，供上层做 RRF 混合检索。
-// 单写连接串行化（与 Python 单连接语义一致），BM25/向量缓存用 RWMutex 保护。
+// Store PG 知识库存储：FTS + pgvector，供上层做 RRF 混合检索。
 type Store struct {
-	db  *sql.DB
-	mu  sync.RWMutex
-	bm  *BM25Index
-	vec map[int][]float32 // L2 归一化缓存
+	pool *pgxpool.Pool
 }
 
-// Open 打开（或创建）索引库并建表。
-func Open(path string) (*Store, error) {
-	db, err := sql.Open("sqlite", path)
+// openTimeout 连接/建 schema 的容忍窗口。
+const openTimeout = 5 * time.Second
+
+// Open 连接（或初始化 schema）PG 索引库。dsn 形如 PG_DSN（config 缺省指向本地 5433）。
+func Open(dsn string) (*Store, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), openTimeout)
+	defer cancel()
+	pool, err := pgxpool.New(ctx, dsn)
 	if err != nil {
+		return nil, fmt.Errorf("解析 DSN 失败: %w", err)
+	}
+	if err := pool.Ping(ctx); err != nil {
+		pool.Close()
+		return nil, fmt.Errorf("连接 PG 失败（先 make pg-up）: %w", err)
+	}
+	if err := execSchema(ctx, pool); err != nil {
+		pool.Close()
 		return nil, err
 	}
-	// 单连接：写操作只在 ingest 时发生，串行化规避 SQLITE_BUSY
-	db.SetMaxOpenConns(1)
-	if err := execSchema(db); err != nil {
-		db.Close()
-		return nil, err
-	}
-	return &Store{db: db}, nil
+	return &Store{pool: pool}, nil
 }
 
-// Close 关闭底层连接。
-func (s *Store) Close() error { return s.db.Close() }
+// Close 关闭底层连接池。
+func (s *Store) Close() error {
+	s.pool.Close()
+	return nil
+}
 
-// UpsertDoc 幂等入库：同一 doc_id 重复导入时先清旧 chunk 与向量。
-// records 按序写入；父块（IsParent=true）不写向量；子块 Vec 非 nil 时写向量。
-// 子块的 ParentIdx 必须指向本批中先于它出现的父块下标。
+// Wipe 清空索引库（-rebuild / 测试隔离用）。DELETE 走行锁 + FK 级联而非
+// TRUNCATE（后者要三表 AccessExclusive 锁，并行测试包同时清库会死锁）；
+// setval 重置序列让 chunk id 重新从 1 计数（等价 RESTART IDENTITY）。
+func (s *Store) Wipe() error {
+	ctx := context.Background()
+	if _, err := s.pool.Exec(ctx, `DELETE FROM docs`); err != nil {
+		return err
+	}
+	if _, err := s.pool.Exec(ctx, `SELECT setval(pg_get_serial_sequence($1, $2), 1, false)`,
+		"chunks", "id"); err != nil {
+		return err
+	}
+	return nil
+}
+
+// UpsertDoc 幂等入库：同一 doc_id 重复导入时先清旧 chunk 与向量（FK 级联删除）。
+// 载荷 json.Marshal 后整体交 rag_upsert_doc 存储函数执行（幂等替换、父块不建
+// 向量、parent_idx 语义见 schema.go）；维度预检给出比 PG 报错更友好的提示。
 func (s *Store) UpsertDoc(docID, title, source, updated string, records []ChunkRecord) error {
-	s.mu.Lock()
-	defer s.mu.Unlock()
-	tx, err := s.db.Begin()
-	if err != nil {
-		return err
-	}
-	defer func() { _ = tx.Rollback() }()
-
-	rows, err := tx.Query("SELECT id FROM chunks WHERE doc_id = ?", docID)
-	if err != nil {
-		return err
-	}
-	var oldIDs []int64
-	for rows.Next() {
-		var id int64
-		if err := rows.Scan(&id); err != nil {
-			rows.Close()
-			return err
-		}
-		oldIDs = append(oldIDs, id)
-	}
-	rows.Close()
-	if err := rows.Err(); err != nil {
-		return err
-	}
-	for _, id := range oldIDs {
-		if _, err := tx.Exec("DELETE FROM vectors WHERE chunk_id = ?", id); err != nil {
-			return err
-		}
-	}
-	if _, err := tx.Exec("DELETE FROM chunks WHERE doc_id = ?", docID); err != nil {
-		return err
-	}
-	if _, err := tx.Exec(
-		"INSERT OR REPLACE INTO docs (id, title, source, updated) VALUES (?, ?, ?, ?)",
-		docID, title, source, updated,
-	); err != nil {
-		return err
-	}
-	// ids[i] = 第 i 条 record 落库后的 chunk id（子块写 parent_id 时回查）。
-	ids := make([]int64, len(records))
 	for seq, rec := range records {
-		var parentID any // nil → SQL NULL（父块自身 / flat 模式）
-		if rec.ParentIdx >= 0 {
-			if rec.ParentIdx >= len(ids) || ids[rec.ParentIdx] == 0 {
-				return fmt.Errorf("chunk %d 的父块下标 %d 非法（父块须先于子块写入）", seq, rec.ParentIdx)
-			}
-			parentID = strconv.FormatInt(ids[rec.ParentIdx], 10)
-		}
-		res, err := tx.Exec(
-			"INSERT INTO chunks (doc_id, seq, text, parent_id, section_path, is_parent) VALUES (?, ?, ?, ?, ?, ?)",
-			docID, seq, rec.Text, parentID, rec.SectionPath, boolToInt(rec.IsParent),
-		)
-		if err != nil {
-			return err
-		}
-		cid, err := res.LastInsertId()
-		if err != nil {
-			return err
-		}
-		ids[seq] = cid
 		if rec.IsParent || len(rec.Vec) == 0 {
-			continue // 父块只入库不建向量；子块无向量（-no-embed）同样跳过
-		}
-		blob, dim := packVector(rec.Vec)
-		if _, err := tx.Exec("INSERT INTO vectors (chunk_id, dim, data) VALUES (?, ?, ?)", cid, dim, blob); err != nil {
-			return err
-		}
-	}
-	if err := tx.Commit(); err != nil {
-		return err
-	}
-	s.bm = nil
-	s.vec = nil
-	return nil
-}
-
-func boolToInt(b bool) int {
-	if b {
-		return 1
-	}
-	return 0
-}
-
-// packVector float64 列表 → (float32 小端字节, 维度)，与 numpy tobytes 兼容。
-func packVector(v []float64) ([]byte, int) {
-	buf := make([]byte, 4*len(v))
-	for i, x := range v {
-		binary.LittleEndian.PutUint32(buf[i*4:], math.Float32bits(float32(x)))
-	}
-	return buf, len(v)
-}
-
-func unpackVector(blob []byte, dim int) ([]float32, bool) {
-	if len(blob) != dim*4 {
-		return nil, false
-	}
-	out := make([]float32, dim)
-	for i := range out {
-		out[i] = math.Float32frombits(binary.LittleEndian.Uint32(blob[i*4:]))
-	}
-	return out, true
-}
-
-// ---------- BM25 ----------
-
-// ensureBM25 懒构建倒排索引；需持有 mu（读或写）。并发首查可能重复构建一次，
-// 结果幂等，最终一致。只索引子块（is_parent=0）——父块仅供回取，进了倒排
-// 会被直接命中、破坏"子块匹配/父块回答"的漏斗。
-func (s *Store) ensureBM25() error {
-	if s.bm != nil {
-		return nil
-	}
-	idx := NewBM25Index()
-	rows, err := s.db.Query("SELECT id, text FROM chunks WHERE is_parent = 0")
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var cid int
-		var text string
-		if err := rows.Scan(&cid, &text); err != nil {
-			return err
-		}
-		idx.AddDoc(cid, text)
-	}
-	if err := rows.Err(); err != nil {
-		return err
-	}
-	idx.Finalize()
-	s.bm = idx
-	return nil
-}
-
-// BM25Search 返回按 BM25 得分降序的前 k 个 (chunkID, score)（委托 BM25Index）。
-func (s *Store) BM25Search(query string, k int) ([]Scored, error) {
-	s.mu.RLock()
-	err := s.ensureBM25()
-	idx := s.bm
-	s.mu.RUnlock()
-	if err != nil || idx == nil {
-		return nil, err
-	}
-	return idx.Search(query, k), nil
-}
-
-// ---------- 向量 ----------
-
-func (s *Store) ensureVectors() error {
-	if s.vec != nil {
-		return nil
-	}
-	cache := map[int][]float32{}
-	rows, err := s.db.Query("SELECT chunk_id, dim, data FROM vectors")
-	if err != nil {
-		return err
-	}
-	defer rows.Close()
-	for rows.Next() {
-		var cid, dim int
-		var blob []byte
-		if err := rows.Scan(&cid, &dim, &blob); err != nil {
-			return err
-		}
-		v, ok := unpackVector(blob, dim)
-		if !ok {
 			continue
 		}
-		norm := l2norm32(v)
-		if norm > 0 {
-			for i := range v {
-				v[i] /= norm
-			}
+		if len(rec.Vec) != EmbedDim {
+			return fmt.Errorf("chunk %d 向量维度 %d 与 halfvec(%d) 不符（换嵌入模型须清库重建）", seq, len(rec.Vec), EmbedDim)
 		}
-		cache[cid] = v
 	}
-	if err := rows.Err(); err != nil {
+	doc, err := json.Marshal(map[string]string{"id": docID, "title": title, "source": source, "updated": updated})
+	if err != nil {
 		return err
 	}
-	s.vec = cache
-	return nil
-}
-
-func l2norm32(v []float32) float32 {
-	var sum float64
-	for _, x := range v {
-		sum += float64(x) * float64(x)
+	payload, err := json.Marshal(records)
+	if err != nil {
+		return err
 	}
-	return float32(math.Sqrt(sum))
-}
-
-// HasEmbeddings 库中是否存在向量。
-func (s *Store) HasEmbeddings() (bool, error) {
 	var n int
-	if err := s.db.QueryRow("SELECT COUNT(*) FROM vectors").Scan(&n); err != nil {
-		return false, err
-	}
-	return n > 0, nil
+	return s.pool.QueryRow(context.Background(),
+		`SELECT rag_upsert_doc($1, $2)`, doc, payload).Scan(&n)
 }
 
-// VectorSearch 暴力余弦：千级 chunk 规模下延迟毫秒级。查询向量先归一化。
-func (s *Store) VectorSearch(queryVec []float64, k int) ([]Scored, error) {
-	s.mu.RLock()
-	defer s.mu.RUnlock()
-	if err := s.ensureVectors(); err != nil {
-		return nil, err
+// toFloat32 float64 → float32（pgvector 参数类型）。
+func toFloat32(v []float64) []float32 {
+	out := make([]float32, len(v))
+	for i, x := range v {
+		out[i] = float32(x)
 	}
-	if len(s.vec) == 0 || len(queryVec) == 0 {
+	return out
+}
+
+// ---------- 关键词检索（PG 原生 FTS，逻辑收口在 rag_fts_search 存储函数） ----------
+
+// BM25Search 关键词检索：查询原文直入 rag_fts_search（服务端 rag_tokenize 分词，
+// 任一 token 命中即召回 = OR 语义，长 query 不会被 AND 过滤成空；得分 = 各命中
+// token 的 ts_rank_cd 之和）。方法名沿用 BM25 避免调用方漂移；ts_rank 与 BM25
+// 公式存在差异（词频饱和/长度归一），迁移对账见 eval/reports/migration-p12-pg.md。
+func (s *Store) BM25Search(query string, k int) ([]Scored, error) {
+	if query == "" || k <= 0 {
 		return nil, nil
 	}
-	q := make([]float32, len(queryVec))
+	rows, err := s.pool.Query(context.Background(),
+		`SELECT id, score FROM rag_fts_search($1, $2, $3)`, "simple", query, k)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Scored
+	for rows.Next() {
+		var sc Scored
+		if err := rows.Scan(&sc.ID, &sc.Score); err != nil {
+			return nil, err
+		}
+		out = append(out, sc)
+	}
+	return out, rows.Err()
+}
+
+// ---------- 向量检索（pgvector halfvec HNSW） ----------
+
+// VectorSearch 向量检索：L2 归一化后 cosine（<=>），HNSW 近似最近邻。
+// 平局按 chunk_id 升序保持确定性（与 SQLite 版语义一致）。
+func (s *Store) VectorSearch(queryVec []float64, k int) ([]Scored, error) {
+	if len(queryVec) == 0 || k <= 0 {
+		return nil, nil
+	}
+	if len(queryVec) != EmbedDim {
+		return nil, fmt.Errorf("查询向量维度 %d 与 halfvec(%d) 不符", len(queryVec), EmbedDim)
+	}
+	q := toFloat32(queryVec)
 	var norm float64
-	for i, x := range queryVec {
-		q[i] = float32(x)
+	for _, x := range queryVec {
 		norm += x * x
 	}
 	if norm > 0 {
@@ -332,27 +216,24 @@ func (s *Store) VectorSearch(queryVec []float64, k int) ([]Scored, error) {
 			q[i] *= inv
 		}
 	}
-	out := make([]Scored, 0, len(s.vec))
-	for cid, v := range s.vec {
-		if len(v) != len(q) {
-			continue // 维度不一致（换了嵌入模型）跳过
-		}
-		var dot float64
-		for i := range v {
-			dot += float64(v[i]) * float64(q[i])
-		}
-		out = append(out, Scored{ID: cid, Score: dot})
+	rows, err := s.pool.Query(context.Background(), `
+		SELECT chunk_id, 1 - (embedding <=> $1) AS score
+		FROM vectors
+		ORDER BY embedding <=> $1, chunk_id ASC
+		LIMIT $2`, pgvector.NewHalfVector(q), k)
+	if err != nil {
+		return nil, err
 	}
-	sort.Slice(out, func(i, j int) bool {
-		if out[i].Score != out[j].Score {
-			return out[i].Score > out[j].Score
+	defer rows.Close()
+	var out []Scored
+	for rows.Next() {
+		var sc Scored
+		if err := rows.Scan(&sc.ID, &sc.Score); err != nil {
+			return nil, err
 		}
-		return out[i].ID < out[j].ID
-	})
-	if len(out) > k {
-		out = out[:k]
+		out = append(out, sc)
 	}
-	return out, nil
+	return out, rows.Err()
 }
 
 // ---------- 读取 ----------
@@ -360,65 +241,87 @@ func (s *Store) VectorSearch(queryVec []float64, k int) ([]Scored, error) {
 // ChunkRows 批量取 chunk 行（含父子块字段）。
 func (s *Store) ChunkRows(ids []int) (map[int]ChunkRow, error) {
 	out := make(map[int]ChunkRow, len(ids))
-	for _, cid := range ids {
-		var r ChunkRow
+	if len(ids) == 0 {
+		return out, nil
+	}
+	rows, err := s.pool.Query(context.Background(), `
+		SELECT id, doc_id, seq, text, COALESCE(parent_id, ''), section_path, is_parent
+		FROM chunks WHERE id = ANY($1)`, toInt64s(ids))
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
 		var id int
-		var parentID sql.NullString
-		err := s.db.QueryRow("SELECT id, doc_id, seq, text, parent_id, section_path, is_parent FROM chunks WHERE id = ?", cid).
-			Scan(&id, &r.DocID, &r.Seq, &r.Text, &parentID, &r.SectionPath, &r.IsParent)
-		if err == nil {
-			r.ParentID = parentID.String
-			out[id] = r
-		} else if err != sql.ErrNoRows {
+		var r ChunkRow
+		if err := rows.Scan(&id, &r.DocID, &r.Seq, &r.Text, &r.ParentID, &r.SectionPath, &r.IsParent); err != nil {
 			return nil, err
 		}
+		out[id] = r
 	}
-	return out, nil
+	return out, rows.Err()
 }
 
 // ParentRows 按 parent_id（父块 chunk id 的文本形式）批量取父块行。
 func (s *Store) ParentRows(parentIDs []string) (map[string]ChunkRow, error) {
 	out := make(map[string]ChunkRow, len(parentIDs))
+	ids := make([]int64, 0, len(parentIDs))
 	for _, pid := range parentIDs {
-		cid, err := strconv.Atoi(pid)
-		if err != nil {
-			continue // 非法 id 直接跳过（不产生幽灵命中）
-		}
+		if n, err := strconv.Atoi(pid); err == nil {
+			ids = append(ids, int64(n))
+		} // 非法 id 直接跳过（不产生幽灵命中）
+	}
+	if len(ids) == 0 {
+		return out, nil
+	}
+	rows, err := s.pool.Query(context.Background(), `
+		SELECT id, doc_id, seq, text, COALESCE(parent_id, ''), section_path, is_parent
+		FROM chunks WHERE id = ANY($1)`, ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
+		var id int64
 		var r ChunkRow
-		var id int
-		var parentNull sql.NullString
-		err = s.db.QueryRow("SELECT id, doc_id, seq, text, parent_id, section_path, is_parent FROM chunks WHERE id = ?", cid).
-			Scan(&id, &r.DocID, &r.Seq, &r.Text, &parentNull, &r.SectionPath, &r.IsParent)
-		if err == nil {
-			r.ParentID = parentNull.String
-			out[pid] = r
-		} else if err != sql.ErrNoRows {
+		if err := rows.Scan(&id, &r.DocID, &r.Seq, &r.Text, &r.ParentID, &r.SectionPath, &r.IsParent); err != nil {
 			return nil, err
 		}
+		out[strconv.FormatInt(id, 10)] = r
 	}
-	return out, nil
+	return out, rows.Err()
 }
 
 // DocMetaMap 批量取文档元信息。
 func (s *Store) DocMetaMap(docIDs []string) (map[string]DocMeta, error) {
 	out := make(map[string]DocMeta, len(docIDs))
-	for _, docID := range docIDs {
-		var m DocMeta
+	if len(docIDs) == 0 {
+		return out, nil
+	}
+	rows, err := s.pool.Query(context.Background(), `
+		SELECT id, title, source, updated FROM docs WHERE id = ANY($1)`, docIDs)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	for rows.Next() {
 		var id string
-		err := s.db.QueryRow("SELECT id, title, source, updated FROM docs WHERE id = ?", docID).
-			Scan(&id, &m.Title, &m.Source, &m.Updated)
-		if err == nil {
-			out[id] = m
-		} else if err != sql.ErrNoRows {
+		var m DocMeta
+		if err := rows.Scan(&id, &m.Title, &m.Source, &m.Updated); err != nil {
 			return nil, err
 		}
+		out[id] = m
 	}
-	return out, nil
+	return out, rows.Err()
 }
 
-// ListDocs 全部文档（按 doc_id 升序）。
+// ListDocs 全部文档（按 doc_id 升序，含 chunk 计数）。
 func (s *Store) ListDocs() ([]DocInfo, error) {
-	rows, err := s.db.Query("SELECT id, title, source, updated FROM docs ORDER BY id")
+	rows, err := s.pool.Query(context.Background(), `
+		SELECT d.id, d.title, d.source, d.updated, COUNT(c.id) AS chunks
+		FROM docs d LEFT JOIN chunks c ON c.doc_id = d.id
+		GROUP BY d.id, d.title, d.source, d.updated
+		ORDER BY d.id`)
 	if err != nil {
 		return nil, err
 	}
@@ -426,35 +329,43 @@ func (s *Store) ListDocs() ([]DocInfo, error) {
 	var out []DocInfo
 	for rows.Next() {
 		var d DocInfo
-		if err := rows.Scan(&d.DocID, &d.Title, &d.Source, &d.Updated); err != nil {
+		if err := rows.Scan(&d.DocID, &d.Title, &d.Source, &d.Updated, &d.Chunks); err != nil {
 			return nil, err
 		}
 		out = append(out, d)
 	}
-	if err := rows.Err(); err != nil {
-		return nil, err
-	}
-	for i := range out {
-		if err := s.db.QueryRow("SELECT COUNT(*) FROM chunks WHERE doc_id = ?", out[i].DocID).
-			Scan(&out[i].Chunks); err != nil {
-			return nil, err
-		}
-	}
-	return out, nil
+	return out, rows.Err()
 }
 
 // GetStats 索引规模。
 func (s *Store) GetStats() (Stats, error) {
 	var st Stats
-	if err := s.db.QueryRow("SELECT COUNT(*) FROM docs").Scan(&st.Docs); err != nil {
-		return st, err
-	}
-	if err := s.db.QueryRow("SELECT COUNT(*) FROM chunks").Scan(&st.Chunks); err != nil {
+	if err := s.pool.QueryRow(context.Background(), `
+		SELECT (SELECT COUNT(*) FROM docs), (SELECT COUNT(*) FROM chunks)`).
+		Scan(&st.Docs, &st.Chunks); err != nil {
 		return st, err
 	}
 	emb, err := s.HasEmbeddings()
 	st.Embedded = emb
 	return st, err
+}
+
+// HasEmbeddings 库中是否存在向量。
+func (s *Store) HasEmbeddings() (bool, error) {
+	var exists bool
+	if err := s.pool.QueryRow(context.Background(),
+		`SELECT EXISTS(SELECT 1 FROM vectors)`).Scan(&exists); err != nil {
+		return false, err
+	}
+	return exists, nil
+}
+
+func toInt64s(ids []int) []int64 {
+	out := make([]int64, len(ids))
+	for i, id := range ids {
+		out[i] = int64(id)
+	}
+	return out
 }
 
 // RRFFuse Reciprocal Rank Fusion：多路召回的排名融合，k=60。
@@ -489,4 +400,52 @@ func RRFFuse(rankLists [][]int, k int) []int {
 		return a.firstSeen < b.firstSeen
 	})
 	return out
+}
+
+// ---------- 测试基建（agent/api 测试共用） ----------
+
+// defaultTestDSN 测试库（与业务库 gewu 分离——测试会 Wipe 清库，绝不能指向真索引）。
+const defaultTestDSN = "postgres://gewu:gewu@127.0.0.1:5433/gewu_test?sslmode=disable"
+
+// OpenTest 打开测试库并清空（agent/api 测试共用）。测试库不存在或 PG 不可达时
+// Skip——门禁口径是 make test（pg-up 前置）/CI service，裸 go test 允许跳过。
+// 测试库须预先建好（CI 有建库步骤；宿主 brew 路径见 runbook T1 备注）。
+func OpenTest(t testing.TB) *Store {
+	t.Helper()
+	s, err := Open(testDSN())
+	if err != nil {
+		t.Skipf("PG 测试库不可用（%v）——跳过 PG 依赖用例；门禁请跑 make test", err)
+	}
+	if err := s.Wipe(); err != nil {
+		s.Close()
+		t.Fatalf("清空测试库失败: %v", err)
+	}
+	t.Cleanup(func() { _ = s.Close() })
+	return s
+}
+
+// testDSN 测试库连接串：PG_TEST_DSN > PG_DSN 的 <db>_test 变体 > 缺省。
+func testDSN() string {
+	if v := os.Getenv("PG_TEST_DSN"); v != "" {
+		return v
+	}
+	base := os.Getenv("PG_DSN")
+	if base == "" {
+		return defaultTestDSN
+	}
+	u, err := url.Parse(base)
+	db := strings.TrimPrefix(u.Path, "/")
+	if err != nil || db == "" {
+		return defaultTestDSN
+	}
+	u.Path = "/" + db + "_test"
+	return u.String()
+}
+
+// UnitVec 返回 EmbedDim 维单位向量，第 i 位为 1——测试/演示用（入库向量维度
+// 必须是 2048，与 vectors.embedding 的 halfvec(2048) 对齐）。
+func UnitVec(i int) []float64 {
+	v := make([]float64, EmbedDim)
+	v[((i%EmbedDim)+EmbedDim)%EmbedDim] = 1
+	return v
 }

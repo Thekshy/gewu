@@ -15,11 +15,7 @@ import (
 // testDeps 构造零 key（离线确定性链路）的编排依赖。
 func testDeps(t *testing.T) *Deps {
 	t.Helper()
-	store, err := rag.Open(filepath.Join(t.TempDir(), "index.db"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() { _ = store.Close() })
+	store := rag.OpenTest(t)
 	biz, err := business.Open(filepath.Join(t.TempDir(), "biz.db"))
 	if err != nil {
 		t.Fatal(err)

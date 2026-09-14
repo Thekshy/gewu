@@ -126,39 +126,34 @@ type IngestOptions struct {
 	Rebuild bool // 删除旧索引文件后重建
 }
 
-// Ingest 语料入库：corpus/*.md → 解析 → 分块 →（可选）向量化 → SQLite。
-// 返回 (文档数, chunk 数, 是否向量化和索引路径)。
+// Ingest 语料入库：corpus/*.md → 解析 → 分块 →（可选）向量化 → PostgreSQL。
+// 返回 (文档数, chunk 数, 是否向量化和 DSN)。
 // P6 阶段0 去静默降级：非 -no-embed 时向量化失败直接报错退出，
 // 不再"假成功"成纯 BM25 索引（向量缺失在检索侧也会被明确拒绝）。
 func Ingest(ctx context.Context, s *config.Settings, client *llm.Client, opt IngestOptions) (Stats, string, error) {
-	if opt.Rebuild {
-		if _, err := os.Stat(s.IndexPath); err == nil {
-			if err := os.Remove(s.IndexPath); err != nil {
-				return Stats{}, s.IndexPath, err
-			}
-		}
-	}
-	if err := os.MkdirAll(filepath.Dir(s.IndexPath), 0o755); err != nil {
-		return Stats{}, s.IndexPath, err
-	}
-	store, err := Open(s.IndexPath)
+	store, err := Open(s.PGDSN)
 	if err != nil {
-		return Stats{}, s.IndexPath, err
+		return Stats{}, s.PGDSN, err
 	}
 	defer store.Close()
+	if opt.Rebuild {
+		if err := store.Wipe(); err != nil {
+			return Stats{}, s.PGDSN, err
+		}
+	}
 
 	hierarchical := s.ChunkMode != "flat"
 	useEmbed := !opt.NoEmbed
 	if useEmbed && (client == nil || !client.HasEmbedKey()) {
-		return Stats{}, s.IndexPath, fmt.Errorf("未配置 EMBED_API_KEY/LLM_API_KEY，无法向量化；确要仅建 BM25 请显式加 -no-embed")
+		return Stats{}, s.PGDSN, fmt.Errorf("未配置 EMBED_API_KEY/LLM_API_KEY，无法向量化；确要仅建 BM25 请显式加 -no-embed")
 	}
 	files, err := filepath.Glob(filepath.Join(s.CorpusDir, "*.md"))
 	if err != nil {
-		return Stats{}, s.IndexPath, err
+		return Stats{}, s.PGDSN, err
 	}
 	sort.Strings(files)
 	if len(files) == 0 {
-		return Stats{}, s.IndexPath, fmt.Errorf("未找到语料文件：%s/*.md", s.CorpusDir)
+		return Stats{}, s.PGDSN, fmt.Errorf("未找到语料文件：%s/*.md", s.CorpusDir)
 	}
 
 	modeLabel := "BM25+向量"
@@ -168,25 +163,25 @@ func Ingest(ctx context.Context, s *config.Settings, client *llm.Client, opt Ing
 	for _, f := range files {
 		doc, err := ParseDoc(f)
 		if err != nil {
-			return Stats{}, s.IndexPath, err
+			return Stats{}, s.PGDSN, err
 		}
 		docID := strings.TrimSuffix(filepath.Base(f), ".md")
 		records, err := buildRecords(ctx, docID, doc, client, useEmbed, hierarchical)
 		if err != nil {
-			return Stats{}, s.IndexPath, err
+			return Stats{}, s.PGDSN, err
 		}
 		title := doc.Meta["title"]
 		if title == "" {
 			title = docID
 		}
 		if err := store.UpsertDoc(docID, title, doc.Meta["source"], doc.Meta["updated"], records); err != nil {
-			return Stats{}, s.IndexPath, err
+			return Stats{}, s.PGDSN, err
 		}
 		fmt.Printf("  ✓ %s  %d 块（父 %d/子 %d）  [%s]\n", docID, len(records),
 			countParents(records), len(records)-countParents(records), modeLabel)
 	}
 	st, err := store.GetStats()
-	return st, s.IndexPath, err
+	return st, s.PGDSN, err
 }
 
 // buildRecords 单文档切分 + 向量化：
