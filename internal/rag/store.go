@@ -16,6 +16,8 @@ import (
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/pgvector/pgvector-go"
+
+	"gewu/internal/config"
 )
 
 // EmbedDim 向量列维度（halfvec(2048)），与火山 doubao-embedding 输出对齐。
@@ -467,15 +469,13 @@ func lockTestDB() error {
 	return testLockErr
 }
 
-// testDSN 测试库连接串：PG_TEST_DSN > PG_DSN 的 <db>_test 变体 > 缺省。
+// testDSN 测试库连接串：PG_TEST_DSN > PG_DSN（OS 环境变量或仓库 .env，经
+// config.Load 与主程序同源——go test 进程不会自己读 .env）推导 <db>_test > 缺省。
 func testDSN() string {
 	if v := os.Getenv("PG_TEST_DSN"); v != "" {
 		return v
 	}
-	base := os.Getenv("PG_DSN")
-	if base == "" {
-		return defaultTestDSN
-	}
+	base := config.Load().PGDSN
 	u, err := url.Parse(base)
 	db := strings.TrimPrefix(u.Path, "/")
 	if err != nil || db == "" {

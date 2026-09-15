@@ -11,19 +11,24 @@ build:
 
 # ---------- 检索存储（P12：PostgreSQL + pgvector） ----------
 
-# 起 PG（pgvector/pgvector:pg17，宿主 127.0.0.1:5433，--wait 等 healthcheck）。
-# 本机 docker daemon 不可用时回退宿主 Homebrew PG（brew install postgresql@17 pgvector）。
+# 起 PG（优先 compose；本机 docker 不可用回退宿主 Homebrew PG）。
+# 宿主实例可能是 brew services 管理的共享 postmaster（多项目共用，端口 5432），
+# 也可能是 pg_ctl 手起的 5433——两端口任一就绪即通过，都不在才尝试拉起。
 pg-up:
 	@docker compose up -d --wait pg 2>/dev/null || { \
-		echo "[pg-up] docker 不可用，回退宿主 Homebrew PG（postgresql@17，:5433）"; \
-		/opt/homebrew/opt/postgresql@17/bin/pg_ctl -D /opt/homebrew/var/postgresql@17 status >/dev/null 2>&1 || \
+		echo "[pg-up] docker 不可用，回退宿主 Homebrew PG（postgresql@17）"; \
+		/opt/homebrew/opt/postgresql@17/bin/pg_isready -q -p 5433 || \
+		/opt/homebrew/opt/postgresql@17/bin/pg_isready -q -p 5432 || \
 		/opt/homebrew/opt/postgresql@17/bin/pg_ctl -D /opt/homebrew/var/postgresql@17 start -o "-p 5433" -l /tmp/gewu-pg.log; \
 		/opt/homebrew/opt/postgresql@17/bin/pg_isready -q -p 5433 || \
-		(echo "[pg-up] 宿主 PG 未就绪：先 CREATE ROLE gewu LOGIN PASSWORD 'gewu' 与 DB gewu 并 CREATE EXTENSION vector"; exit 1); \
+		/opt/homebrew/opt/postgresql@17/bin/pg_isready -q -p 5432 || \
+		(echo "[pg-up] 宿主 PG 未就绪（5432/5433 均无）：brew services start postgresql@17，并按 README 建库建号"; exit 1); \
 	}
 
+# 宿主路径下不代停：该实例是多项目共享 postmaster（停了会殃及其他项目），
+# 需要真停用 brew services stop postgresql@17。
 pg-down:
-	@docker compose stop pg 2>/dev/null || /opt/homebrew/opt/postgresql@17/bin/pg_ctl -D /opt/homebrew/var/postgresql@17 stop -m fast
+	@docker compose stop pg 2>/dev/null || echo "[pg-down] 宿主 PG 为多项目共享实例，不代停；确需停用：brew services stop postgresql@17"
 
 # 语料入库：真调 EMBED_*（火山方舟）出向量，建「FTS+向量」混合索引（PG+pgvector）。
 # 可选参数：REBUILD=1 清库重建 / NO_EMBED=1 仅 FTS（显式手动选项）
