@@ -80,8 +80,12 @@ func Load() *Settings {
 		applyEnvFile(s, env)
 	}
 	applyOSEnv(s)
-	s.CorpusDir = firstNonEmpty(lookup("CORPUS_DIR"), filepath.Join(s.DataDir, "corpus"))
-	s.PGDSN = firstNonEmpty(lookup("PG_DSN"), "postgres://gewu:gewu@127.0.0.1:5433/gewu?sslmode=disable")
+	// 优先级：进程环境变量 > .env（已由 applyEnvFile 写入字段）> 缺省。
+	// 注意 fallback 链必须带上字段现值 s.PGDSN/s.CorpusDir——只查进程环境变量
+	// 会把 .env 读入的值盖回缺省（P14-1 双轨对照时撞出：.env 的 PG_DSN=5432
+	// 从未生效，服务恒连缺省 5433）。
+	s.CorpusDir = firstNonEmpty(lookup("CORPUS_DIR"), s.CorpusDir, filepath.Join(s.DataDir, "corpus"))
+	s.PGDSN = firstNonEmpty(lookup("PG_DSN"), s.PGDSN, "postgres://gewu:gewu@127.0.0.1:5433/gewu?sslmode=disable")
 	return s
 }
 
