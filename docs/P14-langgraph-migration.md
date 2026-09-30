@@ -188,6 +188,69 @@ BASE_URL 覆盖）。P14-7 全量门禁过了之后，P14-8 删除 Go、Python �
 
 ### 6.1 Ticket 执行
 
+**P14-2（2026-09-30，完成）**
+- LangGraph 主图 v1：resolve→route→retrieve→answer（StateGraph + MemorySaver）；
+  PARITY 十类事件构造器（events.py 逐字段对照 Go events.go）+ custom stream
+  writer 发射（emitter.py 脱图运行时安全降级）。
+- /api/chat SSE 契约：校验序列逐条对照 Go chat.go（空问题/超长/mode/role/session）、
+  `data: {json}\n\n` 分帧 + UTF-8 原文、done 单点（completed/max_tokens/error）。
+- LLMService 补 chat_stream（ChatStreamResult 迭代取增量、结束读 finish_reason）。
+- 门禁：chat 契约测试 7 例；eval factual 子集 9/9 真跑（mode=direct）。
+
+**P14-3（2026-09-30，完成）**
+- cascade 三级级联全量移植：L0 规则快路径（exactTx+consult→hybrid）/ L1 flash
+  五类概率分布（双阈值 0.80/0.55 + margin 0.15）+ refusal 双安全网（办理动词/
+  校园领域词升级 L2 复核——真实误拒案例的守卫）/ L2 主模型灰度兜底（failed→
+  L2-uncertain 转旗舰档 factual）；启发式降级（顺序判定不可调换）。
+- jsonx 容错解析（围栏剥离/首尾大括号截取）；classic/triage 按 Q6 不移植。
+- 门禁：路由单测 16 例（含 L1 概率字符串容错、平局 routeOrder 序、安全网升级、
+  阈值参数化）；eval refusal 3/3 真跑。
+
+**P14-4（2026-09-30，完成）**
+- ReAct 子图（LangGraph）：agent → 条件路由（guard：length 先于工具解析——
+  P10 截断防御铁律，不执行截断调用、合成错误 observation 回填重发、不记指纹）
+  → execute（指纹去重第 3 次拒、写操作转确认/缺参提示收集、错误回填不断链）
+  → finalize（无 tool_calls 唯一终止）/ converge（到顶强制收敛+部分结论兜底）。
+- ReactContext 经 config.configurable 注入（msgpack 序列化坑：运行时对象进
+  state 会被 checkpointer 拒绝）。
+- tx 域落地（Go transaction.go 全量）：工具识别（含 book_venue 负向双保险）、
+  槽位元数据/归一（dates 确定性解析）、确认摘要文案、续轮意图（LLM+启发式）。
+- dates.py 移植（测试与 Go 同基准日 2026-08-27）；business 写路径全量（预约
+  校验序/每日 2 时段/冲突可选项/请假审批分层/权限）；工具层权限矩阵单一出口。
+- run_eval.py 加 --mode（P14：agent 集以 react 跑）；expect.route=agent 语义
+  等价映射（triage 退役，mode=react 即 agent 链路）。
+- 门禁：38 例新单测；**agent 集 8/8 真跑**（含多轮确认流/业务状态断言）。
+- 坑：LangGraph StateGraph 丢弃 schema 外的 state key（tx_tool 两度静默丢失，
+  表现为 KeyError）——TypedDict 字段必须显式声明。
+
+**P14-5（2026-09-30，完成）**
+- research（plan→逐路检索→chunk_id 证据池去重→交叉综合，maxSubquestions=4/
+  maxEvidence=12/text 截 600）；hybrid（政策先答→hybrid_then_tx 标记→
+  answer_direct 条件边转办理）；transaction workflow 链（StartFlow：启发式+LLM
+  工具识别→读工具直执行→写工具进槽位收集→未识别转知识库）；advance 共用
+  （collect 吸收→齐了进确认/缺则追问）；Command(goto) 跨链跳转。
+- 门禁：transaction 7/7 + multi_hop 8/8 + hybrid 1/1 真跑（多轮槽位/冲突恢复/
+  审批层级断言全过）。
+
+**P14-6（2026-09-30，执行中）**
+- memory.py 移植（fact UPSERT + episodic + memory_block 装配 + consolidate
+  异步固化——线程替代 Go goroutine）；resolve_query 全门控移植（QUERY_REWRITE
+  开关/有 key/episodic 存在/指代信号词，补全失败静默回退）。
+- **interrupt() 确认门（Q4 原生机制）**：tx_confirm 发摘要（副作用节点）→
+  tx_gate 首动作 interrupt()（之前零副作用，resume 重放安全）→ resume 值=
+  用户新消息 → 修改（goto tx_confirm 重发）/确认（执行回执）/取消/new_topic
+  （goto route 重走正常路由）。SSE 端点 resume 桥：get_state 检测 interrupted
+  thread → Command(resume=question)——前端照常发 /api/chat 零改动。
+- **PostgresSaver checkpointer**：autocommit 连接（官方要求，DSN 字符串构造会
+  在 setup 时 TypeError）；**G3 重启续办真跑通过**——办理停在确认门→kill 服务
+  →重启→「确认」→ resume 续办成功（VE-0192 落库）。
+- 教训：**python str.replace patch 静默失配**（ruff format 重排后目标串不匹配，
+  checkpointer/memory 装配代码一度从未生效，同进程 resume 正常掩盖了它——
+  重启续办才暴露）。修后所有 patch 需 grep 验证落盘。
+- eval 修复：sid 加时间戳跨 run 唯一（固定 sid 时上次 run 遗留的 interrupt
+  会被下次 run 的 turn1 误 resume，事件流错乱）。
+- 全量回归进行中（对照 consolidate 并发影响）。
+
 **P14-0（2026-09-30，完成）**
 - 前置收口：P11 前端三视图 / walkthrough 10 篇 / README 定位重写 / schema.go is_parent
   字面量化（4 commit）先行入库，工作区清零后打 tag **`go-final`**（66edec2）——Go 时代

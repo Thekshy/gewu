@@ -295,7 +295,8 @@ def main() -> int:
 
     rows = []
     for item in items:
-        sid = f"eval-{item['id']}"
+        # 跨 run 唯一：同一 run 内三轮共享；遗留 interrupt/会话状态不串场
+        sid = f"eval-{item['id']}-{int(time.time() * 1000)}"
         multi = "turns" in item
         used0 = budget_used()
         try:

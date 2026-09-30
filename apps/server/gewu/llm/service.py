@@ -29,10 +29,18 @@ def to_lc_messages(messages: list[tuple[str, str]]) -> list[BaseMessage]:
 class LLMService:
     """双模型缓存 + 门面方法。线程安全：ChatOpenAI invoke 可并发，模型惰性建一次。"""
 
-    def __init__(self, settings: Settings) -> None:
+    def __init__(self, settings: Settings, budget=None) -> None:
         self._s = settings
         self._models: dict[bool, object] = {}
         self._embeddings: GewuEmbeddings | None = None
+        self._budget = budget  # TokenBudget（None = 不记账，测试替身用）
+
+    def _record(self, usage) -> None:
+        if self._budget is not None and usage is not None:
+            try:
+                self._budget.add(int(getattr(usage, "total", 0) or 0))
+            except Exception:  # noqa: BLE001 - 记账失败不影响主链路
+                pass
 
     # ---------- Chat ----------
 
@@ -55,6 +63,7 @@ class LLMService:
         if json_mode:
             kwargs["response_format"] = {"type": "json_object"}
         resp = self._model(small).bind(**kwargs).invoke(to_lc_messages(messages))
+        self._record(getattr(resp, "usage_metadata", None))
         return _content_text(resp)
 
     def chat_full(
@@ -67,7 +76,9 @@ class LLMService:
     ) -> AIMessage:
         """同 chat 但返回完整 AIMessage（finish_reason/usage 解析用）。"""
         model = self._model(small).bind(temperature=temperature, max_tokens=max_tokens)
-        return model.invoke(to_lc_messages(messages))  # type: ignore[return-value]
+        resp = model.invoke(to_lc_messages(messages))
+        self._record(getattr(resp, "usage_metadata", None))
+        return resp  # type: ignore[return-value]
 
     def chat_stream(
         self,
@@ -79,7 +90,7 @@ class LLMService:
     ) -> ChatStreamResult:
         """流式补全（Go ChatStream 等价）：迭代取文本增量，结束读 finish_reason。"""
         model = self._model(small).bind(temperature=temperature, max_tokens=max_tokens)
-        return ChatStreamResult(model, to_lc_messages(messages))
+        return ChatStreamResult(model, to_lc_messages(messages), budget=self._budget)
 
     def chat_with_tools(
         self,
@@ -125,8 +136,9 @@ class LLMService:
 class ChatStreamResult:
     """流式补全的可迭代结果：逐块产出文本增量，结束后 finish_reason/usage 就位。"""
 
-    def __init__(self, model, messages: list[BaseMessage]) -> None:
+    def __init__(self, model, messages: list[BaseMessage], budget=None) -> None:
         self._chunks: Iterator = model.stream(messages)
+        self._budget = budget
         self.finish_reason = ""
         self.usage = Usage()
 
@@ -145,6 +157,11 @@ class ChatStreamResult:
             text = _content_text(chunk)
             if text:
                 yield text
+        if self._budget is not None and self.usage.total:
+            try:
+                self._budget.add(self.usage.total)
+            except Exception:  # noqa: BLE001 - 记账失败不影响主链路
+                pass
 
 
 def _content_text(message) -> str:

@@ -10,13 +10,16 @@ done 事件在 chat 端点单点发射（Go RunChat 单点语义的等价物）�
 
 from __future__ import annotations
 
+import re
+
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command
 
 from gewu.agent import events as ev
 from gewu.agent.emitter import emit
-from gewu.agent.prompts import ANSWER_SYSTEM, NO_DATA_ANSWER, REFUSAL_ANSWER
+from gewu.agent.jsonx import json_str, parse_json_object
+from gewu.agent.prompts import ANSWER_SYSTEM, NO_DATA_ANSWER, QUERY_REWRITE_SYSTEM, REFUSAL_ANSWER
 from gewu.agent.routing import CascadeRouter, fill_policy, react_plan_signal
 from gewu.agent.state import ChatState
 from gewu.config import Settings
@@ -26,11 +29,71 @@ from gewu.rag.retrieve import Retriever
 # ---------- 节点 ----------
 
 
-def make_resolve_node(_llm: LLMService, _settings: Settings):
-    """上下文补全（多轮指代消解）。P14-2 占位：P14-6 会话/记忆接通后填 ResolveQuery。"""
+_ANAPHORA_RE = re.compile(
+    r"那|这|它|他|她|也|呢|上述|刚才|前面|上面|之前|第二|这种情况|我的情况|另外"
+)
+
+
+def make_resolve_node(llm: LLMService, settings: Settings, memory=None):
+    """上下文补全（多轮指代消解，Go ResolveQuery 全门控移植）。
+
+    触发门控（全部满足才调 LLM，缺一即原样返回，单轮会话零成本）：
+    QUERY_REWRITE 开启 / 有 key / 本会话有 episodic 历史 / 问题命中指代信号词。
+    补全是增强不是依赖：解析失败/输出异常一律静默回退原问题。
+    """
+    from gewu.memory import MAX_FACTS_IN_CONTEXT
 
     def resolve_query(state: ChatState) -> dict:
-        return {"resolved": state["question"]}
+        question = state["question"]
+        updates: dict = {}
+        if memory is not None:
+            from gewu.memory import memory_block  # noqa: PLC0415
+
+            updates["mem_block"] = memory_block(memory, state["user"], state["session_id"])
+        if settings.query_rewrite == "off" or memory is None or not llm.has_key():
+            return updates
+        if not _ANAPHORA_RE.search(question):
+            return {}
+        try:
+            episodes = memory.recent_episodes(state["session_id"], 6)
+        except Exception:  # noqa: BLE001
+            return {}
+        if not episodes:
+            return {}
+
+        sb = ["已知用户信息："]
+        try:
+            facts = memory.recent_facts(state["user"], MAX_FACTS_IN_CONTEXT)
+        except Exception:  # noqa: BLE001
+            facts = []
+        if facts:
+            sb.extend(f"- {f.kind}/{f.key}：{f.value}" for f in facts)
+        else:
+            sb.append("（暂无）")
+        sb.append("最近对话：")
+        sb.extend(episodes)
+        sb.append("")
+        sb.append("本轮问题：" + question)
+
+        try:
+            raw = llm.chat(
+                [("system", QUERY_REWRITE_SYSTEM), ("user", "\n".join(sb))],
+                json_mode=True,
+                small=True,
+                max_tokens=200,
+            )
+            rewritten = json_str(parse_json_object(raw), "rewritten").strip()
+        except Exception as e:  # noqa: BLE001
+            print(f"[agent] 上下文补全失败，使用原问题：{e}")
+            return {}
+        if not rewritten or rewritten == question:
+            return updates
+        n = len(rewritten)
+        if n < 2 or n > 500:
+            print(f"[agent] 上下文补全输出长度异常（{n} rune），回退原问题")
+            return updates
+        updates["resolved"] = rewritten
+        return updates
 
     return resolve_query
 
@@ -133,7 +196,6 @@ def make_tx_resume_node(llm: LLMService, business, tools: dict):
         _CONFIRM_MODIFY_RE,
         FLOW_DEFS,
         SLOT_ORDER,
-        build_confirm,
         classify_reply,
         execute_tool,
         slot_meta,
@@ -183,11 +245,10 @@ def make_tx_resume_node(llm: LLMService, business, tools: dict):
                 modified = True
         if modified:
             emit(ev.status_evt("已更新，请重新确认："))
-            state = {**state, "tx_slots": slots}
-            pa, text, _note = build_confirm(state, business)
-            emit(pa)
-            emit(ev.answer_evt(text))
-            return {"tx_slots": slots, "tx_phase": "confirm", "tx_last_asked": "", "answer": text}
+            return Command(
+                goto="tx_confirm",
+                update={"tx_slots": slots, "tx_phase": "confirm", "tx_last_asked": ""},
+            )
 
         if _CONFIRM_MODIFY_RE.search(state["question"]):
             result = execute_tool(tools, business, state, state["role"], state["user"])
@@ -251,7 +312,6 @@ def make_advance(llm: LLMService, business):
         FLOW_DEFS,
         SLOT_ORDER,
         apply_days_phrase,
-        build_confirm,
         llm_extract_slots,
         missing_slots,
         normalize_slot,
@@ -293,16 +353,13 @@ def make_advance(llm: LLMService, business):
                 "tx_tool": st["tx_tool"],
                 "answer": ask,
             }
-        st2 = {**st, "tx_slots": slots, "tx_phase": "confirm", "tx_last_asked": ""}
-        pa, text, _note = build_confirm(st2, business)
-        emit(pa)
-        emit(ev.answer_evt(text))
+        # 槽位齐 → 只返回 confirm 状态；确认摘要由 tx_confirm 节点统一发
+        # （transaction/tx_resume/tx_gate 三链共用，避免重复 emit）
         return {
             "tx_slots": slots,
             "tx_phase": "confirm",
             "tx_last_asked": "",
             "tx_tool": st["tx_tool"],
-            "answer": text,
         }
 
     return advance
@@ -404,9 +461,124 @@ def _pending_link(name: str):
     return node
 
 
+def make_tx_gate_node(llm: LLMService, business, tools: dict):
+    """interrupt 确认门（Q4 原生机制）：本节点首个动作即 interrupt()（之前零副作用，
+    resume 重放安全）。resume 值 = 用户新消息 → 分类处理：
+    修改 → goto tx_confirm 重发摘要；确认 → 执行回执；取消 → 回执清状态；
+    new_topic → goto route 重走正常路由。
+    """
+    from langgraph.types import Command, interrupt
+
+    from gewu.agent.tx import (  # noqa: PLC0415
+        _CONFIRM_MODIFY_RE,
+        FLOW_DEFS,
+        SLOT_ORDER,
+        classify_reply,
+        execute_tool,
+        slot_meta,
+    )
+
+    def tx_gate(state: ChatState) -> dict:
+        meta = slot_meta(business)
+        tool = state["tx_tool"]
+        flow = FLOW_DEFS[tool]
+        payload = {"tool": tool, "label": flow["label"], "args": state.get("tx_slots") or {}}
+        user_text = interrupt(payload)  # ← 图在此暂停；resume 值为用户新消息
+
+        st = {**state, "question": user_text}
+        intent = classify_reply(llm, meta, user_text, st)
+
+        if intent == "cancel":
+            emit(ev.answer_evt("好的，已取消本次办理。有别的事随时找我。"))
+            return {
+                "tx_phase": "",
+                "tx_tool": "",
+                "tx_slots": {},
+                "tx_last_asked": "",
+                "answer": "好的，已取消本次办理。有别的事随时找我。",
+            }
+        if intent == "new_topic":
+            return {
+                "tx_phase": "",
+                "tx_tool": "",
+                "tx_slots": {},
+                "tx_last_asked": "",
+                "tx_new_topic": True,
+            }
+
+        # continue：先尝试理解为「修改」
+        slots = dict(state.get("tx_slots") or {})
+        modified = False
+        for slot in SLOT_ORDER:
+            if slot in ("purpose", "reason"):
+                continue
+            if slot not in flow["required"] and slot not in slots:
+                continue
+            value = meta[slot]["parse"](user_text)
+            if value and value != slots.get(slot):
+                slots[slot] = value
+                modified = True
+        if modified:
+            emit(ev.status_evt("已更新，请重新确认："))
+            return Command(goto="tx_confirm", update={"tx_slots": slots, "tx_last_asked": ""})
+
+        if _CONFIRM_MODIFY_RE.search(user_text):
+            result = execute_tool(tools, business, st, st["role"], st["user"])
+            if result.ok:
+                emit(ev.action_result_evt(tool, True, result.message, result.receipt or None))
+                receipt = f"（凭证号：{result.receipt}）" if result.receipt else ""
+                text = f"办理成功：{result.message}{receipt}"
+                emit(ev.answer_evt(text))
+                return {
+                    "tx_phase": "",
+                    "tx_tool": "",
+                    "tx_slots": {},
+                    "tx_last_asked": "",
+                    "answer": text,
+                }
+            # 失败恢复：字段级问题重新追问（collect 态由 tx_resume 续）
+            if result.field:
+                m = meta.get(result.field)
+                if m:
+                    slots.pop(result.field, None)
+                    question = m["ask"]
+                    if result.alternatives:
+                        question = (
+                            question + "可选时段：" + "、".join(result.alternatives)
+                        ).strip()
+                    emit(ev.action_result_evt(tool, False, result.message, None))
+                    emit(ev.slot_question_evt(result.field, question))
+                    msg = result.message or "执行失败"
+                    text = f"{msg}。{question}"
+                    emit(ev.answer_evt(text))
+                    return {
+                        "tx_slots": slots,
+                        "tx_phase": "collect",
+                        "tx_last_asked": result.field,
+                        "answer": text,
+                    }
+            emit(ev.action_result_evt(tool, False, result.message, None))
+            text = f"办理未完成：{result.message or '未知错误'}。如需继续请重新发起。"
+            emit(ev.answer_evt(text))
+            return {
+                "tx_phase": "",
+                "tx_tool": "",
+                "tx_slots": {},
+                "tx_last_asked": "",
+                "answer": text,
+            }
+
+        text = "没太听懂——请回复「确认」提交，或「取消」放弃，也可以直接告诉我需要修改的日期、时段等信息。"
+        emit(ev.answer_evt(text))
+        return {"answer": text}
+
+    return tx_gate
+
+
 def entry_gate(state: ChatState) -> str:
-    """入口分派（Go「会话优先解释续轮」语义）：办理流程进行中走 tx_resume。"""
-    if state.get("tx_phase") in ("collect", "confirm"):
+    """入口分派：办理收集中走 tx_resume；confirm 态由 interrupt/resume 桥接管
+    （不会从这里进——SSE 端点检测到 interrupted thread 时以 Command(resume) 恢复）。"""
+    if state.get("tx_phase") == "collect":
         return "tx_resume"
     return "resolve_query"
 
@@ -465,11 +637,15 @@ def make_refusal_node():
 
 
 def assemble_messages(state: ChatState, context: str) -> list[tuple[str, str]]:
-    """消息分层装配（P6 阶段4，顺序固定）：system → [记忆] → user（P14-6 接记忆）。"""
-    return [
-        ("system", ANSWER_SYSTEM),
-        ("user", f"参考资料：\n\n{context}\n\n问题：{state['resolved']}"),
-    ]
+    """消息分层装配（P6 阶段4，顺序固定）：system → [长期记忆] → user。
+
+    记忆块由入口节点写入 state（mem_block），空块时与历史版本逐字一致。
+    """
+    msgs = [("system", ANSWER_SYSTEM)]
+    if state.get("mem_block"):
+        msgs.append(("system", "已知用户信息：\n" + state["mem_block"]))
+    msgs.append(("user", f"参考资料：\n\n{context}\n\n问题：{state['resolved']}"))
+    return msgs
 
 
 def numbered_context(hits: list[dict]) -> tuple[str, list[dict]]:
@@ -503,6 +679,7 @@ def build_graph(
     business=None,
     tools: dict | None = None,
     checkpointer=None,
+    memory=None,
 ):
     """装配会话编排主图。checkpointer 缺省内存版（P14-6 换 PostgresSaver）。
 
@@ -512,13 +689,14 @@ def build_graph(
 
     tools = tools if tools is not None else tools_for()
     g: StateGraph = StateGraph(ChatState)
-    g.add_node("resolve_query", make_resolve_node(llm, settings))
+    g.add_node("resolve_query", make_resolve_node(llm, settings, memory))
     g.add_node("route", make_route_node(llm, settings))
     g.add_node("retrieve", make_retrieve_node(retriever))
     g.add_node("answer_direct", make_answer_node(llm))
     g.add_node("refusal", make_refusal_node())
     g.add_node("react", make_react_node(llm, retriever, business, tools))
     g.add_node("tx_confirm", make_tx_confirm_node(business))
+    g.add_node("tx_gate", make_tx_gate_node(llm, business, tools))
     g.add_node("tx_resume", make_tx_resume_node(llm, business, tools))
     g.add_node("research", make_research_node(llm, retriever))
     g.add_node("transaction", make_transaction_node(llm, retriever, business, tools))
@@ -564,7 +742,11 @@ def build_graph(
             "__end__": END,
         },
     )
-    g.add_edge("tx_confirm", END)
+    g.add_conditional_edges(
+        "tx_confirm",
+        _after_tx_confirm,
+        {"tx_gate": "tx_gate", "__end__": END},
+    )
     g.add_conditional_edges(
         "tx_resume",
         tx_resume_branch,
@@ -575,13 +757,37 @@ def build_graph(
     )
     g.add_edge("research", END)
     g.add_edge("hybrid_tx", "transaction")
-    g.add_edge("transaction", END)
+    g.add_conditional_edges(
+        "transaction",
+        _after_transaction,
+        {"tx_confirm": "tx_confirm", "__end__": END},
+    )
+    g.add_conditional_edges(
+        "tx_resume",
+        _after_tx_resume,
+        {"tx_confirm": "tx_confirm", "__end__": END},
+    )
     return g.compile(checkpointer=checkpointer or MemorySaver())
 
 
 def _after_react(state: ChatState) -> str:
     """react 后：写操作已转确认 → tx_confirm 发确认摘要；否则结束。"""
     return "tx_confirm" if state.get("tx_phase") == "confirm" else "__end__"
+
+
+def _after_transaction(state: ChatState) -> str:
+    """transaction 后：槽位齐（confirm）→ tx_confirm 发摘要 + interrupt；问过槽位（collect）→ 本轮结束。"""
+    return "tx_confirm" if state.get("tx_phase") == "confirm" else "__end__"
+
+
+def _after_tx_resume(state: ChatState) -> str:
+    """tx_resume（collect 续轮）后：槽位补齐 → tx_confirm；否则结束。"""
+    return "tx_confirm" if state.get("tx_phase") == "confirm" else "__end__"
+
+
+def _after_tx_confirm(state: ChatState) -> str:
+    """确认摘要发出后进 interrupt 门（tx_phase 仍为 confirm）；异常兜底直 END。"""
+    return "tx_gate" if state.get("tx_phase") == "confirm" else "__end__"
 
 
 def _pending_link(name: str):

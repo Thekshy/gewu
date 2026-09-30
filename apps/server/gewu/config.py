@@ -69,6 +69,8 @@ class Settings:
     retrieval_k: int = 6
     rerank_mode: str = "on"  # on（默认，LLM 精排）| off
     react_mode: str = "off"  # off（默认，纯 workflow）| on（路径不定的办理问题转 ReAct）
+    query_rewrite: str = "on"  # on（默认，多轮指代消解补全）| off（路由/检索只见裸问题）
+    rate_limit_per_minute: int = 600
 
     @classmethod
     def load(cls, env: Mapping[str, str] | None = None) -> Settings:
@@ -93,4 +95,6 @@ class Settings:
             retrieval_k=int(env.get("RETRIEVAL_K", "6")),
             rerank_mode=env.get("RERANK_MODE", "on"),
             react_mode=env.get("REACT_MODE", "off"),
+            query_rewrite=env.get("QUERY_REWRITE", "on"),
+            rate_limit_per_minute=int(env.get("RATE_LIMIT_PER_MINUTE", "600")),
         )
