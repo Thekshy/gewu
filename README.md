@@ -1,16 +1,53 @@
 # 格物 Gewu
 
-> 高校场景的 Deep Research 智能问答与业务执行系统：**问题路由 × 混合检索 × 多步研究 × 业务办理 × 可评测**。
-> 简单事实问题走 RAG 直答；复合政策问题进入深度研究链路（拆解 → 多路检索 → 交叉综合）；「帮我预约场馆 / 提交请假」走知行执行层（槽位收集 → 确认 → 执行 → 回执）；范围外问题礼貌拒答。
+> **一个 agent 开发方案的实践对比学习项目。** 以「高校智能问答与业务执行」为载体场景，
+> 把 agent 开发中的关键选型——路由、编排、检索、存储、实现语言、架构形态——做成
+> **同一行为规格下可切换、可评测的实现**，用逐题等价证明与指标报告做对比，
+> 而不是跟着直觉或博客选型。
 
 [![CI](https://github.com/Thekshy/gewu/actions/workflows/ci.yml/badge.svg)](./.github/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](./LICENSE)
 
-**声明**：本项目为个人开源展示项目，采用 **clean-room** 方式独立实现；演示语料为完全虚构的「钱塘大学」合成数据，与任何真实高校、任何闭源商业项目无关。
+**声明**：本项目为个人开源学习与展示项目，采用 **clean-room** 方式独立实现；演示语料为完全虚构的「钱塘大学」合成数据，与任何真实高校、任何闭源商业项目无关。
+
+## 在对比什么
+
+| 对比维度 | 方案 A ↔ 方案 B | 怎么切 | 现状与结论 | 证据 |
+| --- | --- | --- | --- | --- |
+| 架构形态 | 模块化单体 → 六微服务 → 退役回模块化单体 | 形态迁移 + 26/26 逐题 PARITY | 微服务学习目标达成后有序退役：能力缺口先吸收进单体，再删分布式管道 | [ADR-0009](./docs/ADR/0009-微服务退役与单体模块化.md) · [docs/history/](./docs/history/) · tag `pre-ms-removal` |
+| 实现语言 | Python/FastAPI ↔ Go | 行为冻结（PARITY.md）后 clean-room 重写 | 并发取消、确定性、部署面全面受益；重写过程本身修掉 8 个原设计缺陷 | [对照报告](./eval/reports/rewrite-go-vs-python.md) · [go-notes](./docs/go-notes.md) |
+| 问题路由 | 级联三级（规则快路径 → 小模型五分类 → 主模型复核）↔ agent-first（三执行策略 + ReAct 自主编排） | `ROUTER_MODE` | 级联缺省；agent-first 配独立 8 题评测集 | [walkthrough/02](./docs/walkthrough/02-routing.md) |
+| 任务编排 | 固定 workflow（直答 / 深度研究 / 槽位流程）↔ ReAct 引擎自主组合工具 | `REACT_MODE` | 确定性链路用 workflow，开放组合用 ReAct；写操作一律确认流 fail-closed | [walkthrough/03](./docs/walkthrough/03-acting.md) |
+| 分块策略 | flat 单层切分 ↔ hierarchical 父子块（子块命中回父块上下文） | `CHUNK_MODE` | hierarchical 缺省，flat 保留可回退 | [architecture.md](./docs/architecture.md) |
+| 会话状态 | 内存 ↔ SQLite 持久化 | `SESSION_STORE` | 持久化缺省，办理中途重启可续办 | [walkthrough/09](./docs/walkthrough/09-durable-execution.md) |
+
+另有 `RERANK_MODE` / `QUERY_REWRITE` 等能力开关（新旧实现并存、缺省值见
+[`.env.example`](./.env.example)），所有开关都在全绿门禁下灰度，随时可回退。
+
+## 对比的方法：先冻结规格，再换实现
+
+方案的对比要在同等条件下才有意义，本项目的做法：
+
+1. **先写考卷**：[PARITY.md](./docs/PARITY.md) 冻结 SSE 事件契约与行为语义，
+   评测集（28 题主数据集 + 8 题 agent-first）定义「什么是正确」；
+2. **新旧并存**：新方案以行为开关接入，缺省走旧路径，全绿门禁下灰度，随时可回退；
+3. **同数据集评测留档**：`make eval` 产出 Markdown 指标报告（`eval/reports/`），
+   交易型用例断言业务库真实状态，而非文本相似；
+4. **结论落文档**：单点决策进 [ADR/](./docs/ADR/)，取舍与边界进
+   [walkthrough/](./docs/walkthrough/)，退役形态留档 [docs/history/](./docs/history/) 与 git tag。
+
+## 载体场景
+
+所有对比都跑在同一个场景上：**高校场景的 Deep Research 智能问答与业务执行系统**。
+简单事实问题走 RAG 直答；复合政策问题进入深度研究链路（拆解 → 多路检索 → 交叉综合）；
+「帮我预约场馆 / 提交请假」走知行执行层（槽位收集 → 确认 → 执行 → 回执）；
+范围外问题礼貌拒答。语料是虚构的，但工程问题是真实的：路由歧义、多跳证据、
+写操作安全、多轮状态管理——每一项都直接压在要对比的方案选型上。
 
 ## 架构：模块化单体（P8 起）
 
-单二进制 `cmd/server`（:8000）+ SQLite，零外部依赖。曾经完成过单体 → 六微服务的完整迁移
+单二进制 `cmd/server`（:8000）+ PostgreSQL（检索存储，P12 起）+ SQLite（业务/记忆/会话）。
+曾经完成过单体 → 六微服务的完整迁移
 与逐题等价证明（P0~P5，26/26 PARITY），学习目标达成后在 P8 **有序退役**：微服务独有的
 能力缺口（办理会话持久化）先吸收进单体，再删除分布式管道（gRPC/Redis Streams/网关）。
 决策与证据：[ADR-0009](./docs/ADR/0009-微服务退役与单体模块化.md)、
@@ -22,7 +59,7 @@ flowchart LR
 
     subgraph internal
         AGENT[agent 编排域<br/>pipeline·triage/cascade 路由<br/>react·transaction·memory]
-        RAG[rag 检索域<br/>hierarchical 父子块·BM25<br/>向量余弦·rerank]
+        RAG[rag 检索域<br/>hierarchical 父子块·FTS<br/>pgvector HNSW·rerank]
         LLM[llm 模型访问域<br/>chat/stream/embed·双 provider]
         BIZ[business 业务域<br/>场馆预约·请假审批]
         SUP[支撑域<br/>config·budget·dates·middleware]
@@ -30,7 +67,7 @@ flowchart LR
 
     API --> AGENT
     AGENT -->|Retriever/LLMer/Tools 接口| RAG & LLM & BIZ
-    RAG --> DB[(SQLite<br/>index.db)]
+    RAG --> DB[(PostgreSQL + pgvector<br/>FTS · halfvec HNSW)]
     AGENT --> DB2[(SQLite<br/>memory.db·sessions.db)]
     BIZ --> DB3[(SQLite<br/>business.db)]
     LLM --> EXT[[OpenAI 兼容端点]]
@@ -45,8 +82,9 @@ Retriever/LLMer/Tools 接口）；检索/模型/业务域反向禁止 import 编
 
 ## 为什么用 Go 重写（原为 Python/FastAPI）
 
-v1 用 Python（FastAPI）快速验证了产品形态：路由、混合检索、业务办理、评测全绿。
-未上线、无历史包袱，于是在行为冻结（[PARITY.md](./docs/PARITY.md)）后整体重写为 Go：
+这是项目里最早完成的一次完整实践对比。v1 用 Python（FastAPI）快速验证了产品形态：
+路由、混合检索、业务办理、评测全绿。未上线、无历史包袱，于是在行为冻结（[PARITY.md](./docs/PARITY.md)）
+后整体重写为 Go：
 
 - **并发模型**：SSE 每连接一 goroutine，`context` 取消可以一路传播到上游 LLM 流——
   客户端断开即刻停止烧 token（Python 版里 openai SDK 的阻塞调用感知不到 uvicorn 连接关闭）；
@@ -65,7 +103,7 @@ v1 用 Python（FastAPI）快速验证了产品形态：路由、混合检索、
 | 特性 | 说明 |
 | --- | --- |
 | 三层级联路由 | L0 规则快路径（明确办理指令零 LLM）→ L1 小模型五分类 → L2 主模型复核低置信；`agent-first` 模式塌缩为三执行策略（refusal/direct/agent）+ ReAct 自主组合工具 |
-| 混合检索 | BM25（中文字符二元语法，零分词依赖）+ 向量余弦，RRF 融合；**父子块**层级切分（子块命中回父块上下文）；LLM 精排 rerank 可开关 |
+| 混合检索 | PG 原生 FTS（中文二元语法分词下沉 SQL 侧，零分词依赖）+ pgvector halfvec HNSW 向量，RRF 融合；**父子块**层级切分（子块命中回父块上下文）；LLM 精排 rerank 可开关；读写收口为存储函数（P12 起，[迁移对账](./docs/P12-storage-backend.md)） |
 | 查询改写与上下文补全 | 多轮指代消解（"那第二条呢"）在路由前补全，贯通路由与检索两个环节 |
 | Deep Research | 子问题拆解 → 多路检索 → 证据跨子问题去重 → 交叉综合，全程 trace 可视 |
 | 知行执行层 | mock 业务系统（场馆预约/请假审批）：槽位收集、多轮澄清、写操作确认流、回执、冲突恢复；**办理会话 SQLite 持久化，重启可续办** |
@@ -78,9 +116,6 @@ v1 用 Python（FastAPI）快速验证了产品形态：路由、混合检索、
 | 模型分层 | 主答案 glm-5.3；路由/拆解/槽位抽取/查询改写/精排等辅助调用走 glm-5.3-flash |
 | 模型无关 | 任意 OpenAI 兼容端点（智谱 / DeepSeek / OpenAI / vLLM），改环境变量即切换 |
 
-行为开关（全绿门禁下灰度，旧实现保留可回退）：`ROUTER_MODE` / `CHUNK_MODE` / `RERANK_MODE` /
-`REACT_MODE` / `QUERY_REWRITE` / `SESSION_STORE`，缺省值见 [`.env.example`](./.env.example)。
-
 ## 快速开始
 
 前置：Go 1.25+、Node 18+（前端）。
@@ -89,15 +124,37 @@ v1 用 Python（FastAPI）快速验证了产品形态：路由、混合检索、
 # 1. 配置模型（P6 起强制有 key 启动）
 cp .env.example .env   # 填入 LLM_API_KEY / EMBED_API_KEY 等
 
-# 2. 建索引（BM25+向量混合）并启动 API :8000
+# 2. 起检索存储 PG（优先 docker compose；宿主 Homebrew PG 自动回退——多项目
+#    共享 postmaster 场景见下）
+make pg-up
+
+# 3. 建索引（FTS+向量混合）并启动 API :8000
 make ingest
 make run
 
-# 3. 前端 :3100
+# 4. 前端 :3100（对话 / 对比实验台 / 控制台 三视图）
 make install-web && make dev-web
 ```
 
-打开 http://localhost:3100 即可对话。
+**共享宿主 postmaster 的建库建号模板**（多项目共用一个 PG 实例、每项目独立
+database + 角色，以管理员执行一次）：
+
+```sql
+CREATE ROLE gewu LOGIN PASSWORD 'gewu';          -- 应用账号，非 superuser
+CREATE DATABASE gewu OWNER gewu;
+CREATE DATABASE gewu_test OWNER gewu;            -- 测试库（make test 会清库）
+REVOKE ALL ON DATABASE gewu, gewu_test FROM PUBLIC;  -- 数据/连接权限隔离
+\c gewu      CREATE EXTENSION vector;
+\c gewu_test CREATE EXTENSION vector;
+```
+
+实例端口与缺省（5433）不同时（如 brew services 默认 5432），在 `.env` 覆盖
+`PG_DSN` 即可。
+
+打开 http://localhost:3100 即可对话。**对比实验台**（/compare）同题并发
+`mode=auto`（级联 workflow）与 `mode=react`（ReAct agent）双流并排——本项目
+「方案对比」卖点的现场演示入口；**控制台**（/console）看业务台账、检索调试、
+语料与服务健康。设计见 [docs/P11-web-demo.md](./docs/P11-web-demo.md)。
 
 **检索调试**（不经模型直接看命中）：
 
@@ -148,6 +205,18 @@ make build && ./bin/gewu-api          # 宿主直跑（推荐）
 
 生产环境注意：Nginx 反代时关闭 SSE 缓冲（后端已下发 `X-Accel-Buffering: no`）；限流中间件取
 `X-Forwarded-For` 首段作为客户端 IP，请确保代理层透传。
+
+## 文档地图
+
+| 想看什么 | 去哪 |
+| --- | --- |
+| 模块地图与依赖规则 | [docs/architecture.md](./docs/architecture.md) |
+| 设计讲解系列：链路 / 路由 / 执行 / 记忆 / 工程防线 / 演进史（9 篇，含取舍与已知短板） | [docs/walkthrough/](./docs/walkthrough/) |
+| 单点决策记录（9 篇） | [docs/ADR/](./docs/ADR/) |
+| 行为规格与 SSE 事件契约 | [docs/PARITY.md](./docs/PARITY.md) |
+| 历史形态（微服务时代） | [docs/history/](./docs/history/) |
+| 前端展示台：对话 / 对比实验 / 控制台（SPEC + 验收记录） | [docs/P11-web-demo.md](./docs/P11-web-demo.md) |
+| 路线图与进行中的实验 | [docs/roadmap.md](./docs/roadmap.md) |
 
 ## License
 
