@@ -202,7 +202,34 @@ BASE_URL 覆盖）。P14-7 全量门禁过了之后，P14-8 删除 Go、Python �
   并行三轨）。
 - Makefile 增 server-install / server-run（:8001）/ server-test / server-lint 四目标。
 
+**P14-1（2026-09-30，完成）**
+- rag 全量移植：schema.py（DDL 逐字对照 schema.go，Python 侧接管建库）+ store.py
+  （rag_fts_search / halfvec 向量 / chunk_rows / parent_rows / doc_meta_map /
+  rag_upsert_doc / rrf_fuse / wipe；查询向量 L2 归一 + float32 舍入后以文本
+  `::halfvec` cast 传入——与 upsert 的 JSONB vec 契约同路径，零新依赖）+
+  retrieve.py（改写器/精排器/混合检索/父子扩展，漏斗与提示词逐行对照）。
+- llm 包：ChatOpenAI 工厂（主/小双模型 + thinking disabled extra_body）+
+  自定义 GewuEmbeddings（text 批量 / ark_multimodal 逐条并发 4 首错即停）+
+  finish_reason/usage 解析（P10 契约 Python 侧）。
+- /api/search 契约接入：绑定错统一「请求体不是合法 JSON」（全局 exception
+  handler 收口）、query/k 越界中文 detail、text 截 300 rune。
+- 测试：44 例全绿——纯逻辑（RRF/分数解析/漏斗 Fake 全套）+ 契约（search 校验
+  逐条对照 Go）+ LLM 解析 + **PG 集成 9 例真库真跑**（gewu_test + 会话级
+  pg_advisory_lock 串行，沿用 Go 惯例；CI server job 补 postgres service）。
+- 门禁真跑：
+  - 模型冒烟全通道 OK（glm-5.3 主 / glm-5.3-flash 小模型 chat，finish_reason=stop、
+    usage 三元组正常；ark_multimodal embed 2048 维）——**langchain-openai 接 GLM
+    无兼容层坑**（tool_calls/finish_reason 风险点本 ticket 未暴露，ReAct 移植时续盯）。
+  - G1 检索对照（41 条，RERANK off）：Go↔Python 序列一致 15/41、集合一致 25/41。
+    **归因（方差基线法）**：Go↔Go 自身 15/41 与 21/41、Python↔Python 自身 21/41
+    与 27/41——跨语言差异与 Go 自身 run-to-run 方差同量级；叠加改写 5 连测实验
+    （同查询同参数 GLM flash 输出 2 种改写串），漂移由 **GLM 温度 0 改写非确定性
+    主导**（[[glm-model-quirks]] 的已知坑在检索输入侧放大），非移植偏差。
+    报告：eval/reports/P14-search-parity-{fts,rerank-off,go-self,py-self}.md。
+
 ### 6.2 与 SPEC 的偏差
+
+**P14-0**：
 
 1. **uv 包源固化清华镜像**：本机对 pypi.org TLS 持续阻断（非瞬时，curl 实测
    SSL_ERROR_SYSCALL），拍板在 pyproject `[[tool.uv.index]]` 显式声明清华源并随
@@ -214,6 +241,20 @@ BASE_URL 覆盖）。P14-7 全量门禁过了之后，P14-8 删除 Go、Python �
    psycopg_pool 连接池时再演进。
 4. starlette 1.7 对 TestClient(httpx) 有弃用提示（生态新方向 httpx2），本期忽略仅
    记录，不引入额外依赖。
+
+**P14-1 增量**：
+
+1. **撞出并修复 Go config bug**（commit 885604d）：Load 的 PG_DSN/CORPUS_DIR
+   fallback 链只查进程环境变量，.env 读入的值被无条件盖回缺省——**.env 的
+   PG_DSN=5432 从未生效**，本机 Go 服务恒连缺省 5433 失败。双轨对照的价值实证。
+2. **G1 口径修正**：端到端 /api/search 对照受改写方差支配（Go 无法关闭检索侧
+   改写、且 P6 起强制 LLM key 拒绝无 key 启动，「纯 BM25 隔离实验」不可行）；
+   采信 **P12 同款存储函数级对账**（Python store 9 项真库测试）+ **方差基线法**
+   （跨语言差异 ≤ 自身方差 → 等价）。
+3. hierarchical **切分**（入库侧）随 ingest ticket 移植（本 ticket 交付检索侧
+   父子扩展）；**入库 CLI 依赖 ingest**，P14-2 起若需重建索引再排期。
+4. 对照脚本 eval/run_search_parity.py 绕过 macOS 系统代理（urllib 读系统代理
+   劫持 127.0.0.1 回 502）；Token 用量记账（budget 写侧）随 P14-7。
 
 ### 6.3 遗留与后续
 （待填）
