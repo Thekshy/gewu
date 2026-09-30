@@ -32,8 +32,9 @@ class FakeStore:
 class FakeRetriever:
     """检索替身：只读端点测试不需要真检索；search 契约测试单独注入行为。"""
 
-    def __init__(self, hits: list | None = None) -> None:
+    def __init__(self, hits: list | None = None, k: int = 5) -> None:
         self.hits = hits or []
+        self.k = k
         self.calls: list[tuple[str, int]] = []
 
     def search(self, query: str, k: int) -> list:

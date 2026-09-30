@@ -10,6 +10,7 @@ dependencies = [
     "langchain-openai>=0.3",
     "langchain-core>=0.3",
     "httpx>=0.27",
+    "langgraph>=1.2.12",
 ]
 
 [build-system]
@@ -42,6 +43,7 @@ select = ["E", "F", "I", "B", "UP"]
 # 契约原文（提示词逐字对照 Go / DDL 移植自 schema.go）不可改写，超长行豁免
 "gewu/rag/schema.py" = ["E501"]
 "gewu/rag/retrieve.py" = ["E501"]
+"gewu/agent/prompts.py" = ["E501"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
