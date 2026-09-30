@@ -3,7 +3,7 @@
 图结构（P14 分 ticket 扩展；条件边结构按最终形态一次搭好）：
   START → resolve_query → route → {refusal, factual, research, hybrid, transaction, react}
   factual → retrieve → answer_direct → END
-  其余分支随 P14-3~6 落位。
+  其余分支随 P14-4~6 落位。
 
 done 事件在 chat 端点单点发射（Go RunChat 单点语义的等价物）。
 """
@@ -16,6 +16,7 @@ from langgraph.graph import END, START, StateGraph
 from gewu.agent import events as ev
 from gewu.agent.emitter import emit
 from gewu.agent.prompts import ANSWER_SYSTEM, NO_DATA_ANSWER, REFUSAL_ANSWER
+from gewu.agent.routing import CascadeRouter, fill_policy
 from gewu.agent.state import ChatState
 from gewu.config import Settings
 from gewu.llm.service import LLMService
@@ -34,34 +35,27 @@ def make_resolve_node(_llm: LLMService, _settings: Settings):
 
 
 def make_route_node(llm: LLMService, settings: Settings):
-    """路由决策包产出。P14-2 占位直通（factual）；P14-3 换 cascade 级联。"""
+    """路由决策包产出：用户指定 direct/research 直接构造；其余走 cascade 级联。"""
+    router = CascadeRouter(llm)
 
     def route(state: ChatState) -> dict:
         mode = state["mode"]
         if mode in ("direct", "research"):
             route_name = "factual" if mode == "direct" else "research"
-            dec = {
-                "route": route_name,
-                "layer": "user-specified",
-                "reason": f"用户指定 {mode}",
-                "by_llm": False,
-                "confidence": 1.0,
-                "pre_rag": True,
-                "toolset": [],
-                "model_tier": "standard" if route_name == "factual" else "flagship",
-            }
+            dec = fill_policy(
+                {
+                    "route": route_name,
+                    "confidence": 1.0,
+                    "layer": "user-specified",
+                    "reason": f"用户指定 {mode}",
+                    "by_llm": False,
+                    "pre_rag": False,
+                    "toolset": [],
+                    "model_tier": "small",
+                }
+            )
         else:
-            # P14-3 前占位：auto/react 暂直通 factual
-            dec = {
-                "route": "factual",
-                "layer": "L0-rule",
-                "reason": "P14-2 占位直通",
-                "by_llm": False,
-                "confidence": 1.0,
-                "pre_rag": True,
-                "toolset": [],
-                "model_tier": "standard",
-            }
+            dec = router.route(state["resolved"])
         emit(ev.route_decision_evt(dec))
         return {"route": dec}
 
@@ -71,6 +65,17 @@ def make_route_node(llm: LLMService, settings: Settings):
 def route_branch(state: ChatState) -> str:
     """route → 各链路条件边。"""
     return state["route"]["route"]
+
+
+def _pending_link(name: str):
+    """P14-4/5/6 待接入链路的占位节点（真跑 refusal/factual 不受影响）。"""
+
+    def node(state: ChatState) -> dict:
+        emit(ev.error_evt(f"链路 {name} 尚未接入（P14-4/5/6 ticket）"))
+        return {}
+
+    node.__name__ = f"node_{name}"
+    return node
 
 
 def make_retrieve_node(retriever: Retriever):
@@ -161,15 +166,26 @@ def build_graph(settings: Settings, retriever: Retriever, llm: LLMService, check
     g.add_node("retrieve", make_retrieve_node(retriever))
     g.add_node("answer_direct", make_answer_node(llm))
     g.add_node("refusal", make_refusal_node())
+    for name in ("research", "hybrid", "transaction", "react"):
+        g.add_node(name, _pending_link(name))
 
     g.add_edge(START, "resolve_query")
     g.add_edge("resolve_query", "route")
     g.add_conditional_edges(
         "route",
         route_branch,
-        {"factual": "retrieve", "refusal": "refusal"},
+        {
+            "factual": "retrieve",
+            "refusal": "refusal",
+            "research": "research",
+            "hybrid": "hybrid",
+            "transaction": "transaction",
+            "react": "react",
+        },
     )
     g.add_edge("retrieve", "answer_direct")
     g.add_edge("answer_direct", END)
     g.add_edge("refusal", END)
+    for name in ("research", "hybrid", "transaction", "react"):
+        g.add_edge(name, END)
     return g.compile(checkpointer=checkpointer or MemorySaver())
