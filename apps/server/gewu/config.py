@@ -52,13 +52,22 @@ def anchor_dir(start: Path | None = None) -> Path:
 
 @dataclass(frozen=True)
 class Settings:
-    """启动配置。P14-0 仅接三只读端点所需；P14-1 起补 embed/rerank/路由等键。"""
+    """启动配置（键名与缺省值对齐 Go internal/config）。"""
 
     llm_api_key: str = ""
+    llm_base_url: str = ""
+    llm_model: str = "glm-5.3"
+    llm_small_model: str = "glm-5.3-flash"
+    llm_disable_thinking: bool = False
     embed_api_key: str = ""
+    embed_base_url: str = ""
+    embed_model: str = "embedding-3"
+    embed_mode: str = "text"  # text（标准 /embeddings）| ark_multimodal（火山多模态，不支持批量）
     pg_dsn: str = DEFAULT_PG_DSN
     data_dir: Path = Path("data")
     daily_token_budget: int = DEFAULT_DAILY_TOKEN_BUDGET
+    retrieval_k: int = 6
+    rerank_mode: str = "on"  # on（默认，LLM 精排）| off
 
     @classmethod
     def load(cls, env: Mapping[str, str] | None = None) -> Settings:
@@ -68,8 +77,18 @@ class Settings:
             data_dir = anchor_dir() / data_dir
         return cls(
             llm_api_key=env.get("LLM_API_KEY", ""),
+            llm_base_url=env.get("LLM_BASE_URL", ""),
+            llm_model=env.get("LLM_MODEL", "glm-5.3"),
+            llm_small_model=env.get("LLM_SMALL_MODEL", "glm-5.3-flash"),
+            llm_disable_thinking=env.get("LLM_DISABLE_THINKING", "").lower()
+            in ("1", "true", "yes", "on"),
             embed_api_key=env.get("EMBED_API_KEY", ""),
+            embed_base_url=env.get("EMBED_BASE_URL", ""),
+            embed_model=env.get("EMBED_MODEL", "embedding-3"),
+            embed_mode=env.get("EMBED_MODE", "text"),
             pg_dsn=env.get("PG_DSN", DEFAULT_PG_DSN),
             data_dir=data_dir,
             daily_token_budget=int(env.get("DAILY_TOKEN_BUDGET", str(DEFAULT_DAILY_TOKEN_BUDGET))),
+            retrieval_k=int(env.get("RETRIEVAL_K", "6")),
+            rerank_mode=env.get("RERANK_MODE", "on"),
         )

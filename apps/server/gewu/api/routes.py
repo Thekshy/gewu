@@ -1,17 +1,32 @@
-"""路由实现：PARITY §2 契约（P14-0 三只读端点；chat/search/reset 随后续 ticket 接入）。
+"""路由实现：PARITY §2 契约（P14-1 四端点；chat/reset 随后续 ticket 接入）。
 
-错误体统一 {"detail": "<原因>"}（PARITY §2.3 差异决定：不用 pydantic 默认校验错误体，
-校验类 422 的中文 detail 随对应端点接入时实现）。
+错误体统一 {"detail": "<原因>"}：绑定/类型错→「请求体不是合法 JSON」（全局
+exception handler 收口），语义越界→各端点中文 detail。不用 pydantic 默认校验
+错误体（PARITY §2.3 差异决定）。
 """
 
 from __future__ import annotations
 
 import json
 from datetime import date
+from typing import Annotated
 
-from fastapi import APIRouter, HTTPException, Request
+from fastapi import APIRouter, Body, HTTPException, Request
 
 router = APIRouter()
+
+
+def truncate_runes(text: str, limit: int) -> str:
+    """按 Unicode 字符截断（Python str 天然按 rune 计，与 Go []rune 语义一致）。"""
+    return text[:limit]
+
+
+def _body_param(payload: dict, key: str, expected: type) -> object:
+    """取 body 字段并做类型守卫（类型不符=绑定失败，对齐 Go ShouldBindJSON）。"""
+    v = payload.get(key)
+    if v is not None and (isinstance(v, bool) or not isinstance(v, expected)):
+        raise HTTPException(status_code=422, detail="请求体不是合法 JSON")
+    return v
 
 
 def _budget_usage(settings) -> tuple[int, int]:
@@ -59,6 +74,35 @@ def list_docs(request: Request):
             "chunks": d.chunks,
         }
         for d in docs
+    ]
+
+
+@router.post("/api/search")
+def search(request: Request, payload: Annotated[dict, Body(...)]):
+    query = _body_param(payload, "query", str)
+    if query is None:
+        query = ""
+    length = len(query)  # Python str 按 rune 计
+    if length < 1 or length > 200:
+        raise HTTPException(status_code=422, detail="query 长度需在 1~200 字之间")
+    k = _body_param(payload, "k", int)
+    if k is None:
+        k = 5
+    if k < 1 or k > 20:
+        raise HTTPException(status_code=422, detail="k 需在 1~20 之间")
+    try:
+        hits = request.app.state.retriever.search(query, k)
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+    return [
+        {
+            "doc_id": h.doc_id,
+            "title": h.title,
+            "source": h.source,
+            "seq": h.seq,
+            "text": truncate_runes(h.text, 300),
+        }
+        for h in hits
     ]
 
 

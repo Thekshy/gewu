@@ -41,18 +41,37 @@ jobs:
 
   server:
     runs-on: ubuntu-latest
+    # P14-1：rag 存储接线测试需要真 PG（pgvector），与 Go job 同款 service
+    services:
+      pg:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_USER: gewu
+          POSTGRES_PASSWORD: gewu
+          POSTGRES_DB: gewu
+        ports:
+          - 5433:5432
+        options: >-
+          --health-cmd "pg_isready -U gewu -d gewu"
+          --health-interval 3s
+          --health-timeout 3s
+          --health-retries 20
+    env:
+      PG_DSN: postgres://gewu:gewu@127.0.0.1:5433/gewu?sslmode=disable
     steps:
       - uses: actions/checkout@v4
       - uses: astral-sh/setup-uv@v6
         with:
           python-version: "3.12"
+      - name: 建测试库 gewu_test（schema 由测试夹具 ensure 自建）
+        run: PGPASSWORD=gewu psql -h 127.0.0.1 -p 5433 -U gewu -d postgres -c "CREATE DATABASE gewu_test OWNER gewu;"
       - name: 依赖同步 + lint（ruff check + format 校验）
         run: |
           uv sync
           uv run ruff check .
           uv run ruff format --check .
         working-directory: apps/server
-      - name: 单测（纯离线用例；PG 接线测试随 P14-1 加 services）
+      - name: 单测（含 PG 集成用例）
         run: uv run pytest -q
         working-directory: apps/server
 

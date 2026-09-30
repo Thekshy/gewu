@@ -16,7 +16,7 @@ from gewu.rag.store import DocInfo, Stats
 
 
 class FakeStore:
-    """DocStore 协议替身（PG 接线另有真库测试，随 P14-1 加）。"""
+    """DocStore 协议替身（PG 接线另有真库测试，见 test_store_pg.py）。"""
 
     def __init__(self, stats: Stats, docs: list[DocInfo]) -> None:
         self._stats = stats
@@ -29,7 +29,21 @@ class FakeStore:
         return list(self._docs)
 
 
-def make_client(tmp_path: Path, usage: dict | None = None) -> TestClient:
+class FakeRetriever:
+    """检索替身：只读端点测试不需要真检索；search 契约测试单独注入行为。"""
+
+    def __init__(self, hits: list | None = None) -> None:
+        self.hits = hits or []
+        self.calls: list[tuple[str, int]] = []
+
+    def search(self, query: str, k: int) -> list:
+        self.calls.append((query, k))
+        return list(self.hits)
+
+
+def make_client(
+    tmp_path: Path, usage: dict | None = None, retriever: FakeRetriever | None = None
+) -> TestClient:
     (tmp_path / "usage.json").write_text(json.dumps(usage or {}), encoding="utf-8")
     settings = Settings(
         llm_api_key="lk",
@@ -43,7 +57,12 @@ def make_client(tmp_path: Path, usage: dict | None = None) -> TestClient:
             DocInfo("doc-002", "请假制度", "corpus", "2026-09-02", 3),
         ],
     )
-    app = create_app(settings, store=store, business=Business(tmp_path / "business.db"))
+    app = create_app(
+        settings,
+        store=store,
+        business=Business(tmp_path / "business.db"),
+        retriever=retriever or FakeRetriever(),
+    )
     return TestClient(app)
 
 
@@ -72,7 +91,12 @@ def test_health_llm_false_without_key(tmp_path: Path):
     (tmp_path / "usage.json").write_text("{}", encoding="utf-8")
     settings = Settings(llm_api_key="", embed_api_key="", data_dir=tmp_path)
     store = FakeStore(Stats(docs=0, chunks=0, embedded=False), [])
-    app = create_app(settings, store=store, business=Business(tmp_path / "business.db"))
+    app = create_app(
+        settings,
+        store=store,
+        business=Business(tmp_path / "business.db"),
+        retriever=FakeRetriever(),
+    )
     body = TestClient(app).get("/api/health").json()
     assert body["llm"] is False
     assert body["embeddings"] is False

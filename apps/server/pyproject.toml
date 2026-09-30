@@ -7,6 +7,9 @@ dependencies = [
     "fastapi>=0.115",
     "uvicorn>=0.30",
     "psycopg[binary,pool]>=3.2",
+    "langchain-openai>=0.3",
+    "langchain-core>=0.3",
+    "httpx>=0.27",
 ]
 
 [build-system]
@@ -34,6 +37,11 @@ target-version = "py311"
 
 [tool.ruff.lint]
 select = ["E", "F", "I", "B", "UP"]
+
+[tool.ruff.lint.per-file-ignores]
+# 契约原文（提示词逐字对照 Go / DDL 移植自 schema.go）不可改写，超长行豁免
+"gewu/rag/schema.py" = ["E501"]
+"gewu/rag/retrieve.py" = ["E501"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests"]
