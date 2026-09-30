@@ -39,8 +39,11 @@
 
 ## M4 · 部署与展示
 
+- [x] 可演示前端（P11）：对话 / 对比实验台 / 控制台三视图——同题 A/B 双流
+      （cascade workflow ↔ ReAct agent）、业务台账、检索调试；验收记录见
+      [P11-web-demo.md §5](P11-web-demo.md)
 - [ ] Docker Compose 部署到公网 ECS（Nginx + SSE 配置）
-- [ ] 5 分钟演示录屏：事实题 / 多跳题 / 拒答三条路径
+- [ ] 5 分钟演示录屏：事实题 / 多跳题 / 拒答三条路径（三页面已就绪可开录）
 - [ ] 技术报告：设计决策、评测数据、badcase 复盘
 - [ ] GitHub Actions 部署流水线（push main → 构建 → 上线）
 

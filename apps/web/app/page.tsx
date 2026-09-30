@@ -7,14 +7,15 @@ import {
   streamChat,
   type ActionResult,
   type ChatEvent,
+  type ChatMode,
   type Citation,
+  type DoneReason,
   type HealthInfo,
   type PendingAction,
   type Role,
   type Step,
 } from "@/lib/api";
-
-type Mode = "auto" | "direct" | "research";
+import { DONE_BADGE, ROUTE_LABEL, SLOT_LABEL } from "@/lib/labels";
 
 interface Msg {
   role: "user" | "assistant";
@@ -24,20 +25,14 @@ interface Msg {
   status?: string;
   steps: Step[];
   citations: Citation[];
+  slotQ?: { slot: string; question: string };
   pendingAction?: PendingAction;
   actionResult?: ActionResult;
   latency?: number;
+  doneReason?: DoneReason;
   error?: string;
   done: boolean;
 }
-
-const ROUTE_LABEL: Record<string, string> = {
-  factual: "直答",
-  research: "深度研究",
-  refusal: "范围外",
-  transaction: "办理",
-  hybrid: "问答 + 办理",
-};
 
 const SUGGESTIONS = [
   "帮我预约明天晚上的羽毛球馆打班级比赛",
@@ -48,7 +43,7 @@ const SUGGESTIONS = [
 export default function Home() {
   const [messages, setMessages] = useState<Msg[]>([]);
   const [input, setInput] = useState("");
-  const [mode, setMode] = useState<Mode>("auto");
+  const [mode, setMode] = useState<ChatMode>("auto");
   const [role, setRole] = useState<Role>("student");
   const [sending, setSending] = useState(false);
   const [health, setHealth] = useState<HealthInfo | null>(null);
@@ -106,6 +101,14 @@ export default function Home() {
             case "citations":
               patchLast({ citations: (ev.items as Citation[]) ?? [] });
               break;
+            case "slot_question":
+              patchLast({
+                slotQ: {
+                  slot: String(ev.slot ?? ""),
+                  question: String(ev.question ?? ""),
+                },
+              });
+              break;
             case "pending_action":
               patchLast({
                 pendingAction: {
@@ -129,7 +132,12 @@ export default function Home() {
               patchLast({ error: String(ev.message ?? "未知错误") });
               break;
             case "done":
-              patchLast({ done: true, latency: Number(ev.latency_ms ?? 0), status: undefined });
+              patchLast({
+                done: true,
+                latency: Number(ev.latency_ms ?? 0),
+                status: undefined,
+                doneReason: (ev.reason as DoneReason) || "completed",
+              });
               break;
           }
         },
@@ -216,6 +224,12 @@ export default function Home() {
                   </details>
                 )}
                 {msg.status && <p className="status">{msg.status}</p>}
+                {msg.slotQ && (
+                  <div className="slot-card" title={`slot_question: ${msg.slotQ.slot}`}>
+                    <span className="slot-tag">待补充</span>
+                    {SLOT_LABEL[msg.slotQ.slot] ?? msg.slotQ.slot}
+                  </div>
+                )}
                 {msg.text && <p className="answer">{msg.text}</p>}
                 {!msg.text && !msg.status && msg.steps.length === 0 && !msg.done && (
                   <p className="status">思考中…</p>
@@ -266,7 +280,17 @@ export default function Home() {
                   </div>
                 )}
                 {msg.error && <p className="error">出错了：{msg.error}</p>}
-                {msg.done && msg.latency != null && <span className="latency">{msg.latency} ms</span>}
+                {msg.done && (
+                  <span className="meta">
+                    {msg.latency != null && <span className="latency">{msg.latency} ms</span>}
+                    {msg.doneReason &&
+                      DONE_BADGE[msg.doneReason] &&
+                      (() => {
+                        const b = DONE_BADGE[msg.doneReason]!;
+                        return <span className={`done-badge ${b.cls}`}>{b.text}</span>;
+                      })()}
+                  </span>
+                )}
               </div>
             </div>
           ),
@@ -283,10 +307,11 @@ export default function Home() {
           ))}
         </div>
         <div className="inputbar">
-          <select value={mode} onChange={(e) => setMode(e.target.value as Mode)} aria-label="回答模式">
+          <select value={mode} onChange={(e) => setMode(e.target.value as ChatMode)} aria-label="回答模式">
             <option value="auto">自动路由</option>
             <option value="direct">强制直答</option>
             <option value="research">强制研究</option>
+            <option value="react">ReAct 自主编排</option>
           </select>
           <textarea
             value={input}

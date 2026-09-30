@@ -24,6 +24,9 @@ export interface ActionResult {
   receipt?: string | null;
 }
 
+/** PARITY §3：done.reason 四值（P10 起可选下发，老事件缺省 completed 语义）。 */
+export type DoneReason = "completed" | "max_tokens" | "error" | "aborted";
+
 export interface ChatEvent {
   type: string;
   [key: string]: unknown;
@@ -39,7 +42,53 @@ export interface HealthInfo {
   budget: { used: number; limit: number };
 }
 
+/** GET /api/docs：已入库文档元信息。 */
+export interface DocInfo {
+  doc_id: string;
+  title: string;
+  source: string;
+  updated: string;
+  chunks: number;
+}
+
+/** POST /api/search：混合检索命中（文本截断 300 字，服务端行为）。 */
+export interface SearchHit {
+  doc_id: string;
+  title: string;
+  source: string;
+  seq: number;
+  text: string;
+}
+
+/** GET /api/business/overview：业务台账。 */
+export interface BookingFull {
+  booking_id: string;
+  venue: string;
+  date: string;
+  slot: string;
+  user: string;
+}
+
+export interface TicketView {
+  ticket: string;
+  user: string;
+  leave_type: string;
+  start: string;
+  end: string;
+  days: number;
+  approver: string;
+  status: string;
+}
+
+export interface BusinessOverview {
+  bookings: BookingFull[];
+  tickets: TicketView[];
+}
+
 export type Role = "student" | "counselor";
+
+/** chat 请求 mode：auto/direct/research（PARITY §4）+ react（pipeline.go:147 按请求 ReAct 入口）。 */
+export type ChatMode = "auto" | "direct" | "research" | "react";
 
 export const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://127.0.0.1:8000";
 
@@ -53,6 +102,36 @@ export async function fetchHealth(): Promise<HealthInfo | null> {
   }
 }
 
+export async function fetchDocs(): Promise<DocInfo[]> {
+  const res = await fetch(`${API_BASE}/api/docs`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return (await res.json()) as DocInfo[];
+}
+
+export async function fetchBusinessOverview(): Promise<BusinessOverview> {
+  const res = await fetch(`${API_BASE}/api/business/overview`);
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  return (await res.json()) as BusinessOverview;
+}
+
+export async function businessReset(): Promise<void> {
+  const res = await fetch(`${API_BASE}/api/business/reset`, { method: "POST" });
+  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+}
+
+export async function search(query: string, k = 5): Promise<SearchHit[]> {
+  const res = await fetch(`${API_BASE}/api/search`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ query, k }),
+  });
+  if (!res.ok) {
+    const detail = await res.json().catch(() => null);
+    throw new Error(detail?.detail ?? `HTTP ${res.status}`);
+  }
+  return (await res.json()) as SearchHit[];
+}
+
 export interface ChatOpts {
   sessionId?: string;
   role?: Role;
@@ -61,7 +140,7 @@ export interface ChatOpts {
 /** 调用 /api/chat 的 SSE 流，逐事件回调。 */
 export async function streamChat(
   question: string,
-  mode: "auto" | "direct" | "research",
+  mode: ChatMode,
   onEvent: (ev: ChatEvent) => void,
   opts: ChatOpts = {},
 ): Promise<void> {
@@ -76,7 +155,8 @@ export async function streamChat(
     }),
   });
   if (!res.ok || !res.body) {
-    throw new Error(`请求失败（HTTP ${res.status}）`);
+    const detail = await res.json().catch(() => null);
+    throw new Error(detail?.detail ?? `请求失败（HTTP ${res.status}）`);
   }
 
   const reader = res.body.getReader();
