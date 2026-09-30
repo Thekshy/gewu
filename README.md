@@ -218,7 +218,7 @@ make build && ./bin/gewu-api          # 宿主直跑（推荐）
 
 | 想看什么 | 去哪 |
 | --- | --- |
-| 模块地图与依赖规则 | [docs/architecture.md](./docs/architecture.md) |
+| 架构文档系列：总览 / 编排图 / 各领域 / 横切（01~10） | [docs/architecture/](./docs/architecture/) |
 | 设计讲解系列：链路 / 路由 / 执行 / 记忆 / 工程防线 / 演进史（9 篇，含取舍与已知短板） | [docs/walkthrough/](./docs/walkthrough/) |
 | 单点决策记录（9 篇） | [docs/ADR/](./docs/ADR/) |
 | 行为规格与 SSE 事件契约 | [docs/PARITY.md](./docs/PARITY.md) |
