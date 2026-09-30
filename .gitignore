@@ -1,6 +1,7 @@
-# Python（仅 eval/run_eval.py 评测客户端）
+# Python（评测客户端 + P14 起 apps/server 服务端）
 __pycache__/
 *.pyc
+apps/server/.venv/
 
 # Go 构建产物
 bin/

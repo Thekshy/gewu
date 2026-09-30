@@ -1,0 +1,39 @@
+[project]
+name = "gewu-server"
+version = "0.1.0"
+description = "gewu 校园问答 Agent 服务端（P14 起 Python + LangGraph，行为契约 docs/PARITY.md）"
+requires-python = ">=3.11"
+dependencies = [
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+    "psycopg[binary,pool]>=3.2",
+]
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["gewu"]
+
+[dependency-groups]
+dev = [
+    "pytest>=8",
+    "httpx>=0.27",
+    "ruff>=0.8",
+]
+
+# 包源显式声明：本机网络对 pypi.org TLS 持续阻断，清华镜像全量可用（uv.lock 随之固化）
+[[tool.uv.index]]
+url = "https://pypi.tuna.tsinghua.edu.cn/simple"
+default = true
+
+[tool.ruff]
+line-length = 100
+target-version = "py311"
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "B", "UP"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]

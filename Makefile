@@ -1,7 +1,8 @@
 BIN := bin/gewu-api
 WEB_DIR := apps/web
+SERVER_DIR := apps/server
 
-.PHONY: build install-web ingest run test lint fmt vet eval demo clean lint-arch pg-up pg-down
+.PHONY: build install-web ingest run test lint fmt vet eval demo clean lint-arch pg-up pg-down server-install server-run server-test server-lint
 
 # ---------- 单体（P8 起唯一形态） ----------
 
@@ -38,6 +39,22 @@ ingest:
 # 启动单体 API（:8000）；先 make pg-up && make ingest 建索引
 run:
 	go run ./cmd/server
+
+# ---------- Python 服务端（P14 LangGraph 迁移，双轨期 :8001） ----------
+
+# 同步依赖（uv 管 pyproject + uv.lock）
+server-install:
+	cd $(SERVER_DIR) && uv sync
+
+# 启动 Python 服务端（双轨期 :8001；P14-8 Go 退役后收口 :8000）
+server-run:
+	cd $(SERVER_DIR) && uv run uvicorn main:app --host 127.0.0.1 --port 8001
+
+server-test:
+	cd $(SERVER_DIR) && uv run pytest -q
+
+server-lint:
+	cd $(SERVER_DIR) && uv run ruff check . && uv run ruff format --check .
 
 # ---------- 公共 ----------
 

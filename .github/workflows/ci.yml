@@ -39,6 +39,23 @@ jobs:
       - name: 架构依赖规则守护（模块边界 lint）
         run: make lint-arch
 
+  server:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: astral-sh/setup-uv@v6
+        with:
+          python-version: "3.12"
+      - name: 依赖同步 + lint（ruff check + format 校验）
+        run: |
+          uv sync
+          uv run ruff check .
+          uv run ruff format --check .
+        working-directory: apps/server
+      - name: 单测（纯离线用例；PG 接线测试随 P14-1 加 services）
+        run: uv run pytest -q
+        working-directory: apps/server
+
   web:
     runs-on: ubuntu-latest
     steps:
