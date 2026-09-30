@@ -120,9 +120,9 @@ def _request(method: str, path: str, body: dict | None = None) -> http.client.HT
     return conn.getresponse()
 
 
-def chat_events(question: str, session_id: str, role: str) -> list[dict]:
+def chat_events(question: str, session_id: str, role: str, mode: str = "auto") -> list[dict]:
     """POST /api/chat 并解析全部 SSE 事件。"""
-    resp = _request("POST", "/api/chat", {"question": question, "session_id": session_id, "role": role})
+    resp = _request("POST", "/api/chat", {"question": question, "session_id": session_id, "role": role, "mode": mode})
     events: list[dict] = []
     for raw in resp:
         line = raw.decode("utf-8").strip()
@@ -169,11 +169,11 @@ class RunAgg:
     latency_ms: int = 0
 
 
-def _run_turns(sid: str, turns: list[str], role: str) -> RunAgg:
+def _run_turns(sid: str, turns: list[str], role: str, mode: str = "auto") -> RunAgg:
     agg = RunAgg()
     t0 = time.perf_counter()
     for turn in turns:
-        for ev in chat_events(turn, sid, role):
+        for ev in chat_events(turn, sid, role, mode):
             et = ev.get("type")
             if et == "route":
                 agg.routes.add(ev.get("route"))
@@ -195,11 +195,16 @@ def _run_turns(sid: str, turns: list[str], role: str) -> RunAgg:
     return agg
 
 
-def _expect_ok(exp: dict, agg: RunAgg) -> bool:
+def _expect_ok(exp: dict, agg: RunAgg, mode: str = "auto") -> bool:
     checks = []
 
     if "route" in exp:
-        checks.append(exp["route"] in agg.routes)
+        # P14 Q6：triage（agent-first）随 Go 退役，expect.route=agent 的语义
+        # 等价物是请求以 mode=react 显式进入 ReAct 链路——跑法本身即满足。
+        if exp["route"] == "agent" and mode == "react":
+            checks.append(True)
+        else:
+            checks.append(exp["route"] in agg.routes)
     if "asked_slot" in exp:
         checks.append(agg.asked_slot == exp["asked_slot"])
     if "pending_tool" in exp:
@@ -268,6 +273,8 @@ def main() -> int:
     parser.add_argument("--dataset", default="eval/dataset.jsonl",
                         help="数据集路径（相对仓库根或绝对路径），如 eval/dataset-agent.jsonl")
     parser.add_argument("--tag", default="", help="报告标签（写入文件名与表头，如 agent-first）")
+    parser.add_argument("--mode", dest="mode_", default="auto", choices=["auto", "direct", "research", "react"],
+                        help="全部用例统一使用的 chat mode（P14：agent 集以 react 跑）")
     args = parser.parse_args()
 
     h = health()
@@ -294,10 +301,10 @@ def main() -> int:
         try:
             if multi:
                 business_reset()
-                agg = _run_turns(sid, item["turns"], item.get("role", "student"))
-                s = {"pass": _expect_ok(item.get("expect", {}), agg) and not agg.errors, "kw": None, "cite": None}
+                agg = _run_turns(sid, item["turns"], item.get("role", "student"), args.mode_)
+                s = {"pass": _expect_ok(item.get("expect", {}), agg, args.mode_) and not agg.errors, "kw": None, "cite": None}
             else:
-                agg = _run_turns(sid, [item["question"]], "student")
+                agg = _run_turns(sid, [item["question"]], "student", args.mode_)
                 s = score_single(item, agg)
         except Exception as exc:  # noqa: BLE001
             agg = RunAgg(errors=[f"{type(exc).__name__}: {exc}"])

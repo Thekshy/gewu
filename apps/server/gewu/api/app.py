@@ -57,7 +57,9 @@ def create_app(
         app.state.retriever = _build_retriever(settings, app.state.store, app.state.llm)
     else:
         raise TypeError("store 非 Store 实例时必须显式提供 retriever")
-    app.state.graph = build_graph(settings, app.state.retriever, app.state.llm)
+    app.state.graph = build_graph(
+        settings, app.state.retriever, app.state.llm, business=app.state.business
+    )
     app.include_router(routes.router)
     app.include_router(chat_routes.router)
     return app

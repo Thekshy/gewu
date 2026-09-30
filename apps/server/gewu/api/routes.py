@@ -106,6 +106,15 @@ def search(request: Request, payload: Annotated[dict, Body(...)]):
     ]
 
 
+@router.post("/api/business/reset")
+def business_reset(request: Request):
+    try:
+        request.app.state.business.reset()
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=str(e)) from e
+    return {"status": "ok"}
+
+
 @router.get("/api/business/overview")
 def business_overview(request: Request):
     biz = request.app.state.business

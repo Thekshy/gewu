@@ -180,8 +180,11 @@ def test_react_plan_signal():
 )
 def test_cascade_thresholds(conf, margin, expect_layer):
     raw = (
-        '{"scores":{"factual":%s,"research":%s,"transaction":0.0,"hybrid":0.0,"refusal":0.0},"reason":"r"}'
-        % (conf, conf - margin)
+        '{"scores":{"factual":'
+        + str(conf)
+        + ',"research":'
+        + str(conf - margin)
+        + ',"transaction":0.0,"hybrid":0.0,"refusal":0.0},"reason":"r"}'
     )
     llm = FakeRouterLLM(l1_raw=raw, l2_raw=L2_FACTUAL)
     dec = CascadeRouter(llm).route("普通问题")

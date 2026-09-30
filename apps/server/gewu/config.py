@@ -68,6 +68,7 @@ class Settings:
     daily_token_budget: int = DEFAULT_DAILY_TOKEN_BUDGET
     retrieval_k: int = 6
     rerank_mode: str = "on"  # on（默认，LLM 精排）| off
+    react_mode: str = "off"  # off（默认，纯 workflow）| on（路径不定的办理问题转 ReAct）
 
     @classmethod
     def load(cls, env: Mapping[str, str] | None = None) -> Settings:
@@ -91,4 +92,5 @@ class Settings:
             daily_token_budget=int(env.get("DAILY_TOKEN_BUDGET", str(DEFAULT_DAILY_TOKEN_BUDGET))),
             retrieval_k=int(env.get("RETRIEVAL_K", "6")),
             rerank_mode=env.get("RERANK_MODE", "on"),
+            react_mode=env.get("REACT_MODE", "off"),
         )

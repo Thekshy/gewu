@@ -81,6 +81,23 @@ class LLMService:
         model = self._model(small).bind(temperature=temperature, max_tokens=max_tokens)
         return ChatStreamResult(model, to_lc_messages(messages))
 
+    def chat_with_tools(
+        self,
+        messages: list[BaseMessage],
+        tools: list[dict],
+        *,
+        small: bool = False,
+        temperature: float = 0.0,
+        max_tokens: int = 2048,
+    ) -> AIMessage:
+        """原生 tool-calling（Go ChatWithTools 等价）：返回含 tool_calls 的 AIMessage。"""
+        model = (
+            self._model(small)
+            .bind(temperature=temperature, max_tokens=max_tokens)
+            .bind_tools(tools)
+        )
+        return model.invoke(messages)  # type: ignore[return-value]
+
     # ---------- Embed ----------
 
     def embeddings(self) -> GewuEmbeddings:
