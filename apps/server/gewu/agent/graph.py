@@ -12,6 +12,7 @@ from __future__ import annotations
 
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
+from langgraph.types import Command
 
 from gewu.agent import events as ev
 from gewu.agent.emitter import emit
@@ -127,11 +128,7 @@ def make_tx_confirm_node(business):
 
 
 def make_tx_resume_node(llm: LLMService, business, tools: dict):
-    """办理续轮节点：confirm 阶段回复的处理（修改/确认/取消/new_topic）。
-
-    collect 阶段（workflow 槽位收集）随 P14-6 落位；本节点 P14-4 先接 ReAct
-    转来的 confirm 确认流。
-    """
+    """办理续轮节点：collect 阶段吸收信息 / confirm 阶段回复处理（修改/确认/取消/new_topic）。"""
     from gewu.agent.tx import (
         _CONFIRM_MODIFY_RE,
         FLOW_DEFS,
@@ -141,6 +138,8 @@ def make_tx_resume_node(llm: LLMService, business, tools: dict):
         execute_tool,
         slot_meta,
     )
+
+    advance = make_advance(llm, business)
 
     def tx_resume(state: ChatState) -> dict:
         meta = slot_meta(business)
@@ -166,7 +165,9 @@ def make_tx_resume_node(llm: LLMService, business, tools: dict):
                 "tx_new_topic": True,
             }
 
-        # continue：confirm 阶段先尝试理解为「修改」，再判确认
+        # continue：collect 阶段吸收信息；confirm 阶段先尝试「修改」，再判确认
+        if state.get("tx_phase") == "collect":
+            return advance(state)
         tool = state["tx_tool"]
         flow = FLOW_DEFS[tool]
         slots = dict(state.get("tx_slots") or {})
@@ -239,6 +240,168 @@ def make_tx_resume_node(llm: LLMService, business, tools: dict):
         return {"answer": text}
 
     return tx_resume
+
+
+def make_advance(llm: LLMService, business):
+    """collect 阶段推进（Go advance）：吸收新信息 → 齐了进确认，缺则追问。
+
+    transaction 首轮与 tx_resume 续轮共用。
+    """
+    from gewu.agent.tx import (
+        FLOW_DEFS,
+        SLOT_ORDER,
+        apply_days_phrase,
+        build_confirm,
+        llm_extract_slots,
+        missing_slots,
+        normalize_slot,
+        opportunistic_fill,
+        slot_meta,
+    )
+
+    def advance(st: ChatState) -> dict:
+        meta = slot_meta(business)
+        tool = st["tx_tool"]
+        slots = dict(st.get("tx_slots") or {})
+        if llm.has_key():
+            extracted = llm_extract_slots(llm, meta, tool, st["question"], slots)
+            for slot in SLOT_ORDER:
+                if slot not in extracted or slot in slots:
+                    continue
+                norm, ok = normalize_slot(meta, slot, extracted[slot])
+                if ok:
+                    slots[slot] = norm
+        elif st.get("tx_last_asked"):
+            m = meta.get(st["tx_last_asked"])
+            if m:
+                v = m["parse"](st["question"])
+                if v:
+                    slots[st["tx_last_asked"]] = v
+        else:
+            opportunistic_fill({"tx_tool": tool, "tx_slots": slots}, meta, st["question"])
+        apply_days_phrase({"tx_tool": tool, "tx_slots": slots}, st["question"])
+        missing = missing_slots(FLOW_DEFS[tool], slots)
+        if missing:
+            next_slot = missing[0]
+            ask = meta[next_slot]["ask"]
+            emit(ev.slot_question_evt(next_slot, ask))
+            emit(ev.answer_evt(ask))
+            return {
+                "tx_slots": slots,
+                "tx_last_asked": next_slot,
+                "tx_phase": "collect",
+                "tx_tool": st["tx_tool"],
+                "answer": ask,
+            }
+        st2 = {**st, "tx_slots": slots, "tx_phase": "confirm", "tx_last_asked": ""}
+        pa, text, _note = build_confirm(st2, business)
+        emit(pa)
+        emit(ev.answer_evt(text))
+        return {
+            "tx_slots": slots,
+            "tx_phase": "confirm",
+            "tx_last_asked": "",
+            "tx_tool": st["tx_tool"],
+            "answer": text,
+        }
+
+    return advance
+
+
+def make_transaction_node(llm: LLMService, retriever: Retriever, business, tools: dict):
+    """transaction 链路（Go StartFlow）：启发式+LLM 工具识别 → 读工具直执行 /
+    写工具进槽位收集 / 未识别转知识库。"""
+    from gewu.agent.tools import call_tool
+    from gewu.agent.tx import (
+        FLOW_DEFS,
+        _parse_date_slot,
+        detect_tool,
+        is_read_tool,
+        llm_extract_tool,
+        slot_meta,
+    )
+
+    advance = make_advance(llm, business)
+
+    def transaction(state: ChatState) -> dict:
+        meta = slot_meta(business)
+        q = state["resolved"]
+        tool = detect_tool(q)
+        if tool == "" and llm.has_key():
+            tool = llm_extract_tool(llm, tools, business, q, state["role"], meta)
+        if tool and (is_read_tool(tool) or tool not in FLOW_DEFS):
+            # 读操作直接执行，不进确认流
+            args: dict[str, str] = {}
+            if tool == "query_venues":
+                iso = _parse_date_slot(q)
+                if iso:
+                    args["date"] = iso
+            result = call_tool(tools, business, tool, args, state["role"], state["user"])
+            emit(ev.action_result_evt(tool, result.ok, result.message, result.receipt or None))
+            text = result.message if result.ok else f"办理未完成：{result.message or '未知错误'}。"
+            emit(ev.answer_evt(text))
+            return {"answer": text}
+        if tool in FLOW_DEFS:
+            return advance(
+                {
+                    **state,
+                    "tx_tool": tool,
+                    "tx_phase": "collect",
+                    "tx_slots": {},
+                    "tx_last_asked": "",
+                }
+            )
+        # 工具未识别 → 转知识库检索（Go fallbackKnowledge）
+        emit(ev.answer_evt("这个问题我理解为你想咨询校园信息，为你转知识库检索："))
+        return Command(goto="retrieve", update={"hits": []})
+
+    return transaction
+
+
+def make_research_node(llm: LLMService, retriever: Retriever):
+    """research 链路：plan → 逐路检索 → 证据聚合 → 综合作答。"""
+    from gewu.agent.research import run_research
+
+    def research(state: ChatState) -> dict:
+        return run_research(state, llm, retriever)
+
+    return research
+
+
+def make_hybrid_node():
+    """hybrid 链路：先政策直答，再转业务办理（Go pipeline hybrid 分支）。"""
+
+    def hybrid(state: ChatState) -> dict:
+        emit(ev.status_evt("先回答你的政策问题…"))
+        return Command(goto="retrieve", update={"hybrid_then_tx": True})
+
+    return hybrid
+
+
+def make_hybrid_tx_node():
+    """hybrid 的第二段：政策答完后转业务办理。"""
+
+    def hybrid_tx(state: ChatState) -> dict:
+        emit(ev.status_evt("接下来为你办理业务…"))
+        return Command(goto="transaction")
+
+    return hybrid_tx
+
+
+def _after_answer_direct(state: ChatState) -> str:
+    """answer_direct 后：hybrid 触发 → 转办理；否则结束。"""
+    return "hybrid_tx" if state.get("hybrid_then_tx") else "__end__"
+
+
+def _pending_link(name: str):
+    """待接入链路占位节点。"""
+
+    def node(state: ChatState) -> dict:
+        emit(ev.error_evt(f"链路 {name} 尚未接入"))
+        return {}
+
+    node.__name__ = f"node_{name}"
+    return node
 
 
 def entry_gate(state: ChatState) -> str:
@@ -357,8 +520,10 @@ def build_graph(
     g.add_node("react", make_react_node(llm, retriever, business, tools))
     g.add_node("tx_confirm", make_tx_confirm_node(business))
     g.add_node("tx_resume", make_tx_resume_node(llm, business, tools))
-    for name in ("research", "hybrid", "transaction"):
-        g.add_node(name, _pending_link(name))
+    g.add_node("research", make_research_node(llm, retriever))
+    g.add_node("transaction", make_transaction_node(llm, retriever, business, tools))
+    g.add_node("hybrid", make_hybrid_node())
+    g.add_node("hybrid_tx", make_hybrid_tx_node())
 
     g.add_conditional_edges(
         START,
@@ -382,7 +547,14 @@ def build_graph(
         },
     )
     g.add_edge("retrieve", "answer_direct")
-    g.add_edge("answer_direct", END)
+    g.add_conditional_edges(
+        "answer_direct",
+        _after_answer_direct,
+        {
+            "hybrid_tx": "hybrid_tx",
+            "__end__": END,
+        },
+    )
     g.add_edge("refusal", END)
     g.add_conditional_edges(
         "react",
@@ -401,8 +573,9 @@ def build_graph(
             "__end__": END,
         },
     )
-    for name in ("research", "hybrid", "transaction"):
-        g.add_edge(name, END)
+    g.add_edge("research", END)
+    g.add_edge("hybrid_tx", "transaction")
+    g.add_edge("transaction", END)
     return g.compile(checkpointer=checkpointer or MemorySaver())
 
 

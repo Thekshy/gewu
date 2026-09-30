@@ -35,6 +35,9 @@ class ChatState(TypedDict, total=False):
     tx_slots: dict
     tx_last_asked: str
 
+    # hybrid 链路标记：政策直答完成后转业务办理（answer_direct 条件边读）
+    hybrid_then_tx: bool
+
 
 def new_state(question: str, mode: str, session_id: str, role: str, user: str) -> dict:
     """图入口输入（每个请求一次 invoke）。"""

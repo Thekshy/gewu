@@ -197,8 +197,13 @@ def _as_hit_dict(h) -> dict:
     if isinstance(h, dict):
         return h
     return {
-        "chunk_id": h.chunk_id, "doc_id": h.doc_id, "seq": h.seq, "text": h.text,
-        "title": h.title, "source": h.source, "section_path": h.section_path,
+        "chunk_id": h.chunk_id,
+        "doc_id": h.doc_id,
+        "seq": h.seq,
+        "text": h.text,
+        "title": h.title,
+        "source": h.source,
+        "section_path": h.section_path,
     }
 
 
