@@ -70,7 +70,7 @@ func execSchema(ctx context.Context, pool *pgxpool.Pool) error {
 			WITH q AS (SELECT unnest(rag_tokenize(qtext)) AS tok)
 			SELECT c.id, SUM(ts_rank_cd(c.tsv, to_tsquery(cfg, q.tok)))::float8
 			FROM chunks c JOIN q ON c.tsv @@ to_tsquery(cfg, q.tok)
-			WHERE c.is_parent = 0
+			WHERE NOT c.is_parent
 			GROUP BY c.id
 			ORDER BY 2 DESC, 1 ASC
 			LIMIT lim
