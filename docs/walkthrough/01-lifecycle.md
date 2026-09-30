@@ -76,4 +76,4 @@ graph TD
   执行期间插话，只能等 done 后发下一轮。这是刻意简化，代价与收益见 [03](03-acting.md)
   的终止语义对照；
 - done 事件暂无结束原因字段（completed/error/aborted 不可区分），已列入
-  [P10](../P10-finish-reason.md)。
+  [P10](../runbooks/P10-finish-reason.md)。

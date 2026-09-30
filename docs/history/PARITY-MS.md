@@ -1,7 +1,7 @@
 # PARITY-MS —— 微服务版与冻结单体的有意行为差异清单
 
 > 冻结单体：`tag go-monolith`（commit `96c5a18`）。行为唯一标准仍是
-> [PARITY.md](./PARITY.md)；本文只登记微服务部署形态下**有意**的差异与理由，
+> [PARITY.md](../PARITY.md)；本文只登记微服务部署形态下**有意**的差异与理由，
 > 每条给出影响面与验证方式。评测覆盖不到的路径风险另见
 > [SERVICES.md §12](./SERVICES.md)。
 >

@@ -52,4 +52,4 @@ run-to-run 方差**：同实现跑两遍对照。判据：**跨实现差异 ≤ 
 
 `eval/run_eval.py`（评测客户端：SSE 解析/断言/报告）、`eval/run_search_parity.py`
 （检索对照与方差基线）、`eval/k6-chat.js`（压测）；门禁历史见
-[P14 任务书 §6](../P14-langgraph-migration.md) 与 eval/reports/。
+[P14 任务书 §6](../runbooks/P14-langgraph-migration.md) 与 eval/reports/。

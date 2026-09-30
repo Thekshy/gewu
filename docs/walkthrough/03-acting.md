@@ -38,7 +38,7 @@ workflow 是评测可复现的确定性基线；ReAct 服务「agent 自主组�
 | 终止判据 | 无 tool_calls = 模型债务清零 | 与主流一致 |
 | 消息债务（inbox/steering） | 同步单请求架构下不存在 | 结构性规避 |
 | 并行工具顺序提交 | for 循环顺序执行 | 结构性规避 |
-| max-tokens 先于工具解析 | **暂不解析 finish_reason**，截断 tool 参数可能被执行 | 已知缺口 → [P10](../P10-finish-reason.md) |
+| max-tokens 先于工具解析 | **暂不解析 finish_reason**，截断 tool 参数可能被执行 | 已知缺口 → [P10](../runbooks/P10-finish-reason.md) |
 
 理论的价值不是照搬复杂度，而是知道自己的边界属于哪一层、缺什么、什么时候需要补。
 

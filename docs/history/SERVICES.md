@@ -1,7 +1,7 @@
 # SERVICES —— 微服务拆分映射与行为锚点
 
 > 微服务升级提示词（[microservices-upgrade-prompt.md](./microservices-upgrade-prompt.md)）第一步产出。
-> 依据：冻结单体（当前 `main`，P0 将打 tag `go-monolith`）+ [PARITY.md](./PARITY.md) 逐文件核对。
+> 依据：冻结单体（当前 `main`，P0 将打 tag `go-monolith`）+ [PARITY.md](../PARITY.md) 逐文件核对。
 > 本文档回答：每个 `internal/` 包去哪、每个行为锚点在哪份代码里、迁移时的保真要点与风险。
 > **§10 冲突清单的 A~D 四项已由用户于 2026-09-04 拍板（全部采纳推荐方案），结论已回写正文。**
 
@@ -415,9 +415,9 @@ RPC 往返不计入——旧基线报告可直接对照。
 
 | 报告 | 实现 | 时间 | 关键条件 |
 | --- | --- | --- | --- |
-| [report-20260828-1035.md](../eval/reports/report-20260828-1035.md) | Go 单体（HTTP/SSE） | 2026-08-28 10:35 | glm-5.3 + flash；26/26 首次全绿 |
-| [baseline-python.md](../eval/reports/baseline-python.md) | Python `python-final` 进程内直跑 | 2026-09-03 09:14 | 同机；**仅 BM25 索引（15 篇/22 chunk，no-embed）**；无限流（进程内） |
-| [rewrite-go-vs-python.md](../eval/reports/rewrite-go-vs-python.md) | Go 单体（HTTP/SSE） | 2026-09-03 10:02 | 与 Python 轮同机同日同模型**同一 index.db**；`RATE_LIMIT_PER_MINUTE=10000`；26/26 逐题一致 |
+| [report-20260828-1035.md](../../eval/reports/report-20260828-1035.md) | Go 单体（HTTP/SSE） | 2026-08-28 10:35 | glm-5.3 + flash；26/26 首次全绿 |
+| [baseline-python.md](../../eval/reports/baseline-python.md) | Python `python-final` 进程内直跑 | 2026-09-03 09:14 | 同机；**仅 BM25 索引（15 篇/22 chunk，no-embed）**；无限流（进程内） |
+| [rewrite-go-vs-python.md](../../eval/reports/rewrite-go-vs-python.md) | Go 单体（HTTP/SSE） | 2026-09-03 10:02 | 与 Python 轮同机同日同模型**同一 index.db**；`RATE_LIMIT_PER_MINUTE=10000`；26/26 逐题一致 |
 
 微服务各阶段验收的对照口径：与**冻结单体**同机、同模型、同索引状态（BM25-only 与带向量各一轮）、
 gateway 同样调高限流；P4 要求逐题通过情况一致（延迟不比）；报告入 eval/reports/。

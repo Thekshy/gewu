@@ -39,7 +39,7 @@
 
 **评测口径注意**：记忆固化线程与下一轮请求的 L1 路由存在并发争用（偶发路由
 降级漂移）——全量评测以 `MEMORY_CONSOLIDATE=off` 隔离（记忆固化不在 PARITY
-契约内），运行态默认 on。归因过程见 [P14 任务书 §6](../P14-langgraph-migration.md)。
+契约内），运行态默认 on。归因过程见 [P14 任务书 §6](../runbooks/P14-langgraph-migration.md)。
 
 ## 预算（`gewu/budget.py`）
 

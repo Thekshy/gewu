@@ -1,6 +1,6 @@
 # go-notes —— Go 重构的设计决策与「为什么」
 
-> 配套 [PARITY.md](./PARITY.md)（行为契约）阅读。本文只讲**决策与理由**，
+> 配套 [PARITY.md](../PARITY.md)（行为契约）阅读。本文只讲**决策与理由**，
 > 每条都尽量回答面试官的下一句追问：「为什么这么做 / 不那么做？」
 > 最后一节是重写过程中发现的 Python 版原设计问题清单（修复 = 行为改进，均有 PARITY §18 备案）。
 
@@ -160,7 +160,7 @@ SDK 里反而要翻文档找 `WithCtx`。
 ## 11. 数字：启动与内存（macOS arm64，2026-09-03 实测）
 
 > 同机同日实测（进程启动 → /api/health 首次 200 的墙钟；RSS 为空载稳态）；
-> 端到端评测延迟对照见 [rewrite-go-vs-python.md](../eval/reports/rewrite-go-vs-python.md)。
+> 端到端评测延迟对照见 [rewrite-go-vs-python.md](../../eval/reports/rewrite-go-vs-python.md)。
 
 | 指标 | Go（gin + 纯 Go SQLite） | Python（FastAPI + uvicorn） |
 | --- | --- | --- |

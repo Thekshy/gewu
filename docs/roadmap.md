@@ -41,7 +41,7 @@
 
 - [x] 可演示前端（P11）：对话 / 对比实验台 / 控制台三视图——同题 A/B 双流
       （cascade workflow ↔ ReAct agent）、业务台账、检索调试；验收记录见
-      [P11-web-demo.md §5](P11-web-demo.md)
+      [runbooks/P11-web-demo.md §5](runbooks/P11-web-demo.md)
 - [ ] Docker Compose 部署到公网 ECS（Nginx + SSE 配置）
 - [ ] 5 分钟演示录屏：事实题 / 多跳题 / 拒答三条路径（三页面已就绪可开录）
 - [ ] 技术报告：设计决策、评测数据、badcase 复盘
@@ -60,6 +60,6 @@
       SSE 契约只增不改）；报告见 eval/reports/P10-*.md 四份（基线/llm/ReAct/done）
 - [x] P14 LangGraph 迁移：编排层全量迁 Python+LangGraph（PARITY 契约下前端零改动、
       interrupt() 确认门、PostgresSaver 重启续办、P10 截断防御等价移植）；Go 后端退役
-      （tag `go-final`）；评测 28+8 全绿——ADR-0010 / [P14 任务书](P14-langgraph-migration.md)
+      （tag `go-final`）；评测 28+8 全绿——ADR-0010 / [P14 任务书](runbooks/P14-langgraph-migration.md)
 - [ ] agent-first 链路稳定化：flash 三分类与 ReAct 确认流的非确定性（已知短板，见 P8-retire-baseline.md §4；triage 已随 P14 退役，条目收窄为 react 链路稳定化）
 - [ ] 长期记忆消亡与用户侧可见性（当前仅注入不可管理）

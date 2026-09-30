@@ -3,7 +3,7 @@
 - 状态：已接受（2026-09-30，P14 执行完毕）
 - 背景：gewu 定为毕业论文项目《基于 RAG 与 LangGraph 的校园制度智能问答 Agent
   研究与实现》，同时保留求职展示与 agent 学习定位
-- 关联：[P14 任务书](../P14-langgraph-migration.md)、ADR-0008（存储迁 PG——本次
+- 关联：[P14 任务书](../runbooks/P14-langgraph-migration.md)、ADR-0008（存储迁 PG——本次
   存储层零改动复用的前提）、ADR-0009（上一次"冻结规格换实现"的退役实践）
 
 ## 决策

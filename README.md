@@ -15,7 +15,7 @@
 | 对比维度 | 方案 A ↔ 方案 B | 怎么切 | 现状与结论 | 证据 |
 | --- | --- | --- | --- | --- |
 | 架构形态 | 模块化单体 → 六微服务 → 退役回模块化单体 | 形态迁移 + 26/26 逐题 PARITY | 微服务学习目标达成后有序退役：能力缺口先吸收进单体，再删分布式管道 | [ADR-0009](./docs/ADR/0009-微服务退役与单体模块化.md) · [docs/history/](./docs/history/) · tag `pre-ms-removal` |
-| 实现语言 | Python/FastAPI ↔ Go | 行为冻结（PARITY.md）后 clean-room 重写 | 并发取消、确定性、部署面全面受益；重写过程本身修掉 8 个原设计缺陷 | [对照报告](./eval/reports/rewrite-go-vs-python.md) · [go-notes](./docs/go-notes.md) |
+| 实现语言 | Python/FastAPI ↔ Go | 行为冻结（PARITY.md）后 clean-room 重写 | 并发取消、确定性、部署面全面受益；重写过程本身修掉 8 个原设计缺陷 | [对照报告](./eval/reports/rewrite-go-vs-python.md) · [go-notes](./docs/history/go-notes.md) |
 | 问题路由 | 级联三级（规则快路径 → 小模型五分类 → 主模型复核）↔ agent-first（三执行策略 + ReAct 自主编排） | `ROUTER_MODE` | 级联缺省；agent-first 配独立 8 题评测集 | [walkthrough/02](./docs/walkthrough/02-routing.md) |
 | 任务编排 | 固定 workflow（直答 / 深度研究 / 槽位流程）↔ ReAct 引擎自主组合工具 | `REACT_MODE` | 确定性链路用 workflow，开放组合用 ReAct；写操作一律确认流 fail-closed | [walkthrough/03](./docs/walkthrough/03-acting.md) |
 | 分块策略 | flat 单层切分 ↔ hierarchical 父子块（子块命中回父块上下文） | `CHUNK_MODE` | hierarchical 缺省，flat 保留可回退 | [architecture.md](./docs/architecture.md) |
@@ -54,7 +54,7 @@ P8 微服务形态退役回单体 → **P14 以同一份 PARITY 全量迁回 Pyt
 （tag `go-final` 锚定 Go 终态，可随时回看）。原生机制落位：StateGraph 显式建图、
 `interrupt()` 承担写操作人工确认、PostgresSaver 会话跨重启续办、custom stream
 writer 对接既有 SSE 契约（前端零改动）。决策与证据：
-[ADR-0010](./docs/ADR/0010-langgraph-migration.md)、[P14 任务书](./docs/P14-langgraph-migration.md)。
+[ADR-0010](./docs/ADR/0010-langgraph-migration.md)、[P14 任务书](./docs/runbooks/P14-langgraph-migration.md)。
 
 ```mermaid
 flowchart LR
@@ -92,11 +92,11 @@ flowchart LR
 - **并发模型**：SSE 每连接一 goroutine，`context` 取消可以一路传播到上游 LLM 流——
   客户端断开即刻停止烧 token（Python 版里 openai SDK 的阻塞调用感知不到 uvicorn 连接关闭）；
 - **确定性**：BM25/RRF 平局次序、事件 JSON 键序在 Python 里依赖 dict/set 的实现细节，
-  Go 版全部构造性保证（[go-notes §6](./docs/go-notes.md)）；
+  Go 版全部构造性保证（[go-notes §6](./docs/history/go-notes.md)）；
 - **部署面**：单二进制（纯 Go SQLite，免 CGO），冷启动 ~50ms、空载内存 ~18MB（Python 版 ~1.2s / ~95MB）；
 - **重构本身是验证**：以 PARITY.md 为唯一行为规格做 clean-room 对照，同数据集逐题对比
   （[对照报告](./eval/reports/rewrite-go-vs-python.md)），重写过程修掉 8 个原设计缺陷
-  （[go-notes §10](./docs/go-notes.md)）。
+  （[go-notes §10](./docs/history/go-notes.md)）。
 
 P14 再度以同一份 PARITY 迁回 Python + LangGraph（动机：图编排显式化、原生
 interrupt 确认流、checkpointer 会话持久化——手写骨架验证过原理后换框架工程化）。
@@ -110,7 +110,7 @@ interrupt 确认流、checkpointer 会话持久化——手写骨架验证过原
 | 特性 | 说明 |
 | --- | --- |
 | 三层级联路由 | L0 规则快路径（明确办理指令零 LLM）→ L1 小模型五分类 → L2 主模型复核低置信；`mode=react` 走 ReAct 自主组合工具（P14 起 agent-first 随 triage 退役，结论留档） |
-| 混合检索 | PG 原生 FTS（中文二元语法分词下沉 SQL 侧，零分词依赖）+ pgvector halfvec HNSW 向量，RRF 融合；**父子块**层级切分（子块命中回父块上下文）；LLM 精排 rerank 可开关；读写收口为存储函数（P12 起，[迁移对账](./docs/P12-storage-backend.md)） |
+| 混合检索 | PG 原生 FTS（中文二元语法分词下沉 SQL 侧，零分词依赖）+ pgvector halfvec HNSW 向量，RRF 融合；**父子块**层级切分（子块命中回父块上下文）；LLM 精排 rerank 可开关；读写收口为存储函数（P12 起，[迁移对账](./docs/runbooks/P12-storage-backend.md)） |
 | 查询改写与上下文补全 | 多轮指代消解（"那第二条呢"）在路由前补全，贯通路由与检索两个环节 |
 | Deep Research | 子问题拆解 → 多路检索 → 证据跨子问题去重 → 交叉综合，全程 trace 可视 |
 | 知行执行层 | mock 业务系统（场馆预约/请假审批）：槽位收集、多轮澄清、**LangGraph interrupt() 写操作确认流**、回执、冲突恢复；**PostgresSaver checkpointer 持久化，服务重启可续办** |
@@ -161,7 +161,7 @@ REVOKE ALL ON DATABASE gewu, gewu_test FROM PUBLIC;  -- 数据/连接权限隔�
 打开 http://localhost:3100 即可对话。**对比实验台**（/compare）同题并发
 `mode=auto`（级联 workflow）与 `mode=react`（ReAct agent）双流并排——本项目
 「方案对比」卖点的现场演示入口；**控制台**（/console）看业务台账、检索调试、
-语料与服务健康。设计见 [docs/P11-web-demo.md](./docs/P11-web-demo.md)。
+语料与服务健康。设计见 [docs/P11-web-demo.md](./docs/runbooks/P11-web-demo.md)。
 
 **检索调试**（不经模型直接看命中）：
 
@@ -219,12 +219,14 @@ make build && ./bin/gewu-api          # 宿主直跑（推荐）
 | 想看什么 | 去哪 |
 | --- | --- |
 | 架构文档系列：总览 / 编排图 / 各领域 / 横切（01~10） | [docs/architecture/](./docs/architecture/) |
-| 设计讲解系列：链路 / 路由 / 执行 / 记忆 / 工程防线 / 演进史（9 篇，含取舍与已知短板） | [docs/walkthrough/](./docs/walkthrough/) |
-| 单点决策记录（9 篇） | [docs/ADR/](./docs/ADR/) |
+| 设计讲解系列：链路 / 路由 / 执行 / 记忆 / 工程防线 / 演进史（含取舍与已知短板） | [docs/walkthrough/](./docs/walkthrough/) |
+| 单点决策记录（10 篇，含 LangGraph 迁移） | [docs/ADR/](./docs/ADR/) |
+| 任务执行留档：P 系列任务书（P6~P14，全真跑门禁） | [docs/runbooks/](./docs/runbooks/)（P14 = LangGraph 迁移全程） |
+| 竞品深研：8 个开源 Agent 项目源码级对照 | [docs/research/](./docs/research/) |
 | 行为规格与 SSE 事件契约 | [docs/PARITY.md](./docs/PARITY.md) |
-| 历史形态（微服务时代） | [docs/history/](./docs/history/) |
-| 前端展示台：对话 / 对比实验 / 控制台（SPEC + 验收记录） | [docs/P11-web-demo.md](./docs/P11-web-demo.md) |
+| 历史形态留档（微服务 + Go 时代） | [docs/history/](./docs/history/) |
 | 路线图与进行中的实验 | [docs/roadmap.md](./docs/roadmap.md) |
+| **docs 全量导航** | [docs/README.md](./docs/README.md) |
 
 ## License
 

@@ -17,11 +17,11 @@
 
 **铁律：**
 
-- 行为唯一标准 = [docs/PARITY.md](./PARITY.md) + 冻结单体 + 26 题评测（[eval/run_eval.py](../eval/run_eval.py)，HTTP/SSE 契约）。
+- 行为唯一标准 = [docs/PARITY.md](../PARITY.md) + 冻结单体 + 26 题评测（[eval/run_eval.py](../../eval/run_eval.py)，HTTP/SSE 契约）。
 - 迁移开始前（P0 第一个动作）给当前单体打 tag `go-monolith` 并冻结：
   `internal/` 作为共享库被各服务复用，默认只读（确需改动逐条记录原因与影响）；
   `cmd/server` 保持可构建可运行，作为 A/B 对照与回退。
-- 迁移期间**不并入** [docs/agent-projects-report.md](./agent-projects-report.md) 的改进项
+- 迁移期间**不并入** [docs/agent-projects-report.md](../research/agent-projects-report.md) 的改进项
   （打断恢复、并行检索、引用后处理等）——单移动基线，迁移完再议。
 - 评测客户端 `eval/run_eval.py` 与前端 `apps/web` **零改动**（它们只依赖 HTTP/SSE 契约）。
 - 零 key 演示模式（无 LLM_API_KEY 全链路可跑，启发式降级）必须完整存活——它是无密钥 CI 冒烟的底座。
@@ -39,8 +39,8 @@
   工具层权限矩阵与越权文案（PARITY §10）
 - 预算计量口径（流式按字符/2、UTC 日期滚动、入口 429 文案）与限流参数（PARITY §12）
 - 26 题评测的运行方式与指标口径（PARITY §17），三份基线报告的对照条件
-  （[baseline-python.md](../eval/reports/baseline-python.md)、
-  [rewrite-go-vs-python.md](../eval/reports/rewrite-go-vs-python.md)）
+  （[baseline-python.md](../../eval/reports/baseline-python.md)、
+  [rewrite-go-vs-python.md](../../eval/reports/rewrite-go-vs-python.md)）
 - 本提示词架构规格与现状的冲突清单——发现冲突停下来问我，不要自行改行为
 
 ## 架构规格（六进程，单 module 多 cmd）
