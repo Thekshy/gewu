@@ -1,14 +1,7 @@
-BIN := bin/gewu-api
-WEB_DIR := apps/web
 SERVER_DIR := apps/server
+WEB_DIR := apps/web
 
-.PHONY: build install-web ingest run test lint fmt vet eval demo clean lint-arch pg-up pg-down server-install server-run server-test server-lint
-
-# ---------- 单体（P8 起唯一形态） ----------
-
-# 构建 Go 单体二进制（输出 bin/gewu-api）
-build:
-	go build -o $(BIN) ./cmd/server
+.PHONY: install-web run test lint eval demo clean lint-arch pg-up pg-down
 
 # ---------- 检索存储（P12：PostgreSQL + pgvector） ----------
 
@@ -31,62 +24,42 @@ pg-up:
 pg-down:
 	@docker compose stop pg 2>/dev/null || echo "[pg-down] 宿主 PG 为多项目共享实例，不代停；确需停用：brew services stop postgresql@17"
 
-# 语料入库：真调 EMBED_*（火山方舟）出向量，建「FTS+向量」混合索引（PG+pgvector）。
-# 可选参数：REBUILD=1 清库重建 / NO_EMBED=1 仅 FTS（显式手动选项）
-ingest:
-	go run ./cmd/server -ingest $(if $(REBUILD),-rebuild,) $(if $(NO_EMBED),-no-embed,)
-
-# 启动单体 API（:8000）；先 make pg-up && make ingest 建索引
-run:
-	go run ./cmd/server
-
-# ---------- Python 服务端（P14 LangGraph 迁移，双轨期 :8001） ----------
+# ---------- Python 服务端（P14 起：LangGraph 编排，:8000） ----------
 
 # 同步依赖（uv 管 pyproject + uv.lock）
-server-install:
+install:
 	cd $(SERVER_DIR) && uv sync
 
-# 启动 Python 服务端（双轨期 :8001；P14-8 Go 退役后收口 :8000）
-server-run:
-	cd $(SERVER_DIR) && uv run uvicorn main:app --host 127.0.0.1 --port 8001
-
-server-test:
-	cd $(SERVER_DIR) && uv run pytest -q
-
-server-lint:
-	cd $(SERVER_DIR) && uv run ruff check . && uv run ruff format --check .
+# 启动 API（:8000）；先 make pg-up，并确保索引已入库
+run:
+	cd $(SERVER_DIR) && uv run uvicorn main:app --host 127.0.0.1 --port 8000
 
 # ---------- 公共 ----------
 
 install-web:
 	cd $(WEB_DIR) && npm install
 
-# 全绿门禁口径（P12 起）：前置 pg-up，PG 依赖用例真跑；
-# 裸跑 `go test ./...` 时无 PG 的用例会 Skip（醒目日志）。
+# 全绿门禁口径：前置 pg-up，PG 依赖用例真跑；
+# 裸跑 pytest 时无 PG 的用例会 Skip（醒目日志）。
 test: pg-up
-	go test ./...
+	cd $(SERVER_DIR) && uv run pytest -q
 
-lint: fmt vet
-
-fmt:
-	gofmt -l -w cmd internal scripts
-
-vet:
-	go vet ./...
+lint:
+	cd $(SERVER_DIR) && uv run ruff check . && uv run ruff format --check .
 
 eval:
 	python3 eval/run_eval.py
 
-# 一键起演示：入库 + 双端（先 make install-web）
-demo: ingest
+# 一键起演示：双端（先 make install && make install-web）
+demo:
 	$(MAKE) -j2 run dev-web
 
 dev-web:
 	cd $(WEB_DIR) && npm run dev
 
 clean:
-	rm -rf bin
+	rm -rf $(SERVER_DIR)/.pytest_cache $(SERVER_DIR)/.ruff_cache
 
-# 架构依赖规则守护（P8-4）：违规即非零退出
+# 架构依赖规则守护（P14-8 Python 版，零依赖：grep 断言）
 lint-arch:
 	bash scripts/lint-arch.sh

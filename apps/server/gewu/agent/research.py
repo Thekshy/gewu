@@ -7,8 +7,8 @@ from __future__ import annotations
 
 from gewu.agent import events as ev
 from gewu.agent.emitter import emit
-from gewu.agent.jsonx import json_str_slice, parse_json_object
 from gewu.agent.prompts import NO_DATA_ANSWER, PLANNER_SYSTEM
+from gewu.jsonx import json_str_slice, parse_json_object
 from gewu.llm.service import LLMService
 from gewu.rag.retrieve import Retriever
 

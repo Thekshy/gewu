@@ -16,10 +16,10 @@ from collections.abc import Callable
 from typing import Any
 
 from gewu.agent import events as ev
-from gewu.agent.jsonx import json_str, parse_json_object
 from gewu.agent.prompts import CLASSIFY_REPLY_SYSTEM, LLM_EXTRACT_TOOL_SYSTEM, SLOT_EXTRACT_SYSTEM
 from gewu.business.db import Business, Result, approver_of, leave_days, receipt_id
 from gewu.dates import parse_all, parse_iso, today_iso
+from gewu.jsonx import json_str, parse_json_object
 from gewu.llm.service import LLMService
 
 # ---------- 工具识别（离线启发式，按序首个命中；顺序是契约） ----------

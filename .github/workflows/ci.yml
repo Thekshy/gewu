@@ -6,39 +6,6 @@ on:
   pull_request:
 
 jobs:
-  api:
-    runs-on: ubuntu-latest
-    # P12：检索存储 PG（pgvector 镜像）——rag 域测试需要真 PG
-    services:
-      pg:
-        image: pgvector/pgvector:pg17
-        env:
-          POSTGRES_USER: gewu
-          POSTGRES_PASSWORD: gewu
-          POSTGRES_DB: gewu
-        ports:
-          - 5433:5432
-        options: >-
-          --health-cmd "pg_isready -U gewu -d gewu"
-          --health-interval 3s
-          --health-timeout 3s
-          --health-retries 20
-    env:
-      PG_DSN: postgres://gewu:gewu@127.0.0.1:5433/gewu?sslmode=disable
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
-        with:
-          go-version: "1.25"
-      - name: 建测试库 gewu_test（rag 测试用；pgvector 扩展由 execSchema 创建）
-        run: PGPASSWORD=gewu psql -h 127.0.0.1 -p 5433 -U gewu -d postgres -c "CREATE DATABASE gewu_test OWNER gewu;"
-      - run: test -z "$(gofmt -l cmd internal)"
-      - run: go vet ./...
-      - run: go test ./... -race
-      - run: go build ./...
-      - name: 架构依赖规则守护（模块边界 lint）
-        run: make lint-arch
-
   server:
     runs-on: ubuntu-latest
     # P14-1：rag 存储接线测试需要真 PG（pgvector），与 Go job 同款 service

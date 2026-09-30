@@ -15,7 +15,6 @@ import threading
 from dataclasses import dataclass
 from pathlib import Path
 
-from gewu.agent.prompts import CONSOLIDATE_PROMPT
 from gewu.llm.service import LLMService
 
 MAX_FACTS_IN_CONTEXT = 20  # 注入 prompt 的事实条数上限
@@ -154,7 +153,7 @@ def consolidate(
     if not llm.has_key():
         return
     try:
-        from gewu.agent.jsonx import parse_json_object  # noqa: PLC0415
+        from gewu.jsonx import parse_json_object  # noqa: PLC0415
 
         raw = llm.chat(
             [
@@ -175,3 +174,10 @@ def consolidate(
             memory.upsert_facts(user_id, facts)
     except Exception as e:  # noqa: BLE001 - 抽取失败放弃本轮（原文已留存）
         print(f"[agent] 记忆固化失败（不影响主链路）：{e}")
+
+
+# ConsolidatePrompt 事实抽取提示词（glm-5.3-flash，JSONMode）。
+CONSOLIDATE_PROMPT = """从对话中抽取关于该用户的稳定事实、偏好或约束（如专业、年级、绩点、姓名、宿舍、目标院校/方向）。
+只抽取明确表达或可直接确定的信息，不要推测。key 用简短英文标识（如 major、grade、gpa、dorm、goal），
+value 保留用户原表述。每条含 kind（profile=身份事实 / preference=偏好 / constraint=约束条件）。
+只输出 JSON：{"facts":[{"kind":"profile","key":"major","value":"计算机科学"}]}；没有可抽取信息时输出 {"facts":[]}"""

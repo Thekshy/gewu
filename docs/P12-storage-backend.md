@@ -182,7 +182,7 @@ CREATE INDEX IF NOT EXISTS vectors_hnsw ON vectors USING hnsw (embedding vector_
 
 ### 5.3 遗留与后续
 
-- [ ] P13 候选：business/memory/sessions 逐库评估迁入 PG（Q6 路线）
+- [x] ~~P13 候选：business/memory/sessions 逐库评估迁入 PG（Q6 路线）~~ 已被 P14 部分吸收：sessions 由 LangGraph PostgresSaver checkpointer 接管（ADR-0010）；business/memory 仍 SQLite，迁 PG 留待按需立项
 - [ ] 时效元数据过滤（Q7 非目标，语料扩通知类时随迁移做；PG 形态下是 SQL WHERE）
 - [ ] 通知类语料扩充后重跑 A4 对账（当前 15 篇校规语料无时效冲突场景）
 

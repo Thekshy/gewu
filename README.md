@@ -44,47 +44,50 @@
 范围外问题礼貌拒答。语料是虚构的，但工程问题是真实的：路由歧义、多跳证据、
 写操作安全、多轮状态管理——每一项都直接压在要对比的方案选型上。
 
-## 架构：模块化单体（P8 起）
+## 架构：模块化单体（P14 起 Python + LangGraph）
 
-单二进制 `cmd/server`（:8000）+ PostgreSQL（检索存储，P12 起）+ SQLite（业务/记忆/会话）。
-曾经完成过单体 → 六微服务的完整迁移
-与逐题等价证明（P0~P5，26/26 PARITY），学习目标达成后在 P8 **有序退役**：微服务独有的
-能力缺口（办理会话持久化）先吸收进单体，再删除分布式管道（gRPC/Redis Streams/网关）。
-决策与证据：[ADR-0009](./docs/ADR/0009-微服务退役与单体模块化.md)、
-[docs/history/](./docs/history/)、git tag `pre-ms-removal`。
+`apps/server`（uvicorn :8000，FastAPI + LangGraph StateGraph 编排）+
+PostgreSQL（检索存储 P12 起 + LangGraph checkpointer P14 起）+ SQLite（业务/记忆）。
+编排层的历史是本项目「实现对比」叙事的主线：v1 Python/FastAPI 快速验证 →
+[PARITY.md](./docs/PARITY.md) 冻结行为后 clean-room 重写 Go（对照报告留档）→
+P8 微服务形态退役回单体 → **P14 以同一份 PARITY 全量迁回 Python + LangGraph**
+（tag `go-final` 锚定 Go 终态，可随时回看）。原生机制落位：StateGraph 显式建图、
+`interrupt()` 承担写操作人工确认、PostgresSaver 会话跨重启续办、custom stream
+writer 对接既有 SSE 契约（前端零改动）。决策与证据：
+[ADR-0010](./docs/ADR/0010-langgraph-migration.md)、[P14 任务书](./docs/P14-langgraph-migration.md)。
 
 ```mermaid
 flowchart LR
-    C[客户端 / 评测 / web] -->|HTTP/SSE :8000| API[cmd/server<br/>装配 + 路由 + 中间件<br/>限流·CORS·X-Trace-Id]
+    C[客户端 / 评测 / web] -->|HTTP/SSE :8000| API[main.py 装配 + FastAPI<br/>限流·CORS·X-Trace-Id·预算闸]
 
-    subgraph internal
-        AGENT[agent 编排域<br/>pipeline·triage/cascade 路由<br/>react·transaction·memory]
+    subgraph gewu
+        AGENT[agent 编排域<br/>LangGraph StateGraph：cascade 路由<br/>直答/深研/办理/ReAct·interrupt 确认门]
         RAG[rag 检索域<br/>hierarchical 父子块·FTS<br/>pgvector HNSW·rerank]
-        LLM[llm 模型访问域<br/>chat/stream/embed·双 provider]
+        LLM[llm 模型访问域<br/>langchain-openai·双模型<br/>自定义 Embeddings]
         BIZ[business 业务域<br/>场馆预约·请假审批]
-        SUP[支撑域<br/>config·budget·dates·middleware]
+        SUP[支撑域<br/>config·budget·memory·middleware]
     end
 
     API --> AGENT
-    AGENT -->|Retriever/LLMer/Tools 接口| RAG & LLM & BIZ
+    AGENT -->|Retriever/LLMService/Tools| RAG & LLM & BIZ
     RAG --> DB[(PostgreSQL + pgvector<br/>FTS · halfvec HNSW)]
-    AGENT --> DB2[(SQLite<br/>memory.db·sessions.db)]
-    BIZ --> DB3[(SQLite<br/>business.db)]
+    AGENT --> DB2[(PostgreSQL checkpoints<br/>PostgresSaver)]
+    AGENT --> DB3[(SQLite<br/>memory.db)]
+    BIZ --> DB4[(SQLite<br/>business.db)]
     LLM --> EXT[[OpenAI 兼容端点]]
     SUP -.-> AGENT & RAG & LLM & BIZ
 ```
 
-**依赖规则**（`make lint-arch` 零依赖守护）：`agent → rag/llm/business`（经
-Retriever/LLMer/Tools 接口）；检索/模型/业务域反向禁止 import 编排域；业务系统只能经
-`agent.Tools`（权限矩阵单一出口）触达；支撑域不 import 任何业务域；`cmd/server` 只做装配。
+**依赖规则**（`make lint-arch` 零依赖守护）：`agent → rag/llm/business`（经注入接口）；
+检索/模型/业务域反向禁止 import 编排域；业务系统只能经 `agent.tools`（权限矩阵单一出口）
+触达；支撑域不 import 任何业务域；`main.py` 只做装配（app.py 为可测试的装配工厂）。
 
 模块地图与设计决策详见 [docs/architecture.md](./docs/architecture.md)。
 
-## 为什么用 Go 重写（原为 Python/FastAPI）
+## 实现语言的两次对比（Python → Go → Python+LangGraph）
 
-这是项目里最早完成的一次完整实践对比。v1 用 Python（FastAPI）快速验证了产品形态：
-路由、混合检索、业务办理、评测全绿。未上线、无历史包袱，于是在行为冻结（[PARITY.md](./docs/PARITY.md)）
-后整体重写为 Go：
+这是本项目「先冻结规格，再换实现」方法最完整的两次实践。v1 用 Python（FastAPI）
+快速验证产品形态后，行为冻结（[PARITY.md](./docs/PARITY.md)）整体重写为 Go，收获了：
 
 - **并发模型**：SSE 每连接一 goroutine，`context` 取消可以一路传播到上游 LLM 流——
   客户端断开即刻停止烧 token（Python 版里 openai SDK 的阻塞调用感知不到 uvicorn 连接关闭）；
@@ -95,30 +98,34 @@ Retriever/LLMer/Tools 接口）；检索/模型/业务域反向禁止 import 编
   （[对照报告](./eval/reports/rewrite-go-vs-python.md)），重写过程修掉 8 个原设计缺陷
   （[go-notes §10](./docs/go-notes.md)）。
 
-评测客户端仍用 Python（`eval/run_eval.py`，纯标准库 HTTP 客户端）——评测与被测实现
+P14 再度以同一份 PARITY 迁回 Python + LangGraph（动机：图编排显式化、原生
+interrupt 确认流、checkpointer 会话持久化——手写骨架验证过原理后换框架工程化）。
+两次迁移的对照报告都留档 `eval/reports/`；Go 时代终态锚定在 git tag `go-final`。
+
+评测客户端仍是纯标准库 Python（`eval/run_eval.py`）——评测与被测实现
 跨语言隔离，契约靠 HTTP/SSE 而不是共享代码。
 
 ## 核心特性
 
 | 特性 | 说明 |
 | --- | --- |
-| 三层级联路由 | L0 规则快路径（明确办理指令零 LLM）→ L1 小模型五分类 → L2 主模型复核低置信；`agent-first` 模式塌缩为三执行策略（refusal/direct/agent）+ ReAct 自主组合工具 |
+| 三层级联路由 | L0 规则快路径（明确办理指令零 LLM）→ L1 小模型五分类 → L2 主模型复核低置信；`mode=react` 走 ReAct 自主组合工具（P14 起 agent-first 随 triage 退役，结论留档） |
 | 混合检索 | PG 原生 FTS（中文二元语法分词下沉 SQL 侧，零分词依赖）+ pgvector halfvec HNSW 向量，RRF 融合；**父子块**层级切分（子块命中回父块上下文）；LLM 精排 rerank 可开关；读写收口为存储函数（P12 起，[迁移对账](./docs/P12-storage-backend.md)） |
 | 查询改写与上下文补全 | 多轮指代消解（"那第二条呢"）在路由前补全，贯通路由与检索两个环节 |
 | Deep Research | 子问题拆解 → 多路检索 → 证据跨子问题去重 → 交叉综合，全程 trace 可视 |
-| 知行执行层 | mock 业务系统（场馆预约/请假审批）：槽位收集、多轮澄清、写操作确认流、回执、冲突恢复；**办理会话 SQLite 持久化，重启可续办** |
+| 知行执行层 | mock 业务系统（场馆预约/请假审批）：槽位收集、多轮澄清、**LangGraph interrupt() 写操作确认流**、回执、冲突恢复；**PostgresSaver checkpointer 持久化，服务重启可续办** |
 | 长期记忆 | episodic（会话原文）+ fact（结构化事实抽取）双库，注入 prompt 参与补全与作答 |
 | 权限矩阵 | 学生/辅导员角色，越权在工具层单一出口拦截 |
 | 确定性日期解析 | 「明天 / 下周三 / 9月2日 / 请三天假」由代码换算，LLM 只负责找表述，杜绝日期算错 |
 | 引用与拒答 | 每条回答标注 `[n]` 引用来源；证据不足时明确声明"未找到依据" |
 | 离线评测 | 28 题主数据集 + 8 题 agent-first 数据集：单轮 + **多轮交易型**（断言业务库真实状态），一键产出 Markdown 指标报告 |
-| 成本与观测 | 按 IP 令牌桶限流 + 每日 token 预算（持久化、跨重启、原子落盘）；X-Trace-Id 贯穿响应头/gin/agent 日志 |
+| 成本与观测 | 按 IP 固定窗口限流 + 每日 token 预算（持久化、跨重启）；X-Trace-Id 贯穿响应头 |
 | 模型分层 | 主答案 glm-5.3；路由/拆解/槽位抽取/查询改写/精排等辅助调用走 glm-5.3-flash |
 | 模型无关 | 任意 OpenAI 兼容端点（智谱 / DeepSeek / OpenAI / vLLM），改环境变量即切换 |
 
 ## 快速开始
 
-前置：Go 1.25+、Node 18+（前端）。
+前置：Python 3.11+（uv 管理依赖）、Node 18+（前端）。
 
 ```bash
 # 1. 配置模型（P6 起强制有 key 启动）
@@ -128,8 +135,8 @@ cp .env.example .env   # 填入 LLM_API_KEY / EMBED_API_KEY 等
 #    共享 postmaster 场景见下）
 make pg-up
 
-# 3. 建索引（FTS+向量混合）并启动 API :8000
-make ingest
+# 3. 同步依赖并启动 API :8000
+make install
 make run
 
 # 4. 前端 :3100（对话 / 对比实验台 / 控制台 三视图）
@@ -169,7 +176,8 @@ curl -s localhost:8000/api/search -H 'Content-Type: application/json' \
 make run &                     # 先起服务（RATE_LIMIT_PER_MINUTE=600 建议值）
 make eval                      # 28 题主数据集 → eval/reports/report-*.md
 # agent-first 8 题（ReAct 自主编排链路）：
-ROUTER_MODE=agent-first make run &
+make run &
+python3 eval/run_eval.py --dataset eval/dataset-agent.jsonl --mode react --tag agent
 python3 eval/run_eval.py --dataset eval/dataset-agent.jsonl --tag agent-first
 ```
 
@@ -180,7 +188,7 @@ refusal 3 / transaction 7 / hybrid 1），数据在 [eval/dataset.jsonl](./eval/
 ## 语料替换
 
 `data/corpus/*.md` 为虚构「钱塘大学」的政策文档（带 `title/source/updated` frontmatter）。
-把文件换成任意公开语料（如某校官网通知）后 `make ingest` 即完成知识库切换，其余部分零改动。
+把文件换成任意公开语料（如某校官网通知）后重新入库即完成知识库切换，其余部分零改动（入库 CLI 随语料工程线排期，当前经 rag.Store.upsert_doc 写入）。
 
 ## API 一览
 

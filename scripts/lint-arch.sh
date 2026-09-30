@@ -1,85 +1,41 @@
 #!/usr/bin/env bash
-# lint-arch：单体模块化依赖规则守护（P8-4，零依赖：go list + grep）。
+# lint-arch（P14-8 Python 版）：模块依赖规则守护，零依赖（grep 断言）。
 #
-# 模块地图与依赖规则（docs/architecture.md §依赖规则）：
+# 规则（docs/architecture.md §依赖规则，P8-4 Go 版的 Python 等价）：
 #   api（接口层）→ agent/rag/business（只读展示）/支撑域，禁止直接 import llm；
-#   agent（编排域）→ routing / rag / llm / business（经接口）；
-#   routing（路由域）只依赖 llm，不得反向依赖编排/检索/业务/接口层；
-#   rag / llm / business ↛ agent（反向禁止）；
-#   business 只经 agent.Tools（权限矩阵单一出口）被触达，不 import rag；
-#   支撑域（budget/config/dates/middleware）可被任何域用，但不 import 业务域；
-#   cmd/server 只做装配（白名单内的 internal 包）。
+#   rag / llm / business / memory / budget / middleware（支撑域）↛ agent（反向禁止）；
+#   rag / llm / business 互相之间禁止横向依赖（经编排层解耦）；
+#   main.py 只做装配（只 import gewu.api/config 一线）。
 # 违规即非零退出；`make lint-arch`。
 set -u
+cd "$(dirname "$0")/.."
+fail=0
 
-# 健康检查：go list 本身失败（编译错误/cycle）必须报错，不能静默当作合规。
-if ! go list ./internal/... ./cmd/... > /dev/null 2>&1; then
-    echo "lint-arch：go list 失败（存在编译错误或 import cycle），先修复再跑守护" >&2
-    exit 1
-fi
-
-violations=""
-
-# deps <./pkg/...>：列出包路径与其全部 imports（go list 标准格式）。
-deps() { go list -f '{{.ImportPath}} {{.Imports}}' "$1" 2>&1; }
-
-# forbid <glob> <regex> <规则说明>：命中即记录违规。
-forbid() {
-    local glob="$1" regex="$2" rule="$3" hit
-    hit=$(deps "$glob" | grep -E "gewu/$regex" || true)
-    if [ -n "$hit" ]; then
-        violations+="违规规则：$rule
-$hit
-
-"
+check() { # check <描述> <文件glob> <禁止pattern>
+    local desc="$1" glob="$2" pat="$3"
+    if grep -rn "$pat" $glob 2>/dev/null | grep -v "_test.py" | grep -q .; then
+        echo "lint-arch 违规：$desc"
+        grep -rn "$pat" $glob 2>/dev/null | grep -v "_test.py" | head -3
+        fail=1
     fi
 }
 
-# 规则 0：api 接口层——只允许触达编排/检索/业务(只读展示)/支撑域，禁止绕过编排直接调 llm。
-allowed_api='gewu/internal/(agent|rag|business|budget|config|middleware|dates)\b'
-hit=$(go list -f '{{.Imports}}' ./internal/api | grep -oE "gewu/internal/[a-z_]+" | sort -u | grep -vE "$allowed_api" || true)
-if [ -n "$hit" ]; then
-    violations+="违规规则：api 只 import 接口层所需包（agent/rag/business/支撑域），不得直接调 llm
-$hit
+# app.py 是装配工厂（Go cmd/server/main.go 的等价物，构造 LLMService 合法）；
+# 路由实现层（routes/chat）禁止直接 import llm。
+check "api 路由层禁止直接 import llm" "apps/server/gewu/api/routes.py apps/server/gewu/api/chat.py" "from gewu.llm\|import gewu.llm"
+check "rag ↛ agent（反向）" "apps/server/gewu/rag" "from gewu.agent\|import gewu.agent"
+check "llm ↛ agent（反向）" "apps/server/gewu/llm" "from gewu.agent\|import gewu.agent"
+check "business ↛ agent（反向）" "apps/server/gewu/business" "from gewu.agent\|import gewu.agent"
+check "business ↛ rag（经编排层解耦）" "apps/server/gewu/business" "from gewu.rag\|import gewu.rag"
+check "llm ↛ rag（横向禁止）" "apps/server/gewu/llm" "from gewu.rag\|import gewu.rag"
+check "memory/budget/middleware ↛ 业务域" "apps/server/gewu/memory.py apps/server/gewu/budget.py apps/server/gewu/middleware.py" "from gewu.\(agent\|rag\|business\)"
 
-"
+# main.py 只做装配：import 面只允许 gewu.api / gewu.config
+if grep -E "^from gewu\.|^import gewu" apps/server/main.py | grep -v "gewu.api\|gewu.config" | grep -q .; then
+    echo "lint-arch 违规：main.py 只做装配（仅允许 import gewu.api/gewu.config）"
+    grep -E "^from gewu\.|^import gewu" apps/server/main.py | grep -v "gewu.api\|gewu.config"
+    fail=1
 fi
 
-# 规则 0.5：routing 路由域——只许依赖 llm（含标准库），其余 internal 包全部禁止。
-hit=$(go list -f '{{.Imports}}' ./internal/agent/routing | grep -oE "gewu/internal/[a-z_/]+" | sort -u | grep -vE 'gewu/internal/llm\b' || true)
-if [ -n "$hit" ]; then
-    violations+="违规规则：routing 只 import llm（路由域是叶子，不得依赖编排/检索/业务/接口层）
-$hit
-
-"
-fi
-
-# 规则 1：rag / llm / business 反向禁止 import agent。
-forbid "./internal/rag/..."      "internal/agent\b" "rag ↛ agent（rag/llm/business 不得 import 编排域）"
-forbid "./internal/llm/..."      "internal/agent\b" "llm ↛ agent（rag/llm/business 不得 import 编排域）"
-forbid "./internal/business/..." "internal/agent\b" "business ↛ agent（业务域只经 agent.Tools 被触达，不得反向 import）"
-
-# 规则 2：business 不 import rag（业务域与检索域互不依赖）。
-forbid "./internal/business/..." "internal/rag\b" "business ↛ rag（业务域不依赖检索域）"
-
-# 规则 3：支撑域不 import 任何业务/编排/检索/模型域。
-for sup in budget config dates middleware; do
-    forbid "./internal/$sup/..." "internal/(agent|rag|business|llm)\b" "支撑域 $sup 不得 import 业务域（agent/rag/business/llm）"
-done
-
-# 规则 4：cmd/server 只做装配——仅允许白名单内的 internal 包。
-allowed='gewu/internal/(api|agent|rag|llm|business|config|budget|middleware|dates)\b'
-hit=$(deps ./cmd/server | grep -oE "gewu/internal/[a-z_]+" | sort -u | grep -vE "$allowed" || true)
-if [ -n "$hit" ]; then
-    violations+="违规规则：cmd/server 只 import 装配白名单（api/agent/rag/llm/business/config/budget/middleware/dates）
-$hit
-
-"
-fi
-
-if [ -n "$violations" ]; then
-    echo "lint-arch 发现依赖规则违规：
-$violations"
-    exit 1
-fi
-echo "lint-arch：依赖规则全部通过（api→编排/检索；agent→routing/rag/llm/business 单向；routing 仅 llm；支撑域无业务依赖；cmd/server 仅装配）"
+if [ "$fail" -ne 0 ]; then exit 1; fi
+echo "lint-arch：依赖规则全部合规"

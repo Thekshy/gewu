@@ -1,4 +1,4 @@
-# 架构设计（模块化单体 · P8）
+# 架构设计（模块化单体 · P14：Python + LangGraph）
 
 ## 总览
 
@@ -7,34 +7,34 @@ flowchart TB
     subgraph Web[apps/web · Next.js]
         UI[聊天界面<br/>路由徽章 / 研究过程 / 引用]
     end
-    subgraph API[cmd/server · Go(gin) · :8000]
+    subgraph API[main.py 装配 + apps/server · FastAPI · :8000]
         TR[X-Trace-Id 中间件]
-        RL[限流中间件<br/>令牌桶/IP]
+        RL[限流中间件<br/>固定窗口/IP]
         EP[API 层<br/>chat / search / docs / health]
-        PIPE[编排管线 RunChat]
+        PIPE[LangGraph StateGraph<br/>主图编排]
     end
-    subgraph AGENT[internal/agent · 编排域]
-        ROUTE[路由 cascade / triage agent-first]
+    subgraph AGENT[gewu/agent · 编排域]
+        ROUTE[路由 cascade 三级级联]
         DIRECT[RAG 直答]
         RES[Deep Research]
-        REACT[ReAct 引擎]
-        TX[知行执行层<br/>槽位/确认/回执]
+        REACT[ReAct 子图<br/>截断防御 guard]
+        TX[知行执行层<br/>槽位/interrupt 确认门/回执]
         MEM[长期记忆 episodic+fact]
-        SESS[(sessions.db<br/>办理会话持久化)]
+        SESS[(PG checkpoints<br/>PostgresSaver)]
     end
-    subgraph RAGD[internal/rag · 检索域]
+    subgraph RAGD[gewu/rag · 检索域]
         RET[Retriever 混合检索]
         HIE[父子块层级检索]
         RR[LLM 精排]
         ST[(PostgreSQL + pgvector<br/>FTS + halfvec HNSW)]
     end
-    subgraph BIZ[internal/business · 业务域]
+    subgraph BIZ[gewu/business · 业务域]
         BOOK[场馆预约]
         LEAVE[请假审批]
         BT[(business.db)]
     end
-    LLMD[internal/llm 模型访问域<br/>chat/stream/embed 双 provider]
-    BUD[internal/budget 每日 token 预算]
+    LLMD[gewu/llm 模型访问域<br/>langchain-openai 双模型 + 自定义 Embeddings]
+    BUD[gewu/budget 每日 token 预算]
     LLM[[LLM API<br/>OpenAI 兼容]]
     CORPUS[data/corpus/*.md]
 
@@ -59,14 +59,14 @@ flowchart TB
 
 | 域 | 包 | 职责 |
 | --- | --- | --- |
-| 接口 | `internal/api` | HTTP 层：路由注册、请求校验、SSE 事件写出——只做 HTTP 语义，不含业务逻辑 |
-| 编排 | `internal/agent` | pipeline（RunChat 总编排，done 单点收口带 reason）、react（ReAct 引擎 + 截断防御：finish_reason=length 且带 tool_calls 时一律不执行——参数可能不完整，合成错误 observation 回填交模型重发，Pi 式修复）、transaction（知行执行层）、memory（长期记忆）、query_rewrite（指代补全）、tools（权限矩阵）、session（办理会话） |
-| 路由 | `internal/agent/routing` | 意图路由/执行策略分流：cascade 三级级联、triage 三策略、classic 基线、启发式；路由提示词随域内聚 |
-| 检索 | `internal/rag` | hierarchical（父子块切分与检索）、关键词检索（PG 原生 FTS，中文二元语法分词下沉 SQL 侧）、pgvector halfvec HNSW 向量检索、RRF 融合、rerank；读写收口为存储函数（rag_tokenize / rag_fts_search / rag_upsert_doc） |
-| 模型访问 | `internal/llm` | chat / stream / embed，OpenAI 兼容双 provider，工具调用；响应侧解析 finish_reason 与 usage 三元组（P10：length=截断判定依据；记账仍只入 total_tokens） |
-| 业务 | `internal/business` | mock 校内业务：场馆预约（容量/冲突/限额）+ 请假审批（分级） |
-| 支撑 | `internal/config` `budget` `dates` `middleware` | 配置、token 预算、确定性中文日期、限流与 trace-id |
-| 装配 | `cmd/server` | 组装根：flag/env、依赖注入——**不含 HTTP 与业务逻辑** |
+| 接口 | `gewu/api` | HTTP 层：路由注册、请求校验、SSE 事件写出、interrupt/resume 桥（thread 停在确认门时以用户消息 resume）——只做 HTTP 语义，不含业务逻辑 |
+| 编排 | `gewu/agent` | graph（LangGraph 主图：entry_gate 会话优先 → resolve 指代补全 → route → 六链路分发；done 由 SSE 端点单点发射）、react（ReAct 子图 + 截断防御：finish_reason=length 且带 tool_calls 时一律不执行——合成错误 observation 回填交模型重发，Pi 式修复）、tx（知行执行层：槽位/确认/恢复）、research（深研）、tools（权限矩阵） |
+| 路由 | `gewu/agent/routing` | cascade 三级级联（L0 规则/L1 flash 概率分布双阈值+margin/L2 主模型灰度兜底）+ 启发式降级；triage/classic 随 P14 Q6 退役（结论留档 walkthrough/02） |
+| 检索 | `gewu/rag` | hierarchical（父子块检索）、关键词检索（PG 原生 FTS，中文二元语法分词下沉 SQL 侧）、pgvector halfvec HNSW 向量检索、RRF 融合、rerank；读写收口为存储函数（rag_tokenize / rag_fts_search / rag_upsert_doc，schema.py 为 DDL 唯一权威） |
+| 模型访问 | `gewu/llm` | ChatOpenAI 工厂（主/小双模型 + thinking 开关）+ 自定义 GewuEmbeddings（text 批量 / ark_multimodal 逐条并发）；finish_reason 与 usage 三元组解析（P10 契约 Python 侧） |
+| 业务 | `gewu/business` | mock 校内业务：场馆预约（容量/冲突/限额）+ 请假审批（分级） |
+| 支撑 | `gewu/config` `budget` `memory` `middleware` `dates` | 配置、token 预算（usage_metadata 精确入账）、长期记忆（fact+episodic SQLite）、限流与 trace-id、确定性中文日期 |
+| 装配 | `apps/server/main.py`（工厂 `gewu/api/app.py`） | 组装根：env、依赖注入、PostgresSaver checkpointer——**不含 HTTP 与业务逻辑** |
 
 依赖规则（`make lint-arch` 断言，违规即非零退出，CI 门禁）：
 
@@ -76,7 +76,7 @@ flowchart TB
 4. `rag / llm / business ↛ agent`（反向禁止——编排域是唯一的上游）；
 5. `business ↛ rag / agent`（业务系统只经 `agent.Tools` 权限矩阵单一出口被触达）；
 6. 支撑域可被任何域用，但不 import 业务域；
-7. `cmd/server` 只 import 装配白名单内的 internal 包。
+7. `apps/server/main.py` 只 import `gewu.api`/`gewu.config`（装配一线）。
 
 lint 实现为 `scripts/lint-arch.sh`（go list + grep，零依赖）；带健康检查：go list
 本身失败（编译错误 / import cycle）时报错而非静默通过；已用注入违规 import 的方式
@@ -126,12 +126,19 @@ eval/reports/migration-p12-pg.md）。专业向量库（Milvus）的触发线不
 
 ## 设计决策问答
 
-### 为什么自研编排而不用 LangChain / LangGraph？
+### 为什么先自研编排、P14 又迁到 LangGraph？
 
-本项目的问题形态是"路由 + 两级管线 + 工具循环"，自研编排代码换来：零重依赖、事件流完全可控
-（SSE 每个环节可插桩）、评测可直连管线内部。ReAct 引擎（P6）补上了 Agent Loop 后，
-复杂度仍然可控（原生 tool-calling 单主体，~300 行）——如果未来出现多主体协作或人工
-介入图，才值得引入框架。
+**自研阶段（P6~P13，Go）**：问题形态是"路由 + 两级管线 + 工具循环"，手写编排换来
+零重依赖、事件流完全可控（SSE 每个环节可插桩）、评测可直连管线内部——用它验证了
+级联路由、ReAct 循环、截断防御、确认流这些**原理层**的设计，每一个都留了单测与
+对照报告。**迁移时机（P14）**：原理验证完成后，框架的工程价值开始大于学习价值——
+LangGraph 恰好提供了当时"手写了 300 行"的那些件的原生等价物：StateGraph 显式建图
+（路由/管线/循环成为一等公民可视化）、`interrupt()` 人工介入（确认流从自研状态机
+变成图原生暂停/恢复）、PostgresSaver checkpointer（会话持久化与续办免费获得）、
+custom stream writer（SSE 契约照旧逐环节可插桩）。迁移以 PARITY 为唯一行为规格
+（前端零改动、评测同数据集全绿），Go 终态锚定 tag `go-final`——这是本项目
+"先冻结规格，再换实现"方法论的第三次实践。决策全文见
+[ADR-0010](./ADR/0010-langgraph-migration.md)。
 
 ### 为什么关键词检索用字符二元语法而不是分词？
 
@@ -154,13 +161,13 @@ SQLite（P13 起逐库评估迁入）；Milvus 触发线不变：chunk 十万级
 
 ### 成本防线如何设计？
 
-两层：入口处按 IP 令牌桶限流（默认 20 次/分钟）；LLM 调用前检查每日 token 预算
-（`data/usage.json` 持久化，跨重启有效，默认 200 万/天）。流式响应无法拿到精确 usage，
-按字符数/2 保守估算入账。
+两层：入口处按 IP 固定窗口限流（默认 600 次/分钟，评测建议值）；chat 入口检查每日
+token 预算（`data/usage.json` 持久化，跨重启有效，默认 200 万/天），耗尽 429。P14 起
+usage 由 langchain 的 usage_metadata 精确入账（LLMService 统一收口）。
 
 ### 模型如何切换与分层？
 
-所有模型调用收敛在 `internal/llm`，走 OpenAI 兼容协议；改 `LLM_BASE_URL / LLM_MODEL /
+所有模型调用收敛在 `gewu/llm`（langchain-openai，OpenAI 兼容协议）；改 `LLM_BASE_URL / LLM_MODEL /
 LLM_SMALL_MODEL / EMBED_MODEL` 即可切换供应商。**分层**：路由/拆解/槽位抽取/续轮意图/
 查询改写/精排等小输入小输出任务走 `LLM_SMALL_MODEL`（单次 ~1s）；只有最终答案与 ReAct
 主循环走主模型。分层后直答链路延迟从 28s 降到 5s。
@@ -192,7 +199,7 @@ flowchart TB
 
 **为什么写操作必须确认，读操作不用？** 答错话只是尴尬，执行错动作是事故。确认流（摘要 → 确认 → 执行 → 回执）是幻觉防线在执行场景的对等物；读操作无副作用，确认只会增加摩擦。
 
-**为什么日期换算不用 LLM？** 「下周三到底是哪天」这类换算 LLM 极易算错。分工是：LLM 负责"从句子里找出日期表述"，`internal/dates` 用确定性规则换算（含中文数字天数「请三天假」、周几、下周一等），并有独立单测。LLM 输出的任何日期都会再过一遍这个解析器归一化。
+**为什么日期换算不用 LLM？** 「下周三到底是哪天」这类换算 LLM 极易算错。分工是：LLM 负责"从句子里找出日期表述"，`gewu/dates` 用确定性规则换算（含中文数字天数「请三天假」、周几、下周一等），并有独立单测。LLM 输出的任何日期都会再过一遍这个解析器归一化。
 
 **权限为什么放在工具层而不是业务系统？** 业务系统（mock）保持对角色无感知，权限判定收敛在 `agent.Tools` 单一出口——agent 的任何路径（路由、LLM 选择工具、恢复流程、ReAct 自主调用）都绕不过这道闸。越权尝试返回明确的拒绝文案，评测集里专门有学生调辅导员工具的用例。
 

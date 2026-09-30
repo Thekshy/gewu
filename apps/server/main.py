@@ -1,7 +1,4 @@
-"""gewu 服务端入口：只做装配与启动（对齐 cmd/server/main.go 只做装配的约定）。
-
-P14 双轨期缺省 :8001（Go 版仍占 :8000），P14-8 Go 退役后收口切 :8000。
-"""
+"""gewu 服务端入口：只做装配与启动（对齐 Go cmd/server/main.go 只做装配的约定）。"""
 
 from __future__ import annotations
 
@@ -18,8 +15,8 @@ app = create_app(settings)
 
 
 def main() -> None:
-    host, _, port = os.environ.get("SERVER_ADDR", "127.0.0.1:8001").partition(":")
-    uvicorn.run(app, host=host or "127.0.0.1", port=int(port or 8001))
+    host, _, port = os.environ.get("SERVER_ADDR", "127.0.0.1:8000").partition(":")
+    uvicorn.run(app, host=host or "127.0.0.1", port=int(port or 8000))
 
 
 if __name__ == "__main__":

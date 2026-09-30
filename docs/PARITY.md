@@ -1,10 +1,10 @@
-# PARITY —— 格物 API 行为规格（Go 重构唯一行为契约)
+# PARITY —— 格物 API 行为规格（跨实现迁移的唯一行为契约）
 
-> 本文档由 Python(FastAPI) 最终实现(`tag: python-final`,commit `01dea6a`)逐文件提取而成。
-> Python 代码删除后,本文档即 Go 实现的行为唯一标准。所有事件 JSON 字段名、错误文案、
-> 降级分支必须与本文档一致;评测脚本与 web 前端都依赖这些细节。
-> 标注【差异决定】的条目是 Python 实现的框架隐式行为,FastAPI 细节无法逐字节复刻,
-> 给出了 Go 版采用的等价行为。
+> 本文档最初由 v1 Python(FastAPI) 实现（`tag: python-final`）逐文件提取，作为 Go
+> 重构的行为唯一标准（Go 终态 `tag: go-final`）；P14 起 LangGraph 版（apps/server）
+> 第三次以本文档为唯一契约——SSE 事件字段、错误文案、降级分支逐条对齐，评测脚本
+> 与 web 前端跨实现复用。标注【差异决定】的条目是框架隐式行为的等价决定（历史
+> 措辞保留）。
 
 ## 1. 服务总览
 

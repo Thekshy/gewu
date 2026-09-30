@@ -1,4 +1,4 @@
-# 单体形态编排（P8 起）：前端容器 + 检索存储 PG（P12 起）；API 单体直接宿主运行（make run，:8000）。
+# 单体形态编排（P14 起）：前端容器 + 检索存储 PG；API 服务（Python+LangGraph）宿主 make run 或 Dockerfile.api。
 #
 # 常用：
 #   make pg-up                    # 起 PG（pgvector/pgvector:pg17，宿主 127.0.0.1:5433）

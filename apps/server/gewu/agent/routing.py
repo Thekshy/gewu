@@ -9,8 +9,8 @@ from __future__ import annotations
 
 import re
 
-from gewu.agent.jsonx import EmptyJSONError, json_str, parse_json_object
 from gewu.agent.routing_prompts import ROUTER_SYSTEM, ROUTER_SYSTEM_CASCADE
+from gewu.jsonx import EmptyJSONError, json_str, parse_json_object
 
 CONF_HIGH = 0.80  # ≥ 且 margin 足够 → 直接路由
 CONF_LOW = 0.55  # < → 不相信 L1，走 L2/兜底

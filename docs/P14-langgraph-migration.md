@@ -232,7 +232,7 @@ BASE_URL 覆盖）。P14-7 全量门禁过了之后，P14-8 删除 Go、Python �
 - 门禁：transaction 7/7 + multi_hop 8/8 + hybrid 1/1 真跑（多轮槽位/冲突恢复/
   审批层级断言全过）。
 
-**P14-6（2026-09-30，执行中）**
+**P14-6 + P14-7（2026-09-30，完成，commit 26239af）**
 - memory.py 移植（fact UPSERT + episodic + memory_block 装配 + consolidate
   异步固化——线程替代 Go goroutine）；resolve_query 全门控移植（QUERY_REWRITE
   开关/有 key/episodic 存在/指代信号词，补全失败静默回退）。
@@ -249,7 +249,34 @@ BASE_URL 覆盖）。P14-7 全量门禁过了之后，P14-8 删除 Go、Python �
   重启续办才暴露）。修后所有 patch 需 grep 验证落盘。
 - eval 修复：sid 加时间戳跨 run 唯一（固定 sid 时上次 run 遗留的 interrupt
   会被下次 run 的 turn1 误 resume，事件流错乱）。
-- 全量回归进行中（对照 consolidate 并发影响）。
+- **consolidate 并发干扰归因**：记忆固化线程（flash 抽取）与下一轮请求的 L1 路由
+  并发争用时偶发路由降级（全量跑失败用例漂移 tx-004/005/007，routes 混入启发式
+  误判症状；MEMORY_CONSOLIDATE=off 对照 28/28 全绿）。收端口径：**全量评测门禁以
+  MEMORY_CONSOLIDATE=off 跑**（记忆固化不在 PARITY 契约内，属评测隔离变量），
+  运行态默认 on（功能经 agent 集 8/8 与 G3 验证）。
+- P14-7：budget（usage.json 同格式跨天归零；LLMService 三通道统一入账——
+  chat/chat_with_tools 的 usage_metadata + ChatStreamResult 迭代完自记）+ chat
+  入口 429 闸 + 限流中间件（固定窗口/IP，健康检查豁免）+ X-Trace-Id 中间件。
+- 门禁：103 单测全绿；全量 28/28（mtfact-002 已知 flaky 重跑过）+ agent 8/8 +
+  G3 重启续办真跑。
+
+**P14-8（2026-09-30，完成）**
+- Go 全量退役：internal/ cmd/ go.mod go.sum bin/ 删除；Dockerfile.api 换 Python
+  （uv 两段构建）；compose 注释更新。
+- Makefile 收口：Go 轨（build/ingest/run/test/lint/fmt/vet）退役，install/run
+  （:8000）/test/lint/eval/demo Python 单轨；server-* 目标并入主线名。
+- CI：api（Go）job 删除，server（Python）+ web 双 job。
+- lint-arch 重写 Python 版（grep 断言）：rag/llm/business ↛ agent 反向禁止、
+  api 路由层禁 import llm（app.py 为装配工厂豁免=Go main 等价物）、main.py 只
+  装配；执行中顺手完成 jsonx 提升顶层（通用件）、CONSOLIDATE_PROMPT 归位
+  memory 域（依赖规则倒逼的收口）。
+- 端口收口 :8000（main.py SERVER_ADDR 缺省）；G4 真跑：Python 服务 :8000 +
+  前端零改动，factual 抽样 3/3。
+- 文档收口：README（架构节/两次语言对比叙事/命令）、architecture.md（模块地图
+  + §127 反转为"先自研后迁移"）、ADR-0010、roadmap P14 条目、P12 §5.3 预留
+  改写（sessions 被 checkpointer 吸收）、walkthrough 历史注记、PARITY 头部
+  （三次契约史）。
+- G6 验收：全仓无 .go/go.mod/cmd/internal/bin；Makefile/CI 无 Go 命令。
 
 **P14-0（2026-09-30，完成）**
 - 前置收口：P11 前端三视图 / walkthrough 10 篇 / README 定位重写 / schema.go is_parent
@@ -318,6 +345,21 @@ BASE_URL 覆盖）。P14-7 全量门禁过了之后，P14-8 删除 Go、Python �
    父子扩展）；**入库 CLI 依赖 ingest**，P14-2 起若需重建索引再排期。
 4. 对照脚本 eval/run_search_parity.py 绕过 macOS 系统代理（urllib 读系统代理
    劫持 127.0.0.1 回 502）；Token 用量记账（budget 写侧）随 P14-7。
+
+**P14-2~8 增量**：
+
+5. **route=agent 断言语义等价映射**（P14-4）：run_eval 对 expect.route=agent 且
+   --mode react 的用例视为满足（triage 退役，mode=react 即 agent 链路显式入口）。
+6. **interrupt 节点零副作用纪律**（P14-6）：tx_gate 首动作即 interrupt()，摘要
+   发射放在 tx_confirm（副作用节点）——LangGraph resume 会重放 interrupt 前的
+   节点，副作用前置会重复 emit。
+7. **StateGraph schema 外 key 静默丢弃**（P14-4/5 两度撞上）：TypedDict 未声明
+   的字段（tx_tool/hybrid_then_tx）更新被吞、下游 KeyError——所有跨节点 state
+   字段必须显式进 ChatState 定义。
+8. **全量评测口径 MEMORY_CONSOLIDATE=off**（P14-6 归因，见 6.1）。
+9. **jsonx/CONSOLIDATE_PROMPT 域归位**（P14-8）：lint-arch Python 版上线倒逼
+   的收口——通用容错解析提升 gewu/jsonx.py，记忆固化提示词归 memory.py。
+10. agent 集以 --mode react 跑（run_eval 加 --mode 参数，缺省 auto 不变）。
 
 ### 6.3 遗留与后续
 （待填）

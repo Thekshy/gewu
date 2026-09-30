@@ -54,12 +54,6 @@ NO_DATA_ANSWER = (
     "如果你认为这属于校园政策/服务问题，欢迎换个说法再问一次。"
 )
 
-# ConsolidatePrompt 事实抽取提示词（glm-5.3-flash，JSONMode）。
-CONSOLIDATE_PROMPT = """从对话中抽取关于该用户的稳定事实、偏好或约束（如专业、年级、绩点、姓名、宿舍、目标院校/方向）。
-只抽取明确表达或可直接确定的信息，不要推测。key 用简短英文标识（如 major、grade、gpa、dorm、goal），
-value 保留用户原表述。每条含 kind（profile=身份事实 / preference=偏好 / constraint=约束条件）。
-只输出 JSON：{"facts":[{"kind":"profile","key":"major","value":"计算机科学"}]}；没有可抽取信息时输出 {"facts":[]}"""
-
 # ReactSystemHead ReAct system 提示词主体（工具清单走原生 tools 参数；记忆块尾部注入）。
 REACT_SYSTEM_HEAD = """你是「格物」的自主任务执行器，通过调用工具完成用户在校园场景的目标。规则：
 1. 事实与政策一律用检索工具获取，不凭记忆编造；引用政策时标注来源文档标题；
