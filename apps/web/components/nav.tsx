@@ -9,20 +9,29 @@ const ITEMS = [
   { href: "/console", label: "控制台" },
 ];
 
-/** 顶部导航：三视图切换，当前项高亮。 */
+/** 全局顶栏导航：三视图 pill 切换，当前项高亮。 */
 export default function Nav() {
   const pathname = usePathname();
   return (
-    <nav className="nav" aria-label="页面导航">
-      {ITEMS.map((it) => (
-        <Link
-          key={it.href}
-          href={it.href}
-          className={`nav-item${pathname === it.href ? " active" : ""}`}
-        >
-          {it.label}
-        </Link>
-      ))}
+    <nav className="flex items-center gap-1" aria-label="页面导航">
+      {ITEMS.map((it) => {
+        const active = pathname === it.href;
+        return (
+          <Link
+            key={it.href}
+            href={it.href}
+            aria-current={active ? "page" : undefined}
+            className={
+              "rounded-full px-3.5 py-1.5 text-sm font-medium transition-colors " +
+              (active
+                ? "bg-primary/10 text-primary"
+                : "text-muted-foreground hover:bg-muted hover:text-foreground")
+            }
+          >
+            {it.label}
+          </Link>
+        );
+      })}
     </nav>
   );
 }

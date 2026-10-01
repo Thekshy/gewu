@@ -1,9 +1,14 @@
 "use client";
 
 import { useRef, useState } from "react";
+import { Loader2, Send } from "lucide-react";
 import TrackPanel, { type TimelineItem, type TrackRound } from "@/components/eventStream";
 import { streamChat, type ChatEvent, type ChatMode, type Role } from "@/lib/api";
 import { SLOT_LABEL } from "@/lib/labels";
+import { Button } from "@/components/ui/button";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
+import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
 // 对比实验台：同题并发打两条链路——A 轨 mode=auto（级联路由 + 固定 workflow）、
 // B 轨 mode=react（ReAct 引擎自主组合工具）。两轨 session 隔离：办理流程的槽位/确认
@@ -32,6 +37,11 @@ function uuid(): string {
     ? crypto.randomUUID()
     : `s-${Date.now()}`;
 }
+
+const ROLE_OPTIONS: { value: Role; label: string }[] = [
+  { value: "student", label: "学生身份" },
+  { value: "counselor", label: "辅导员身份" },
+];
 
 export default function Compare() {
   const [input, setInput] = useState("");
@@ -164,120 +174,135 @@ export default function Compare() {
   const bothDone = ra?.done && rb?.done && !running;
 
   return (
-    <main className="page wide">
-      <header className="header">
-        <div className="logo" aria-hidden>
-          较
+    <main className="h-full overflow-y-auto">
+      <div className="mx-auto w-full max-w-6xl space-y-5 px-4 py-6">
+        <header className="flex flex-wrap items-center gap-3">
+          <div className="min-w-0 flex-1">
+            <h1 className="text-lg font-semibold">对比实验台</h1>
+            <p className="text-sm text-muted-foreground">
+              同一问题并发两条链路：级联路由 + 固定 workflow ↔ ReAct 自主组合工具
+            </p>
+          </div>
+          <Select value={role} onValueChange={(v) => setRole(v as Role)}>
+            <SelectTrigger className="h-9 w-30 shrink-0" aria-label="演示身份（权限不同）">
+              <SelectValue>{ROLE_OPTIONS.find((o) => o.value === role)?.label}</SelectValue>
+            </SelectTrigger>
+            <SelectContent>
+              {ROLE_OPTIONS.map((o) => (
+                <SelectItem key={o.value} value={o.value}>
+                  {o.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </header>
+
+        <div className="space-y-2">
+          <div className="flex items-end gap-2 rounded-2xl border bg-card p-2 shadow-xs focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/20">
+            <textarea
+              value={input}
+              placeholder="输入问题，Enter 同题双发，Shift+Enter 换行"
+              rows={1}
+              className="max-h-40 min-h-9 flex-1 resize-none border-0 bg-transparent px-2 py-2 text-sm outline-none placeholder:text-muted-foreground"
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+                  e.preventDefault();
+                  send();
+                }
+              }}
+            />
+            <Button onClick={() => send()} disabled={running || !input.trim()} className="h-9 shrink-0">
+              {running ? <Loader2 className="animate-spin" aria-hidden /> : <Send aria-hidden />}
+              {running ? "运行中…" : "同题双发"}
+            </Button>
+          </div>
+          <div className="flex flex-wrap gap-2">
+            {SUGGESTIONS.map((s) => (
+              <button
+                key={s}
+                onClick={() => send(s)}
+                disabled={running}
+                className="rounded-full border bg-card px-3 py-1 text-xs text-muted-foreground transition-colors hover:border-primary/40 hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
+              >
+                {s}
+              </button>
+            ))}
+          </div>
         </div>
-        <div className="header-main">
-          <h1>对比实验台</h1>
-          <p className="tagline">
-            同一问题并发两条链路：级联路由 + 固定 workflow ↔ ReAct 自主组合工具
-          </p>
+
+        <div className="grid gap-4 md:grid-cols-2">
+          <TrackPanel
+            tag="A"
+            title="级联路由 + 固定 workflow"
+            note="mode=auto：L0 规则快路径 → L1 小模型五分类 → L2 主模型复核；路由决定后续固定链路"
+            round={ra}
+            busy={a.busy}
+            onConfirm={() => void run("a", "确认")}
+            onCancel={() => void run("a", "取消")}
+          />
+          <TrackPanel
+            tag="B"
+            title="ReAct 自主组合工具"
+            note="mode=react：路由事件仅参考，实际由模型每轮自主决定调用哪个工具（🔧），写操作仍走确认流"
+            round={rb}
+            busy={b.busy}
+            onConfirm={() => void run("b", "确认")}
+            onCancel={() => void run("b", "取消")}
+          />
         </div>
-        <select
-          className="role-select"
-          value={role}
-          onChange={(e) => setRole(e.target.value as Role)}
-          title="演示身份（权限不同）"
-        >
-          <option value="student">学生身份</option>
-          <option value="counselor">辅导员身份</option>
-        </select>
-      </header>
 
-      <div className="inputbar compare-bar">
-        <textarea
-          value={input}
-          placeholder="输入问题，Enter 同题双发，Shift+Enter 换行"
-          rows={1}
-          onChange={(e) => setInput(e.target.value)}
-          onKeyDown={(e) => {
-            if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
-              e.preventDefault();
-              send();
-            }
-          }}
-        />
-        <button onClick={() => send()} disabled={running || !input.trim()}>
-          {running ? "运行中…" : "同题双发"}
-        </button>
+        {bothDone && ra && rb && (
+          <Card aria-label="两轨差异摘要">
+            <CardHeader>
+              <CardTitle className="text-sm">本轮差异</CardTitle>
+              <CardDescription>前端只呈现事实；同数据集的量化对比见 eval/reports/。</CardDescription>
+            </CardHeader>
+            <CardContent>
+              <Table>
+                <TableHeader>
+                  <TableRow>
+                    <TableHead className="w-28"></TableHead>
+                    <TableHead>A · 级联 workflow</TableHead>
+                    <TableHead>B · ReAct</TableHead>
+                  </TableRow>
+                </TableHeader>
+                <TableBody>
+                  <TableRow>
+                    <TableCell className="font-medium">路由判定</TableCell>
+                    <TableCell title={ra.reason}>
+                      {ra.route} · {ra.reason}
+                    </TableCell>
+                    <TableCell title={rb.reason}>
+                      {rb.route}（参考） · 实际 ReAct
+                    </TableCell>
+                  </TableRow>
+                  <TableRow>
+                    <TableCell className="font-medium">事件数</TableCell>
+                    <TableCell>{ra.eventCount}</TableCell>
+                    <TableCell>{rb.eventCount}</TableCell>
+                  </TableRow>
+                  <TableRow>
+                    <TableCell className="font-medium">耗时</TableCell>
+                    <TableCell>{ra.latency ?? 0} ms</TableCell>
+                    <TableCell>{rb.latency ?? 0} ms</TableCell>
+                  </TableRow>
+                  <TableRow>
+                    <TableCell className="font-medium">引用来源</TableCell>
+                    <TableCell>{ra.citations.length} 条</TableCell>
+                    <TableCell>{rb.citations.length} 条</TableCell>
+                  </TableRow>
+                </TableBody>
+              </Table>
+            </CardContent>
+          </Card>
+        )}
+
+        <footer className="pb-4 text-center text-[11px] text-muted-foreground">
+          两轨会话隔离（独立 session_id），B 轨确认办理不影响 A 轨 ·
+          演示语料为虚构「钱塘大学」合成数据
+        </footer>
       </div>
-      <div className="suggestions">
-        {SUGGESTIONS.map((s) => (
-          <button key={s} className="chip" onClick={() => send(s)} disabled={running}>
-            {s}
-          </button>
-        ))}
-      </div>
-
-      <div className="tracks">
-        <TrackPanel
-          tag="A"
-          title="级联路由 + 固定 workflow"
-          note="mode=auto：L0 规则快路径 → L1 小模型五分类 → L2 主模型复核；路由决定后续固定链路"
-          round={ra}
-          busy={a.busy}
-          onConfirm={() => void run("a", "确认")}
-          onCancel={() => void run("a", "取消")}
-        />
-        <TrackPanel
-          tag="B"
-          title="ReAct 自主组合工具"
-          note="mode=react：路由事件仅参考，实际由模型每轮自主决定调用哪个工具（🔧），写操作仍走确认流"
-          round={rb}
-          busy={b.busy}
-          onConfirm={() => void run("b", "确认")}
-          onCancel={() => void run("b", "取消")}
-        />
-      </div>
-
-      {bothDone && ra && rb && (
-        <section className="diff" aria-label="两轨差异摘要">
-          <h2>本轮差异</h2>
-          <table>
-            <thead>
-              <tr>
-                <th></th>
-                <th>A · 级联 workflow</th>
-                <th>B · ReAct</th>
-              </tr>
-            </thead>
-            <tbody>
-              <tr>
-                <th>路由判定</th>
-                <td title={ra.reason}>
-                  {ra.route} · {ra.reason}
-                </td>
-                <td title={rb.reason}>
-                  {rb.route}（参考） · 实际 ReAct
-                </td>
-              </tr>
-              <tr>
-                <th>事件数</th>
-                <td>{ra.eventCount}</td>
-                <td>{rb.eventCount}</td>
-              </tr>
-              <tr>
-                <th>耗时</th>
-                <td>{ra.latency ?? 0} ms</td>
-                <td>{rb.latency ?? 0} ms</td>
-              </tr>
-              <tr>
-                <th>引用来源</th>
-                <td>{ra.citations.length} 条</td>
-                <td>{rb.citations.length} 条</td>
-              </tr>
-            </tbody>
-          </table>
-          <p className="diff-note">前端只呈现事实；同数据集的量化对比见 eval/reports/。</p>
-        </section>
-      )}
-
-      <footer className="footer">
-        两轨会话隔离（独立 session_id），B 轨确认办理不影响 A 轨 ·
-        演示语料为虚构「钱塘大学」合成数据
-      </footer>
     </main>
   );
 }

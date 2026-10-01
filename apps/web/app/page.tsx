@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { Info, Loader2, Send, Sparkles, TriangleAlert } from "lucide-react";
 import {
   API_BASE,
   fetchHealth,
@@ -15,7 +16,20 @@ import {
   type Role,
   type Step,
 } from "@/lib/api";
-import { DONE_BADGE, ROUTE_LABEL, SLOT_LABEL } from "@/lib/labels";
+import Answer from "@/components/answer";
+import {
+  CitationsRow,
+  ConfirmCard,
+  DoneMeta,
+  ReceiptAlert,
+  ResearchTrace,
+  RouteBadge,
+  SlotCard,
+  StatusLine,
+} from "@/components/message-parts";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Button } from "@/components/ui/button";
+import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 interface Msg {
   role: "user" | "assistant";
@@ -33,6 +47,17 @@ interface Msg {
   error?: string;
   done: boolean;
 }
+
+const ROLE_OPTIONS: { value: Role; label: string }[] = [
+  { value: "student", label: "学生身份" },
+  { value: "counselor", label: "辅导员身份" },
+];
+const MODE_OPTIONS: { value: ChatMode; label: string }[] = [
+  { value: "auto", label: "自动路由" },
+  { value: "direct", label: "强制直答" },
+  { value: "research", label: "强制研究" },
+  { value: "react", label: "ReAct 自主编排" },
+];
 
 const SUGGESTIONS = [
   "帮我预约明天晚上的羽毛球馆打班级比赛",
@@ -151,189 +176,162 @@ export default function Home() {
   }
 
   return (
-    <main className="page">
-      <header className="header">
-        <div className="logo" aria-hidden>
-          格
-        </div>
-        <div className="header-main">
-          <h1>格物</h1>
-          <p className="tagline">
-            钱塘大学校园智能问答 · RAG 直答 × Deep Research × 业务办理
-            {health && (
-              <span className="stat">
-                {health.docs} 篇文档 / {health.chunks} chunks
-              </span>
-            )}
-          </p>
-        </div>
-        <select
-          className="role-select"
-          value={role}
-          onChange={(e) => setRole(e.target.value as Role)}
-          title="演示身份（权限不同）"
-        >
-          <option value="student">学生身份</option>
-          <option value="counselor">辅导员身份</option>
-        </select>
-      </header>
-
+    <main className="flex h-full flex-col">
       {health && !health.llm && (
-        <div className="banner">
-          检索演示模式：未配置 LLM_API_KEY。知识问答展示检索节选；业务办理走完整流程（槽位收集 → 确认 → 回执）。
+        <div className="mx-auto w-full max-w-3xl space-y-2 px-4 pt-3">
+          <Alert className="py-2.5">
+            <Info className="size-4" aria-hidden />
+            <AlertDescription>
+              检索演示模式：未配置 LLM_API_KEY。知识问答展示检索节选；业务办理走完整流程（槽位收集 → 确认 → 回执）。
+            </AlertDescription>
+          </Alert>
         </div>
       )}
-      {!health && <div className="banner warn">连不上后端（{API_BASE}），请先启动 API 服务。</div>}
+      {!health && (
+        <div className="mx-auto w-full max-w-3xl space-y-2 px-4 pt-3">
+          <Alert variant="destructive" className="py-2.5">
+            <TriangleAlert className="size-4" aria-hidden />
+            <AlertDescription>连不上后端（{API_BASE}），请先启动 API 服务。</AlertDescription>
+          </Alert>
+        </div>
+      )}
 
-      <section className="chat" aria-label="对话区">
-        {messages.length === 0 && (
-          <div className="empty">
-            <p>问校园政策，或者直接办事——预约场馆、提交请假。</p>
-            <p className="hint">
-              办理类请求会经过：槽位收集 → 确认摘要 → 执行 → 回执；写操作必须确认后才会执行。
-            </p>
-          </div>
-        )}
-
-        {messages.map((msg, i) =>
-          msg.role === "user" ? (
-            <div key={i} className="row user">
-              <div className="bubble user">{msg.text}</div>
-            </div>
-          ) : (
-            <div key={i} className="row assistant">
-              <div className="bubble assistant">
-                {msg.route && (
-                  <span className={`badge ${msg.route}`} title={msg.reason}>
-                    {ROUTE_LABEL[msg.route] ?? msg.route}
-                  </span>
-                )}
-                {msg.steps.length > 0 && (
-                  <details className="trace" open={!msg.done}>
-                    <summary>研究过程 · {msg.steps.length} 个子问题</summary>
-                    <ol>
-                      {msg.steps.map((s) => (
-                        <li key={s.index}>
-                          <span className="subq">{s.subquestion}</span>
-                          {s.sources.length > 0 && (
-                            <span className="src"> ↳ {s.sources.join("、")}</span>
-                          )}
-                        </li>
-                      ))}
-                    </ol>
-                  </details>
-                )}
-                {msg.status && <p className="status">{msg.status}</p>}
-                {msg.slotQ && (
-                  <div className="slot-card" title={`slot_question: ${msg.slotQ.slot}`}>
-                    <span className="slot-tag">待补充</span>
-                    {SLOT_LABEL[msg.slotQ.slot] ?? msg.slotQ.slot}
-                  </div>
-                )}
-                {msg.text && <p className="answer">{msg.text}</p>}
-                {!msg.text && !msg.status && msg.steps.length === 0 && !msg.done && (
-                  <p className="status">思考中…</p>
-                )}
-
-                {msg.pendingAction && !msg.actionResult && msg.done && (
-                  <div className="confirm-card">
-                    <div className="confirm-title">待确认 · {msg.pendingAction.label}</div>
-                    <dl className="args">
-                      {Object.entries(msg.pendingAction.args).map(([k, v]) => (
-                        <div key={k}>
-                          <dt>{k}</dt>
-                          <dd>{v}</dd>
-                        </div>
-                      ))}
-                    </dl>
-                    <div className="confirm-buttons">
-                      <button className="primary" onClick={() => send("确认")} disabled={sending}>
-                        确认办理
-                      </button>
-                      <button onClick={() => send("取消")} disabled={sending}>
-                        取消
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-                {msg.actionResult && (
-                  <div className={`receipt ${msg.actionResult.success ? "ok" : "fail"}`}>
-                    <span>{msg.actionResult.success ? "✔" : "✖"}</span>
-                    <span>
-                      {msg.actionResult.message}
-                      {msg.actionResult.success && msg.actionResult.receipt
-                        ? `（凭证号 ${msg.actionResult.receipt}）`
-                        : ""}
-                    </span>
-                  </div>
-                )}
-
-                {msg.citations.length > 0 && (
-                  <div className="citations">
-                    <span className="cite-title">引用来源</span>
-                    {msg.citations.map((c) => (
-                      <span key={c.n} className="cite-chip" title={c.doc_id}>
-                        [{c.n}] {c.title} · {c.source}
-                      </span>
-                    ))}
-                  </div>
-                )}
-                {msg.error && <p className="error">出错了：{msg.error}</p>}
-                {msg.done && (
-                  <span className="meta">
-                    {msg.latency != null && <span className="latency">{msg.latency} ms</span>}
-                    {msg.doneReason &&
-                      DONE_BADGE[msg.doneReason] &&
-                      (() => {
-                        const b = DONE_BADGE[msg.doneReason]!;
-                        return <span className={`done-badge ${b.cls}`}>{b.text}</span>;
-                      })()}
-                  </span>
-                )}
+      <section aria-label="对话区" className="min-h-0 flex-1 overflow-y-auto">
+        <div className="mx-auto w-full max-w-3xl space-y-4 px-4 py-6">
+          {messages.length === 0 && (
+            <div className="flex flex-col items-center gap-3 pt-16 text-center">
+              <div
+                className="flex size-14 items-center justify-center rounded-2xl bg-gradient-to-br from-cyan-600 to-teal-700 text-2xl font-semibold text-white shadow-md"
+                aria-hidden
+              >
+                格
               </div>
+              <p className="text-lg font-medium">问校园政策，或者直接办事——预约场馆、提交请假。</p>
+              <p className="max-w-md text-sm text-muted-foreground">
+                办理类请求会经过：槽位收集 → 确认摘要 → 执行 → 回执；写操作必须确认后才会执行。
+              </p>
             </div>
-          ),
-        )}
-        <div ref={bottomRef} />
+          )}
+
+          {messages.map((msg, i) =>
+            msg.role === "user" ? (
+              <div key={i} className="flex justify-end">
+                <div className="max-w-[85%] rounded-2xl rounded-br-sm bg-primary px-4 py-2.5 text-sm leading-relaxed text-primary-foreground">
+                  {msg.text}
+                </div>
+              </div>
+            ) : (
+              <div key={i} className="flex items-start gap-2.5">
+                <div
+                  className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary"
+                  aria-hidden
+                >
+                  <Sparkles className="size-4" />
+                </div>
+                <div className="min-w-0 flex-1 space-y-2.5 rounded-2xl rounded-tl-sm border bg-card px-4 py-3 shadow-xs">
+                  <div className="flex flex-wrap items-center gap-2">
+                    {msg.route && <RouteBadge route={msg.route} reason={msg.reason} />}
+                  </div>
+                  <ResearchTrace steps={msg.steps} defaultOpen={!msg.done} />
+                  {msg.status && <StatusLine text={msg.status} />}
+                  {msg.slotQ && <SlotCard slot={msg.slotQ.slot} />}
+                  {msg.text && <Answer text={msg.text} />}
+                  {!msg.text && !msg.status && msg.steps.length === 0 && !msg.done && (
+                    <StatusLine text="思考中…" />
+                  )}
+
+                  {msg.pendingAction && !msg.actionResult && msg.done && (
+                    <ConfirmCard
+                      pending={msg.pendingAction}
+                      onConfirm={() => send("确认")}
+                      onCancel={() => send("取消")}
+                      disabled={sending}
+                    />
+                  )}
+
+                  {msg.actionResult && <ReceiptAlert result={msg.actionResult} />}
+
+                  <CitationsRow citations={msg.citations} withSource />
+                  {msg.error && (
+                    <Alert variant="destructive" className="py-2.5">
+                      <TriangleAlert className="size-4" aria-hidden />
+                      <AlertDescription>出错了：{msg.error}</AlertDescription>
+                    </Alert>
+                  )}
+                  {msg.done && (
+                    <DoneMeta latency={msg.latency} doneReason={msg.doneReason} />
+                  )}
+                </div>
+              </div>
+            ),
+          )}
+          <div ref={bottomRef} />
+        </div>
       </section>
 
-      <div className="composer">
-        <div className="suggestions">
-          {SUGGESTIONS.map((s) => (
-            <button key={s} className="chip" onClick={() => send(s)} disabled={sending}>
-              {s}
-            </button>
-          ))}
-        </div>
-        <div className="inputbar">
-          <select value={mode} onChange={(e) => setMode(e.target.value as ChatMode)} aria-label="回答模式">
-            <option value="auto">自动路由</option>
-            <option value="direct">强制直答</option>
-            <option value="research">强制研究</option>
-            <option value="react">ReAct 自主编排</option>
-          </select>
-          <textarea
-            value={input}
-            placeholder="输入你的问题，Enter 发送，Shift+Enter 换行"
-            rows={1}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={(e) => {
-              if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
-                e.preventDefault();
-                send();
-              }
-            }}
-          />
-          <button onClick={() => send()} disabled={sending || !input.trim()}>
-            {sending ? "处理中…" : "发送"}
-          </button>
+      <div className="shrink-0 border-t bg-background">
+        <div className="mx-auto w-full max-w-3xl space-y-2 px-4 py-3">
+          <div className="flex flex-wrap gap-2">
+            {SUGGESTIONS.map((s) => (
+              <button
+                key={s}
+                onClick={() => send(s)}
+                disabled={sending}
+                className="rounded-full border bg-card px-3 py-1 text-xs text-muted-foreground transition-colors hover:border-primary/40 hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
+              >
+                {s}
+              </button>
+            ))}
+          </div>
+          <div className="flex items-end gap-2 rounded-2xl border bg-card p-2 shadow-xs focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/20">
+            <Select value={role} onValueChange={(v) => setRole(v as Role)}>
+              <SelectTrigger className="h-9 w-27 shrink-0" aria-label="演示身份（权限不同）">
+                <SelectValue>{ROLE_OPTIONS.find((o) => o.value === role)?.label}</SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                {ROLE_OPTIONS.map((o) => (
+                  <SelectItem key={o.value} value={o.value}>
+                    {o.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <Select value={mode} onValueChange={(v) => setMode(v as ChatMode)}>
+              <SelectTrigger className="h-9 w-31 shrink-0" aria-label="回答模式">
+                <SelectValue>{MODE_OPTIONS.find((o) => o.value === mode)?.label}</SelectValue>
+              </SelectTrigger>
+              <SelectContent>
+                {MODE_OPTIONS.map((o) => (
+                  <SelectItem key={o.value} value={o.value}>
+                    {o.label}
+                  </SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+            <textarea
+              value={input}
+              placeholder="输入你的问题，Enter 发送，Shift+Enter 换行"
+              rows={1}
+              className="max-h-40 min-h-9 flex-1 resize-none border-0 bg-transparent px-1 py-2 text-sm outline-none placeholder:text-muted-foreground"
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
+                  e.preventDefault();
+                  send();
+                }
+              }}
+            />
+            <Button onClick={() => send()} disabled={sending || !input.trim()} className="h-9 shrink-0">
+              {sending ? <Loader2 className="animate-spin" aria-hidden /> : <Send aria-hidden />}
+              {sending ? "处理中…" : "发送"}
+            </Button>
+          </div>
         </div>
       </div>
 
-      <footer className="footer">
-        演示语料与业务系统均为虚构的「钱塘大学」合成数据，与任何真实高校无关 ·
-        格物 Gewu 是开源的个人求职展示项目
+      <footer className="shrink-0 px-4 pb-2 text-center text-[11px] text-muted-foreground">
+        {health ? `${health.docs} 篇文档 / ${health.chunks} chunks · ` : ""}
+        演示语料与业务系统均为虚构的「钱塘大学」合成数据 · 格物 Gewu 是开源的个人求职展示项目
       </footer>
     </main>
   );

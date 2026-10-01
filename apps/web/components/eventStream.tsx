@@ -1,7 +1,19 @@
 "use client";
 
+import { ArrowRight, CircleAlert, Loader2, Search, SquarePen, Wrench } from "lucide-react";
 import type { ActionResult, Citation, DoneReason, PendingAction } from "@/lib/api";
-import { DONE_BADGE, ROUTE_LABEL } from "@/lib/labels";
+import Answer from "@/components/answer";
+import {
+  CitationsRow,
+  ConfirmCard,
+  DoneMeta,
+  ReceiptAlert,
+  RouteBadge,
+  StatusLine,
+} from "@/components/message-parts";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 
 /** 时间线条目：status / step / slot_question / action_result 的顺序化呈现。 */
 export interface TimelineItem {
@@ -27,31 +39,41 @@ export interface TrackRound {
   eventCount: number;
 }
 
-const KIND_ICON: Record<TimelineItem["kind"], string> = {
-  status: "·",
-  step: "？",
-  slot: "▢",
-  result: "→",
-};
+const KIND_ICON = {
+  status: Loader2,
+  step: Search,
+  slot: SquarePen,
+  result: ArrowRight,
+} as const;
 
 /** ReAct 引擎的工具调用只经 status 文本（`调用工具 X…`）可见，渲染为工具 chip。 */
 const TOOL_RE = /^调用工具 (\S+?)…$/;
 
 function TimelineRow({ item }: { item: TimelineItem }) {
   const tool = item.kind === "status" ? item.text.match(TOOL_RE)?.[1] : undefined;
+  const Icon = KIND_ICON[item.kind];
   return (
-    <li className={`tl-item ${item.kind}`}>
-      <span className="tl-icon" aria-hidden>
-        {KIND_ICON[item.kind]}
-      </span>
+    <li className="flex items-start gap-2 text-sm">
+      <Icon
+        className={
+          "mt-1 size-3.5 shrink-0 text-muted-foreground " +
+          (item.kind === "status" && !tool ? "animate-spin" : "")
+        }
+        aria-hidden
+      />
       {tool ? (
-        <span className="tool-chip" title="ReAct 工具调用">
-          🔧 {tool}
-        </span>
+        <Badge variant="outline" className="gap-1 py-0 font-mono text-xs font-normal">
+          <Wrench className="size-3" aria-hidden />
+          {tool}
+        </Badge>
       ) : (
-        <span className="tl-text">{item.text}</span>
+        <span className="min-w-0 break-words">{item.text}</span>
       )}
-      {item.detail && <span className="tl-detail">{item.detail}</span>}
+      {item.detail && (
+        <span className="ml-auto hidden shrink-0 text-xs text-muted-foreground sm:inline">
+          {item.detail}
+        </span>
+      )}
     </li>
   );
 }
@@ -77,93 +99,61 @@ export default function TrackPanel({
   onCancel: () => void;
 }) {
   return (
-    <section className="track" aria-label={title}>
-      <header className="track-head">
-        <span className="track-tag">{tag}</span>
-        <div>
-          <h2>{title}</h2>
-          {note && <p className="track-note">{note}</p>}
-        </div>
-        {round?.route && (
-          <span className={`badge ${round.route}`} title={round.reason} style={{ marginLeft: "auto" }}>
-            {ROUTE_LABEL[round.route] ?? round.route}
-          </span>
-        )}
-      </header>
-
-      {!round && !busy && <p className="track-empty">等待提问…</p>}
-      {round && (
-        <>
-          <p className="round-q">{round.question}</p>
-          {round.timeline.length > 0 && (
-            <ol className="timeline">
-              {round.timeline.map((item, i) => (
-                <TimelineRow key={i} item={item} />
-              ))}
-            </ol>
-          )}
-          {!round.done && busy && <p className="status">运行中…</p>}
-          {round.answer && <p className="answer">{round.answer}</p>}
-
-          {round.pendingAction && !round.actionResult && round.done && (
-            <div className="confirm-card">
-              <div className="confirm-title">待确认 · {round.pendingAction.label}</div>
-              <dl className="args">
-                {Object.entries(round.pendingAction.args).map(([k, v]) => (
-                  <div key={k}>
-                    <dt>{k}</dt>
-                    <dd>{v}</dd>
-                  </div>
-                ))}
-              </dl>
-              <div className="confirm-buttons">
-                <button className="primary" onClick={onConfirm} disabled={busy}>
-                  确认办理（本轨）
-                </button>
-                <button onClick={onCancel} disabled={busy}>
-                  取消
-                </button>
-              </div>
-            </div>
-          )}
-
-          {round.actionResult && (
-            <div className={`receipt ${round.actionResult.success ? "ok" : "fail"}`}>
-              <span>{round.actionResult.success ? "✔" : "✖"}</span>
-              <span>
-                {round.actionResult.message}
-                {round.actionResult.success && round.actionResult.receipt
-                  ? `（凭证号 ${round.actionResult.receipt}）`
-                  : ""}
-              </span>
-            </div>
-          )}
-
-          {round.citations.length > 0 && (
-            <div className="citations">
-              <span className="cite-title">引用</span>
-              {round.citations.map((c) => (
-                <span key={c.n} className="cite-chip" title={c.doc_id}>
-                  [{c.n}] {c.title}
-                </span>
-              ))}
-            </div>
-          )}
-          {round.error && <p className="error">出错了：{round.error}</p>}
-          {round.done && (
-            <span className="meta">
-              <span className="latency">{round.latency ?? 0} ms</span>
-              <span className="latency">· {round.eventCount} 事件</span>
-              {round.doneReason &&
-                DONE_BADGE[round.doneReason] &&
-                (() => {
-                  const b = DONE_BADGE[round.doneReason]!;
-                  return <span className={`done-badge ${b.cls}`}>{b.text}</span>;
-                })()}
+    <Card className="gap-4" aria-label={title}>
+      <CardHeader>
+        <CardTitle className="flex items-center gap-2 text-sm">
+          <Badge variant={tag === "A" ? "default" : "secondary"}>{tag}</Badge>
+          {title}
+          {round?.route && (
+            <span className="ml-auto">
+              <RouteBadge route={round.route} reason={round.reason} />
             </span>
           )}
-        </>
-      )}
-    </section>
+        </CardTitle>
+        {note && <p className="text-xs leading-relaxed text-muted-foreground">{note}</p>}
+      </CardHeader>
+      <CardContent className="space-y-3">
+        {!round && !busy && <p className="text-sm text-muted-foreground">等待提问…</p>}
+        {round && (
+          <>
+            <p className="rounded-lg bg-muted px-3 py-2 text-sm font-medium">{round.question}</p>
+            {round.timeline.length > 0 && (
+              <ol className="space-y-1.5">
+                {round.timeline.map((item, i) => (
+                  <TimelineRow key={i} item={item} />
+                ))}
+              </ol>
+            )}
+            {!round.done && busy && <StatusLine text="运行中…" />}
+            {round.answer && <Answer text={round.answer} />}
+
+            {round.pendingAction && !round.actionResult && round.done && (
+              <ConfirmCard
+                pending={round.pendingAction}
+                confirmLabel="确认办理（本轨）"
+                onConfirm={onConfirm}
+                onCancel={onCancel}
+                disabled={busy}
+              />
+            )}
+
+            {round.actionResult && <ReceiptAlert result={round.actionResult} />}
+
+            <CitationsRow citations={round.citations} />
+            {round.error && (
+              <Alert variant="destructive" className="py-2.5">
+                <CircleAlert className="size-4" aria-hidden />
+                <AlertDescription>出错了：{round.error}</AlertDescription>
+              </Alert>
+            )}
+            {round.done && (
+              <DoneMeta latency={round.latency} doneReason={round.doneReason}>
+                <span className="font-mono">{round.eventCount} 事件</span>
+              </DoneMeta>
+            )}
+          </>
+        )}
+      </CardContent>
+    </Card>
   );
 }

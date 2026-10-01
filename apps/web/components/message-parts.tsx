@@ -1,0 +1,203 @@
+"use client";
+
+import {
+  BookMarked,
+  CheckCircle2,
+  ChevronRight,
+  Loader2,
+  XCircle,
+} from "lucide-react";
+import type { ActionResult, Citation, DoneReason, PendingAction, Step } from "@/lib/api";
+import { DONE_BADGE, ROUTE_LABEL, SLOT_LABEL } from "@/lib/labels";
+import { cn } from "@/lib/utils";
+import { Alert, AlertDescription } from "@/components/ui/alert";
+import { Badge } from "@/components/ui/badge";
+import { Button } from "@/components/ui/button";
+import {
+  Card,
+  CardContent,
+  CardFooter,
+  CardHeader,
+  CardTitle,
+} from "@/components/ui/card";
+import {
+  Collapsible,
+  CollapsibleContent,
+  CollapsibleTrigger,
+} from "@/components/ui/collapsible";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
+
+/** 聊天主页与 compare 轨道共用的消息积木：路由徽章 / 研究过程 / 槽位卡 /
+ * 确认卡 / 回执 / 引用 / 结束元信息。纯展示，不含任何数据流。 */
+
+const ROUTE_VARIANT: Record<string, "default" | "secondary" | "outline" | "destructive"> = {
+  factual: "secondary",
+  research: "default",
+  refusal: "outline",
+  transaction: "secondary",
+  hybrid: "default",
+};
+
+export function RouteBadge({ route, reason }: { route: string; reason?: string }) {
+  return (
+    <Badge variant={ROUTE_VARIANT[route] ?? "secondary"} title={reason}>
+      {ROUTE_LABEL[route] ?? route}
+    </Badge>
+  );
+}
+
+export function StatusLine({ text }: { text: string }) {
+  return (
+    <p className="flex items-center gap-2 text-sm text-muted-foreground">
+      <Loader2 className="size-3.5 animate-spin" aria-hidden />
+      {text}
+    </p>
+  );
+}
+
+export function ResearchTrace({ steps, defaultOpen }: { steps: Step[]; defaultOpen: boolean }) {
+  if (steps.length === 0) return null;
+  return (
+    <Collapsible defaultOpen={defaultOpen}>
+      <CollapsibleTrigger className="group/trace flex items-center gap-1 rounded-md text-xs font-medium text-muted-foreground transition-colors hover:text-foreground">
+        <ChevronRight className="size-3.5 transition-transform group-data-[panel-open]/trace:rotate-90" aria-hidden />
+        研究过程 · {steps.length} 个子问题
+      </CollapsibleTrigger>
+      <CollapsibleContent>
+        <ol className="mt-1.5 space-y-1 border-l pl-4 text-sm">
+          {steps.map((s) => (
+            <li key={s.index} className="relative">
+              <span className="absolute top-[0.55em] -left-[21px] size-1.5 rounded-full bg-muted-foreground/40" aria-hidden />
+              <span className="font-medium">{s.subquestion}</span>
+              {s.sources.length > 0 && (
+                <span className="block text-xs text-muted-foreground">↳ {s.sources.join("、")}</span>
+              )}
+            </li>
+          ))}
+        </ol>
+      </CollapsibleContent>
+    </Collapsible>
+  );
+}
+
+export function SlotCard({ slot }: { slot: string }) {
+  return (
+    <div
+      className="inline-flex items-center gap-2 rounded-lg border border-dashed px-3 py-1.5 text-sm"
+      title={`slot_question: ${slot}`}
+    >
+      <Badge variant="secondary">待补充</Badge>
+      {SLOT_LABEL[slot] ?? slot}
+    </div>
+  );
+}
+
+export function ConfirmCard({
+  pending,
+  confirmLabel = "确认办理",
+  onConfirm,
+  onCancel,
+  disabled,
+}: {
+  pending: PendingAction;
+  confirmLabel?: string;
+  onConfirm: () => void;
+  onCancel: () => void;
+  disabled?: boolean;
+}) {
+  return (
+    <Card className="gap-3 py-4">
+      <CardHeader>
+        <CardTitle className="text-sm">
+          待确认 · {pending.label}
+          <span className="ml-2 font-mono text-xs font-normal text-muted-foreground">{pending.tool}</span>
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        <dl className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-1 text-sm">
+          {Object.entries(pending.args).map(([k, v]) => (
+            <div key={k} className="col-span-2 grid grid-cols-subgrid">
+              <dt className="text-muted-foreground">{k}</dt>
+              <dd className="break-words font-medium">{v}</dd>
+            </div>
+          ))}
+        </dl>
+      </CardContent>
+      <CardFooter className="gap-2">
+        <Button onClick={onConfirm} disabled={disabled}>{confirmLabel}</Button>
+        <Button variant="outline" onClick={onCancel} disabled={disabled}>
+          取消
+        </Button>
+      </CardFooter>
+    </Card>
+  );
+}
+
+export function ReceiptAlert({ result }: { result: ActionResult }) {
+  const ok = result.success;
+  return (
+    <Alert variant={ok ? "default" : "destructive"} className="items-center py-2">
+      {ok ? (
+        <CheckCircle2 className="size-4 text-emerald-600 dark:text-emerald-400" aria-hidden />
+      ) : (
+        <XCircle className="size-4" aria-hidden />
+      )}
+      <AlertDescription className={cn(ok && "text-foreground")}>
+        {result.message}
+        {ok && result.receipt ? `（凭证号 ${result.receipt}）` : ""}
+      </AlertDescription>
+    </Alert>
+  );
+}
+
+export function CitationsRow({ citations, withSource }: { citations: Citation[]; withSource?: boolean }) {
+  if (citations.length === 0) return null;
+  return (
+    <div className="flex flex-wrap items-center gap-1.5">
+      <span className="mr-1 inline-flex items-center gap-1 text-xs text-muted-foreground">
+        <BookMarked className="size-3.5" aria-hidden />
+        引用来源
+      </span>
+      {citations.map((c) => (
+        <Tooltip key={c.n}>
+          <TooltipTrigger render={
+            <Badge variant="secondary" className="max-w-72 truncate font-normal">
+              [{c.n}] {c.title}{withSource ? ` · ${c.source}` : ""}
+            </Badge>
+          } />
+          <TooltipContent className="font-mono text-xs">{c.doc_id}</TooltipContent>
+        </Tooltip>
+      ))}
+    </div>
+  );
+}
+
+export function DoneMeta({
+  latency,
+  doneReason,
+  children,
+}: {
+  latency?: number;
+  doneReason?: DoneReason;
+  children?: React.ReactNode;
+}) {
+  const badge = doneReason ? DONE_BADGE[doneReason] : null;
+  return (
+    <span className="flex flex-wrap items-center gap-2 text-xs text-muted-foreground">
+      {latency != null && <span className="font-mono">{latency} ms</span>}
+      {children}
+      {badge && (
+        <Badge
+          variant={badge.cls === "fail" ? "destructive" : "outline"}
+          className={cn(badge.cls === "warn" && "border-amber-500/40 text-amber-700 dark:text-amber-400")}
+        >
+          {badge.text}
+        </Badge>
+      )}
+    </span>
+  );
+}
