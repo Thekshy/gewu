@@ -39,6 +39,31 @@ P21 起引入用户体系（邀请码封闭注册·内测），以下条目**修
   行为零变化；单号 `VE-XXXX/LV-XXXX` 形态不变。评测 harness 进程内直调编排层，
   不受 HTTP 认证影响。
 
+## 0.6 P22 会话与记忆契约（会话资源化）
+
+P22 起会话从「客户端自报的裸 uuid」升格为服务端资源，以下条目**修订**本文相应原文：
+
+- **新增会话五端点**（均需登录，本人视角；越权/不存在统一 404 防枚举）：
+  `POST /api/sessions`（可带 `{kind}` 缺省 chat，kind ∈ chat|compare →
+  `{session_id,title,kind,created_at,updated_at}`）、`GET /api/sessions?kind=`
+  （本人列表，updated_at 倒序）、`PATCH /api/sessions/{id}`（改名，title 1~60 字）、
+  `DELETE /api/sessions/{id}`（三处连带：checkpointer thread + memory_episodic +
+  chat_sessions 行；顺序先 cp 后业务行，悬空检查点无害）、
+  `GET /api/sessions/{id}/messages`（历史恢复：checkpointer state 的 messages
+  对话级提取——工具调用轮/ToolMessage/system 跳过；classic 链路不写 messages，
+  提取为空时退 memory_episodic 兜底）。
+- **chat session 语义变更（破坏性）**：`POST /api/chat` 的 `session_id` **必填**
+  且必须为已登记属本人的会话——未传 422 `{"detail":"session_id 不能为空（请先
+  POST /api/sessions 创建会话）"}`；未登记/他人会话 404 `{"detail":"会话不存在"}`。
+  `"default"` 缺省值废弃。每轮刷 updated_at；title 为空时首问前 20 字回填
+  （条件更新，用户改名后不再覆盖）。
+- **新增记忆三端点**（本人视角）：`GET /api/memory/facts`（全量，按 kind,key
+  排序）、`POST /api/memory/facts`（upsert `{kind,key,value}`，kind ∈
+  profile|preference|constraint，key ≤60 字、value ≤500 字）、
+  `DELETE /api/memory/facts?kind=&key=`（复合主键定位，不存在 404）。
+- **compare 双轨适配**：两轨首跑前各 `POST /api/sessions {kind:"compare"}`
+  取服务端下发 id（不入对话侧栏列表）。
+
 ## 1. 服务总览
 
 - 监听端口 `:8000`(HTTP)。
@@ -60,6 +85,14 @@ P21 起引入用户体系（邀请码封闭注册·内测），以下条目**修
 | POST | `/api/auth/login` | 登录（下发会话 cookie） |
 | POST | `/api/auth/logout` | 登出（会话即失效） |
 | GET | `/api/auth/me` | 当前登录用户 |
+| POST | `/api/sessions` | 创建会话（P22，服务端下发 session_id） |
+| GET | `/api/sessions?kind=` | 本人会话列表（P22） |
+| PATCH | `/api/sessions/{id}` | 会话改名（P22） |
+| DELETE | `/api/sessions/{id}` | 删会话（P22，三处连带） |
+| GET | `/api/sessions/{id}/messages` | 历史恢复（P22，对话级） |
+| GET | `/api/memory/facts` | 长期记忆事实列表（P22） |
+| POST | `/api/memory/facts` | 新增/覆盖事实（P22，upsert） |
+| DELETE | `/api/memory/facts?kind=&key=` | 删除事实（P22） |
 
 ### 2.1 GET /api/health
 
@@ -94,17 +127,19 @@ k/query 越界返回 422。【差异决定】FastAPI 的 pydantic 校验错误�
 {
   "question": "…",          // 必填,1~500 字
   "mode": "auto",           // auto | direct | research,缺省 auto
-  "session_id": "default",  // ≤64 字符,缺省 "default"
-  "role": "student"         // student | counselor,缺省 student
+  "session_id": "…",        // 必填(P22 起),≤64 字符;须为 POST /api/sessions 登记属本人的会话
+  "role": "student"         // P21 起废弃忽略(服务端 users.role 权威)
 }
 ```
 
 - `question` 超过 `MAX_QUESTION_CHARS`(500)→ 422 `{"detail":"问题过长"}`。
+- `session_id` 未传 → 422 指引「请先 POST /api/sessions 创建会话」;未登记/
+  他人会话 → 404 `{"detail":"会话不存在"}`(P22,缺省值 `"default"` 废弃)。
 - 预算耗尽 → 429 `{"detail":"今日 token 预算已用尽（上限 2000000），请明天再试"}`。
 - 正常 → SSE 流,`Content-Type: text/event-stream`,响应头含
   `Cache-Control: no-cache`、`X-Accel-Buffering: no`。
 - 每个事件格式:`data: {JSON}\n\n`(JSON 不转义非 ASCII 字符,即 UTF-8 原文输出)。
-- 服务内部用户标识:`demo-{role}`(评测直调时为 `eval-user`)。
+- 服务内部用户标识:`demo-{role}`(评测直调时为 `eval-user`)。P21 起为登录 email。
 
 ### 2.5 /api/business/*
 

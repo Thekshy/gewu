@@ -7,6 +7,7 @@ const ITEMS = [
   { href: "/", label: "对话" },
   { href: "/compare", label: "对比实验" },
   { href: "/console", label: "控制台" },
+  { href: "/memory", label: "记忆" },
 ];
 
 /** 全局顶栏导航：三视图 pill 切换，当前项高亮。 */

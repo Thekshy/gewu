@@ -82,6 +82,19 @@ P21 前 `role` 是 `/api/chat` 请求参数——任何人自称 counselor 即�
   `demo-{role}` 变为真实 email，跨会话记忆第一次真正按用户隔离。用户侧
   可见与可管理（面板 UI）属 P22。
 
+## P22 注记：归属锚点的两次扩展
+
+P22 在「身份是归属锚点」这条线上补了两块（详见 [07](07-state-persistence.md)
+会话资源化一节与 [PARITY](../PARITY.md) §0.6）：
+
+- **会话归属**：`chat_sessions."user"`=email，`/api/chat` 只认已登记属本人的
+  session_id（他人/不存在统一 404 防枚举）——与台账/记忆同一归属语义，会话
+  从客户端自报变服务端资源。
+- **记忆可管**：`/memory` 页 + `/api/memory/facts` 三端点把 `memory_fact`
+  从「黑盒注入」变「透明资产」（查看/编辑/删除/新增，upsert 同语义）；
+  防越权同样由复合主键含 user_id 保证。episodic 不做用户界面（随会话删除
+  连带清理，见任务书非目标）。
+
 ## business / memory 迁 PG（P21-2，闭 P13 遗留）
 
 两域自 SQLite 迁入同一 PG（接口签名/返回形状/权限语义零变化，只换驱动）：

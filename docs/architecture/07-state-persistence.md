@@ -6,10 +6,32 @@
 
 | 状态 | 存放 | 生命周期 | 失效 |
 | --- | --- | --- | --- |
-| 会话与办理流程（ChatState） | **PG checkpoints**（PostgresSaver） | 跨请求、跨进程重启 | thread 级；办理完成/取消时显式清 |
+| 会话与办理流程（ChatState） | **PG checkpoints**（PostgresSaver） | 跨请求、跨进程重启 | thread 级；办理完成/取消时显式清；P22 起随会话删除连带清 |
+| 会话登记（归属/标题/kind） | PG 表 `chat_sessions`（P22） | 跨请求、跨重启 | `DELETE /api/sessions/{id}` 三处连带之一 |
 | 业务数据（预约/请假单） | PG 表 `bookings`/`leave_tickets` | 永久（演示语义） | `/api/business/reset` 手动清（P21 起 admin-only） |
-| 长期记忆（fact/episodic） | PG 表 `memory_fact`/`memory_episodic` | 永久积累 | 同 key UPSERT 覆盖；user_id=P21 起为真实 email |
+| 长期记忆（fact/episodic） | PG 表 `memory_fact`/`memory_episodic` | 永久积累 | 同 key UPSERT 覆盖；user_id=P21 起为真实 email；P22 起 fact 用户可管（/memory 页）、episodic 随会话删除连带清 |
 | 每日 token 用量 | `data/usage.json` | 当天 | 跨天自动归零 |
+
+## 会话资源化（P22：`gewu/session/store.py`）
+
+P22 起 session_id 不再是客户端自报的裸 uuid，而是 `chat_sessions` 表登记发放的
+服务端资源（`secrets.token_urlsafe(16)` 主键、`"user"`=email 保留字双引号、
+`kind ∈ chat|compare`、title 首问前 20 字条件回填——`UPDATE ... WHERE title=''`
+语义防并发覆盖用户改名）。`/api/chat` 装配点一条 SELECT 做归属校验（本人外
+统一 404 防枚举），`"default"` 缺省值废弃（未传 422 给指引文案）。
+
+删除会话 = 三处连带（`gewu/api/sessions.py`）：先 `checkpointer.delete_thread`
+（langgraph-checkpoint-postgres 3.x 原生 API，删 checkpoints/blobs/writes 三表
+该 thread 全部行），再 `memory_episodic` 按 session_id 清，最后删 `chat_sessions`
+行——顺序不反：跨连接非事务，业务行删了 cp 删失败只会留无害悬空检查点（无入口
+可达），反过来会留「看似可用实则无历史」的会话。
+
+历史恢复（`GET /api/sessions/{id}/messages`）：优先从 checkpointer state 的
+`messages` 提取对话级序列（HumanMessage 文本 + AIMessage 非空 text；工具调用轮
+与 ToolMessage 跳过、system 跳过）——覆盖 agent 链路（mode=auto/react）；
+classic 链路（classic/direct/research）不写 messages，提取为空时退
+`memory_episodic` 兜底（每轮 user/assistant 双条、链路无关）。对话级纯文本渲染，
+事件级细节（citations/steps 卡片）不恢复。
 
 ## PostgresSaver（P14 Q4 原生机制）
 

@@ -29,7 +29,7 @@ def _hit(chunk_id: int, doc_id: str, text: str) -> Hit:
     )
 
 
-def _hit_client(tmp_path, biz, mem, auth, hits: list[Hit]):
+def _hit_client(tmp_path, biz, mem, auth, sess, hits: list[Hit]):
     (tmp_path / "usage.json").write_text("{}", encoding="utf-8")
     rr = FakeRetriever(hits)
     settings = Settings(llm_api_key="lk", embed_api_key="ek", data_dir=tmp_path)
@@ -39,14 +39,15 @@ def _hit_client(tmp_path, biz, mem, auth, hits: list[Hit]):
         business=biz,
         memory=mem,
         auth=auth,
+        sessions=sess,
         retriever=rr,
     )
     return make_logged_client(app, auth), rr
 
 
-def test_search_ok_maps_fields_and_truncates_300(tmp_path: Path, biz, mem, auth):
+def test_search_ok_maps_fields_and_truncates_300(tmp_path: Path, biz, mem, auth, sess):
     long_text = "甲" * 350
-    c, rr = _hit_client(tmp_path, biz, mem, auth, [_hit(7, "doc-x", long_text)])
+    c, rr = _hit_client(tmp_path, biz, mem, auth, sess, [_hit(7, "doc-x", long_text)])
     r = c.post("/api/search", json={"query": "图书馆几点开门", "k": 3})
     assert r.status_code == 200
     body = r.json()
@@ -59,14 +60,14 @@ def test_search_ok_maps_fields_and_truncates_300(tmp_path: Path, biz, mem, auth)
     assert rr.calls == [("图书馆几点开门", 3)]
 
 
-def test_search_k_defaults_5(tmp_path: Path, biz, mem, auth):
-    c, rr = _hit_client(tmp_path, biz, mem, auth, [])
+def test_search_k_defaults_5(tmp_path: Path, biz, mem, auth, sess):
+    c, rr = _hit_client(tmp_path, biz, mem, auth, sess, [])
     assert c.post("/api/search", json={"query": "奖学金"}).status_code == 200
     assert rr.calls == [("奖学金", 5)]
 
 
-def test_search_query_length_422(tmp_path: Path, biz, mem, auth):
-    c, _ = _hit_client(tmp_path, biz, mem, auth, [])
+def test_search_query_length_422(tmp_path: Path, biz, mem, auth, sess):
+    c, _ = _hit_client(tmp_path, biz, mem, auth, sess, [])
     r = c.post("/api/search", json={"query": ""})
     assert r.status_code == 422
     assert r.json()["detail"] == "query 长度需在 1~200 字之间"
@@ -75,17 +76,17 @@ def test_search_query_length_422(tmp_path: Path, biz, mem, auth):
     assert r.json()["detail"] == "query 长度需在 1~200 字之间"
 
 
-def test_search_k_range_422(tmp_path: Path, biz, mem, auth):
-    c, _ = _hit_client(tmp_path, biz, mem, auth, [])
+def test_search_k_range_422(tmp_path: Path, biz, mem, auth, sess):
+    c, _ = _hit_client(tmp_path, biz, mem, auth, sess, [])
     for k in (0, 21):
         r = c.post("/api/search", json={"query": "q", "k": k})
         assert r.status_code == 422
         assert r.json()["detail"] == "k 需在 1~20 之间"
 
 
-def test_search_binding_errors_are_uniform_422(tmp_path: Path, biz, mem, auth):
+def test_search_binding_errors_are_uniform_422(tmp_path: Path, biz, mem, auth, sess):
     """类型不符/非对象体/非法 JSON → 统一「请求体不是合法 JSON」（对齐 Go ShouldBindJSON）。"""
-    c, _ = _hit_client(tmp_path, biz, mem, auth, [])
+    c, _ = _hit_client(tmp_path, biz, mem, auth, sess, [])
     cases = [
         {"query": 123},
         {"query": "q", "k": "5"},
@@ -101,14 +102,14 @@ def test_search_binding_errors_are_uniform_422(tmp_path: Path, biz, mem, auth):
     assert r.json()["detail"] == "请求体不是合法 JSON"
 
 
-def test_search_missing_body_is_binding_error(tmp_path: Path, biz, mem, auth):
-    c, _ = _hit_client(tmp_path, biz, mem, auth, [])
+def test_search_missing_body_is_binding_error(tmp_path: Path, biz, mem, auth, sess):
+    c, _ = _hit_client(tmp_path, biz, mem, auth, sess, [])
     r = c.post("/api/search")
     assert r.status_code == 422
     assert r.json()["detail"] == "请求体不是合法 JSON"
 
 
-def test_usage_json_write_roundtrip(tmp_path: Path, biz, mem, auth):
+def test_usage_json_write_roundtrip(tmp_path: Path, biz, mem, auth, sess):
     """防回归占位：确认 usage.json 读取路径稳定（空文件→used=0）。"""
     (tmp_path / "usage.json").write_text(json.dumps({}), encoding="utf-8")
     rr = FakeRetriever()
@@ -119,6 +120,7 @@ def test_usage_json_write_roundtrip(tmp_path: Path, biz, mem, auth):
         business=biz,
         memory=mem,
         auth=auth,
+        sessions=sess,
         retriever=rr,
     )
     assert TestClient(app).get("/api/health").json()["budget"]["used"] == 0

@@ -7,6 +7,9 @@ resume 值续跑——前端照常发 /api/chat，零改动。流结束后异步
 
 P21-3：需登录（cookie）；role 改服务端权威（users.role，请求体 role 字段废弃
 忽略——权限矩阵从君子协定变强制）；user_id=登录 email（记忆/台账真实归属）。
+P22：session_id 必填且必须为已登记属本人的会话（POST /api/sessions 下发；
+未传 422 给指引、不属本人/不存在 404 防枚举；"default" 缺省值废弃）；每轮
+刷 updated_at + 首见空 title 回填首问前 20 字（SessionStore.note_turn）。
 """
 
 from __future__ import annotations
@@ -43,7 +46,11 @@ def _parse_chat_body(payload: dict) -> dict:
         raise HTTPException(
             status_code=422, detail="mode 必须为 auto/direct/research/react/classic"
         )
-    session_id = payload.get("session_id") or "default"
+    session_id = payload.get("session_id")
+    if session_id is None or session_id == "":
+        raise HTTPException(
+            status_code=422, detail="session_id 不能为空（请先 POST /api/sessions 创建会话）"
+        )
     if not isinstance(session_id, str):
         raise HTTPException(status_code=422, detail="请求体不是合法 JSON")
     if len(session_id) > 64:
@@ -85,11 +92,13 @@ def chat(request: Request, payload: Annotated[dict, Body(...)]):
     req = _parse_chat_body(payload)
     req["role"] = user.role
     req["user"] = user.email
+    # P22 归属校验：会话必须已登记且属本人（否则 404，不泄露他人会话存在性）。
+    if request.app.state.sessions.get(user.email, req["session_id"]) is None:
+        raise HTTPException(status_code=404, detail="会话不存在")
+    request.app.state.sessions.note_turn(user.email, req["session_id"], req["question"])
     try:
         request.app.state.budget.ensure()
     except Exception as e:  # noqa: BLE001 - 预算耗尽 → 429（PARITY §2.4）
-        from fastapi import HTTPException
-
         raise HTTPException(status_code=429, detail=str(e)) from e
     graph = request.app.state.graph
     config = {"configurable": {"thread_id": req["session_id"]}}

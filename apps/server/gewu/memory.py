@@ -94,6 +94,25 @@ class MemoryStore:
             ).fetchall()
         return [Fact(r[0], r[1], r[2]) for r in rows]
 
+    def all_facts(self, user_id: str) -> list[Fact]:
+        """全量事实（/memory 面板用；按 kind,key 稳定排序便于分组渲染）。"""
+        with self._pool.connection() as conn:
+            rows = conn.execute(
+                "SELECT kind, key, value FROM memory_fact WHERE user_id = %s ORDER BY kind, key",
+                (user_id,),
+            ).fetchall()
+        return [Fact(r[0], r[1], r[2]) for r in rows]
+
+    def delete_fact(self, user_id: str, kind: str, key: str) -> bool:
+        """删除单条事实（复合主键定位；P22 记忆面板）。"""
+        with self._pool.connection() as conn:
+            row = conn.execute(
+                "DELETE FROM memory_fact WHERE user_id = %s AND kind = %s AND key = %s"
+                " RETURNING key",
+                (user_id, kind, key),
+            ).fetchone()
+        return row is not None
+
     # ---------- episodic ----------
 
     def append_episode(self, session_id: str, user_id: str, kind: str, text: str) -> None:
@@ -117,6 +136,20 @@ class MemoryStore:
                 (session_id, n),
             ).fetchall()
         return [("助手" if r[0] == "assistant" else "用户") + "：" + r[1] for r in rows]
+
+    def episodes_for_session(self, session_id: str) -> list[dict]:
+        """本会话全部对话轮（时间正序 [{role,text}]）——历史恢复的 classic 兜底（P22）。"""
+        with self._pool.connection() as conn:
+            rows = conn.execute(
+                "SELECT kind, text FROM memory_episodic WHERE session_id = %s ORDER BY id ASC",
+                (session_id,),
+            ).fetchall()
+        return [{"role": r[0], "text": r[1]} for r in rows]
+
+    def delete_episodes(self, session_id: str) -> None:
+        """删会话连带清理（P22 Q4：用户删会话=清干净）。"""
+        with self._pool.connection() as conn:
+            conn.execute("DELETE FROM memory_episodic WHERE session_id = %s", (session_id,))
 
 
 # ---------- 记忆块装配与固化（Go memory.go 的 Deps 方法等价物） ----------

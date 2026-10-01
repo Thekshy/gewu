@@ -1,11 +1,18 @@
 "use client";
 
 import { useRef, useState } from "react";
-import { Loader2, Send } from "lucide-react";
+import { Loader2, Send, TriangleAlert } from "lucide-react";
 import TrackPanel, { type TimelineItem, type TrackRound } from "@/components/eventStream";
-import { streamChat, type ChatEvent, type ChatMode } from "@/lib/api";
+import {
+  createSession,
+  streamChat,
+  type ChatEvent,
+  type ChatMode,
+  type SessionInfo,
+} from "@/lib/api";
 import { useRequireUser } from "@/lib/auth";
 import { SLOT_LABEL } from "@/lib/labels";
+import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
@@ -14,6 +21,7 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 // guard 安检 + create_agent 工具自选）、B 轨 mode=classic（级联路由 + 固定 workflow，
 // 论文对照基线）。两轨 session 隔离：办理流程的槽位/确认状态各自独立。A 轨 route
 // 事件两段式（guard provisional + effective 工具轨迹合成），以 effective 为准。
+// P22：会话改服务端下发（kind=compare 不入对话侧栏），首跑前 ensure、失败即停双发。
 
 const SUGGESTIONS = [
   "帮我预约明天晚上 19:00-21:00 的羽毛球馆，班级比赛用",
@@ -32,22 +40,22 @@ function newRound(question: string): TrackRound {
   return { question, timeline: [], answer: "", citations: [], done: false, eventCount: 0 };
 }
 
-function uuid(): string {
-  return typeof crypto !== "undefined" && crypto.randomUUID
-    ? crypto.randomUUID()
-    : `s-${Date.now()}`;
-}
-
 export default function Compare() {
   useRequireUser(); // P21：登录守卫（role 由服务端随会话下发）
   const [input, setInput] = useState("");
   const [a, setA] = useState<TrackState>({ busy: false, rounds: [] });
   const [b, setB] = useState<TrackState>({ busy: false, rounds: [] });
-  // 会话隔离的关键：两轨固定独立 session_id（useRef 跨渲染稳定），跨轮复用保持各自多轮上下文
-  const sessions = useRef<{ a: string; b: string }>({
-    a: `compare-a-${uuid()}`,
-    b: `compare-b-${uuid()}`,
-  });
+  // 会话隔离的关键：两轨各自独立 compare 会话（P22 起服务端 POST /api/sessions 下发，
+  // useRef 缓存创建结果——首个 Promise 落定前不重复建），跨轮复用保持各自多轮上下文
+  const sessions = useRef<Record<Side, SessionInfo | null>>({ a: null, b: null });
+  const [sessionErr, setSessionErr] = useState<string | null>(null);
+
+  async function ensureSession(side: Side): Promise<SessionInfo> {
+    if (!sessions.current[side]) {
+      sessions.current[side] = await createSession("compare");
+    }
+    return sessions.current[side];
+  }
 
   const running = a.busy || b.busy;
   const lastRound = (t: TrackState) => t.rounds[t.rounds.length - 1];
@@ -74,7 +82,7 @@ export default function Compare() {
     patchRound(side, (r) => ({ ...r, timeline: [...r.timeline, item] }));
   }
 
-  async function run(side: Side, question: string) {
+  async function run(side: Side, question: string, session: SessionInfo) {
     const mode: ChatMode = side === "a" ? "auto" : "classic";
     setBusy(side, true);
     pushRound(side, newRound(question));
@@ -83,7 +91,7 @@ export default function Compare() {
         question,
         mode,
         (ev: ChatEvent) => handleEvent(side, ev),
-        { sessionId: sessions.current[side] },
+        { sessionId: session.session_id },
       );
     } catch (err) {
       patchRound(side, { error: err instanceof Error ? err.message : String(err), done: true });
@@ -156,12 +164,27 @@ export default function Compare() {
     }
   }
 
-  function send(text?: string) {
+  async function send(text?: string) {
     const question = (text ?? input).trim();
     if (!question || running) return;
+    setSessionErr(null);
+    // 双轨会话先 ensure（首跑前创建，失败即报错停止双发——任务书 Q 风险表）
+    let sa: SessionInfo, sb: SessionInfo;
+    try {
+      [sa, sb] = await Promise.all([ensureSession("a"), ensureSession("b")]);
+    } catch (err) {
+      setSessionErr(err instanceof Error ? err.message : String(err));
+      return;
+    }
     setInput("");
-    void run("a", question);
-    void run("b", question);
+    void run("a", question, sa);
+    void run("b", question, sb);
+  }
+
+  /** 确认门续轮（确认/取消）：复用已创建的轨会话。 */
+  function reply(side: Side, text: string) {
+    const s = sessions.current[side];
+    if (s) void run(side, text, s);
   }
 
   const ra = lastRound(a);
@@ -214,6 +237,18 @@ export default function Compare() {
           </div>
         </div>
 
+        {sessionErr && (
+          <Alert variant="destructive" className="py-2.5">
+            <TriangleAlert className="size-4" aria-hidden />
+            <AlertDescription>
+              会话创建失败：{sessionErr}
+              <button className="ml-2 underline underline-offset-2" onClick={() => setSessionErr(null)}>
+                关闭
+              </button>
+            </AlertDescription>
+          </Alert>
+        )}
+
         <div className="grid gap-4 md:grid-cols-2">
           <TrackPanel
             tag="A"
@@ -221,8 +256,8 @@ export default function Compare() {
             note="mode=auto：guard 安检 + create_agent 单循环，模型每轮自主选工具；写操作仍走确认门"
             round={ra}
             busy={a.busy}
-            onConfirm={() => void run("a", "确认")}
-            onCancel={() => void run("a", "取消")}
+            onConfirm={() => reply("a", "确认")}
+            onCancel={() => reply("a", "取消")}
           />
           <TrackPanel
             tag="B"
@@ -230,8 +265,8 @@ export default function Compare() {
             note="mode=classic：L0 规则快路径 → L1 小模型五分类 → L2 主模型复核；路由决定后续固定链路"
             round={rb}
             busy={b.busy}
-            onConfirm={() => void run("b", "确认")}
-            onCancel={() => void run("b", "取消")}
+            onConfirm={() => reply("b", "确认")}
+            onCancel={() => reply("b", "取消")}
           />
         </div>
 

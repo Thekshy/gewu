@@ -14,7 +14,9 @@ from langgraph.checkpoint.memory import MemorySaver
 from gewu.agent.graph import build_graph
 from gewu.api import auth as auth_routes
 from gewu.api import chat as chat_routes
+from gewu.api import memory as memory_routes
 from gewu.api import routes
+from gewu.api import sessions as session_routes
 from gewu.auth.store import AuthStore
 from gewu.budget import TokenBudget
 from gewu.business.db import Business
@@ -24,6 +26,7 @@ from gewu.memory import MemoryStore
 from gewu.middleware import RateLimitMiddleware, TraceIDMiddleware
 from gewu.rag.retrieve import LLMReranker, Retriever
 from gewu.rag.store import DocStore, Store
+from gewu.session.store import SessionStore
 
 
 def _make_checkpointer(settings: Settings):
@@ -71,6 +74,8 @@ def create_app(
     retriever: Retriever | None = None,
     memory: MemoryStore | None = None,
     auth: AuthStore | None = None,
+    sessions: SessionStore | None = None,
+    checkpointer=None,
 ) -> FastAPI:
     app = FastAPI(title="gewu", version=VERSION)
     # 中间件顺序（外→内）：限流 → trace-id → CORS（对齐 Go：TraceID → 限流 → CORS）。
@@ -104,7 +109,11 @@ def create_app(
         raise TypeError("store 非 Store 实例时必须显式提供 retriever")
     app.state.memory = memory if memory is not None else MemoryStore(settings.pg_dsn)
     app.state.auth = auth if auth is not None else AuthStore(settings.pg_dsn)
-    app.state.checkpointer = _make_checkpointer(settings)
+    # P22：会话域（chat 归属校验/CRUD）；checkpointer 可注入（测试断言连带删除行数）
+    app.state.sessions = sessions if sessions is not None else SessionStore(settings.pg_dsn)
+    app.state.checkpointer = (
+        checkpointer if checkpointer is not None else _make_checkpointer(settings)
+    )
     app.state.graph = build_graph(
         settings,
         app.state.retriever,
@@ -116,4 +125,6 @@ def create_app(
     app.include_router(auth_routes.router)
     app.include_router(routes.router)
     app.include_router(chat_routes.router)
+    app.include_router(session_routes.router)
+    app.include_router(memory_routes.router)
     return app

@@ -1,7 +1,8 @@
 #!/usr/bin/env bash
 # P20 设计门禁（DESIGN.md 契约的机械执行）：
-#   1) impeccable detect 三页扫描 —— 必须跑生产构建：dev server 会间歇性吐出
-#      未编译完的空 Tailwind CSS，扫描结果不稳定（P20-4 实测）
+#   1) impeccable detect 五页扫描（/ /compare /console /login /memory）—— 必须跑
+#      生产构建：dev server 会间歇性吐出未编译完的空 Tailwind CSS，扫描结果
+#      不稳定（P20-4 实测）
 #   2) grep 规则：衬线域泄漏 / h-screen / 冷色残留
 # exit 0 = 全绿；非 0 = 有 finding（逐条修或在 DESIGN.md 白名单区记录理由）。
 # 注：引擎 4.x 对零 finding 的页面不打印文本，脚本按退出码显式报 PASS/FAIL。
@@ -45,10 +46,10 @@ if ! curl -sf --noproxy '*' -o /dev/null "$BASE"; then
   fi
 fi
 
-# --- impeccable detect 四页（exit 0=clean / 2=有 finding / 1=扫描失败）---
+# --- impeccable detect 五页（exit 0=clean / 2=有 finding / 1=扫描失败）---
 # 必须在 apps/web 下执行：检测器从 cwd 读取 .impeccable/config.json 白名单
-# P21 起 /login 入检测清单（登录/注册表单页）
-for path in "" "/compare" "/console" "/login"; do
+# P21 起 /login 入检测清单（登录/注册表单页）；P22 起 /memory 入清单（记忆面板）
+for path in "" "/compare" "/console" "/login" "/memory"; do
   name=${path:-/}
   if (cd "$WEB" && npx -y impeccable detect "$BASE$path" >/tmp/gewu-design-lint-detect.log 2>&1); then
     echo "[design-lint] PASS detect $name"

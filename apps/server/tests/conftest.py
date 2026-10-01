@@ -13,12 +13,14 @@ import urllib.parse
 import psycopg
 import pytest
 from fastapi.testclient import TestClient
+from langgraph.checkpoint.postgres import PostgresSaver
 
 from gewu.auth.store import AuthStore
 from gewu.business.db import Business
 from gewu.config import load_dotenv
 from gewu.memory import MemoryStore
 from gewu.rag.store import Store
+from gewu.session.store import SessionStore
 
 LOCK_KEY = 941012  # 与 Go testLockKey 同值（任意常量，全仓库唯一即可）
 DEFAULT_TEST_DSN = "postgres://gewu:gewu@127.0.0.1:5433/gewu_test?sslmode=disable"
@@ -110,6 +112,41 @@ def _mem_store(pg_lock: str, pg_dsn: str) -> MemoryStore:
 def mem(_mem_store: MemoryStore) -> MemoryStore:
     _mem_store.wipe()
     return _mem_store
+
+
+@pytest.fixture(scope="session")
+def _sess_store(pg_lock: str, pg_dsn: str) -> SessionStore:
+    s = SessionStore(pg_dsn)
+    yield s
+    s.close()
+
+
+@pytest.fixture
+def sess(_sess_store: SessionStore) -> SessionStore:
+    _sess_store.wipe()
+    return _sess_store
+
+
+@pytest.fixture(scope="session")
+def _test_checkpointer(pg_lock: str, pg_dsn: str):
+    """PostgresSaver（测试库）：连带删除/历史提取的行级断言用（P22）。
+
+    autocommit 单连接（官方要求）；建表幂等；测试库专库不殃及真库。
+    """
+    conn = psycopg.connect(pg_dsn, autocommit=True)
+    cp = PostgresSaver(conn)
+    cp.setup()
+    yield cp
+    conn.close()
+
+
+@pytest.fixture
+def cp(_test_checkpointer, pg_dsn: str):
+    """每用例清空 checkpoints 三表（行数断言基线归零）。"""
+    with psycopg.connect(pg_dsn, autocommit=True) as conn:
+        for t in ("checkpoints", "checkpoint_blobs", "checkpoint_writes"):
+            conn.execute(f"DELETE FROM {t}")
+    return _test_checkpointer
 
 
 def make_logged_client(

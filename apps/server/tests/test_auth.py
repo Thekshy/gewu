@@ -126,8 +126,8 @@ def test_promote_admin(auth):
 # ---------- API 层 ----------
 
 
-def test_auth_api_flow(tmp_path, biz, mem, auth):
-    c = make_client(tmp_path, biz, mem, auth)
+def test_auth_api_flow(tmp_path, biz, mem, auth, sess):
+    c = make_client(tmp_path, biz, mem, auth, sess)
     assert c.get("/api/auth/me").status_code == 401
 
     code = auth.create_invite(uses=1)
@@ -173,8 +173,8 @@ def test_auth_api_flow(tmp_path, biz, mem, auth):
     assert c.get("/api/auth/me").status_code == 200
 
 
-def test_register_duplicate_email_409(tmp_path, biz, mem, auth):
-    app = make_client(tmp_path, biz, mem, auth).app
+def test_register_duplicate_email_409(tmp_path, biz, mem, auth, sess):
+    app = make_client(tmp_path, biz, mem, auth, sess).app
     make_logged_client(app, auth, email="dup@qtu.edu.cn")
     c2 = TestClient(app)
     code = auth.create_invite()
@@ -191,8 +191,8 @@ def test_register_duplicate_email_409(tmp_path, biz, mem, auth):
     assert r.status_code == 200
 
 
-def test_register_used_up_invite_400(tmp_path, biz, mem, auth):
-    c = make_client(tmp_path, biz, mem, auth)
+def test_register_used_up_invite_400(tmp_path, biz, mem, auth, sess):
+    c = make_client(tmp_path, biz, mem, auth, sess)
     code = auth.create_invite(uses=1)
     body = {"email": "a@qtu.edu.cn", "password": PWD, "invite_code": code}
     assert c.post("/api/auth/register", json=body).status_code == 200

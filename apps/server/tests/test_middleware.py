@@ -44,7 +44,7 @@ def test_token_budget_ensure_raises_when_exhausted(tmp_path: Path):
         b.ensure()
 
 
-def _client(tmp_path: Path, biz, mem, auth, limit: int = 600) -> TestClient:
+def _client(tmp_path: Path, biz, mem, auth, sess, limit: int = 600) -> TestClient:
     (tmp_path / "usage.json").write_text("{}", encoding="utf-8")
     settings = Settings(llm_api_key="lk", data_dir=tmp_path, rate_limit_per_minute=limit)
     return TestClient(
@@ -54,22 +54,23 @@ def _client(tmp_path: Path, biz, mem, auth, limit: int = 600) -> TestClient:
             business=biz,
             memory=mem,
             auth=auth,
+            sessions=sess,
             retriever=FakeRetriever(),
             llm=FakeChatLLM(["答"]),
         )
     )
 
 
-def test_trace_id_header_present(tmp_path: Path, biz, mem, auth):
-    c = _client(tmp_path, biz, mem, auth)
+def test_trace_id_header_present(tmp_path: Path, biz, mem, auth, sess):
+    c = _client(tmp_path, biz, mem, auth, sess)
     r = c.get("/api/health")
     assert r.headers.get("x-trace-id")  # TestClient 头名小写化
     r2 = c.get("/api/health", headers={"X-Trace-Id": "fixed-id"})
     assert r2.headers["x-trace-id"] == "fixed-id"  # 入站头沿用
 
 
-def test_rate_limit_429_after_threshold(tmp_path: Path, biz, mem, auth):
-    c = _client(tmp_path, biz, mem, auth, limit=3)
+def test_rate_limit_429_after_threshold(tmp_path: Path, biz, mem, auth, sess):
+    c = _client(tmp_path, biz, mem, auth, sess, limit=3)
     for _ in range(3):
         assert c.get("/api/docs").status_code == 200
     r = c.get("/api/docs")
@@ -79,7 +80,7 @@ def test_rate_limit_429_after_threshold(tmp_path: Path, biz, mem, auth):
     assert c.get("/api/health").status_code == 200
 
 
-def test_chat_budget_429(tmp_path: Path, biz, mem, auth):
+def test_chat_budget_429(tmp_path: Path, biz, mem, auth, sess):
     """预算耗尽 → 登录态下 chat 429（auth 先于预算闸，未登录则 401）。"""
     (tmp_path / "usage.json").write_text(
         json.dumps({"date": date.today().isoformat(), "tokens": 2_000_000}),
@@ -92,12 +93,14 @@ def test_chat_budget_429(tmp_path: Path, biz, mem, auth):
         business=biz,
         memory=mem,
         auth=auth,
+        sessions=sess,
         retriever=FakeRetriever(),
         llm=FakeChatLLM(["答"]),
     )
     anon = TestClient(app)
     assert anon.post("/api/chat", json={"question": "q"}).status_code == 401  # 认证在前
     c = make_logged_client(app, auth)
-    r = c.post("/api/chat", json={"question": "q"})
+    sid = c.post("/api/sessions", json={}).json()["session_id"]  # P22：会话须先登记
+    r = c.post("/api/chat", json={"question": "q", "session_id": sid})
     assert r.status_code == 429
     assert "预算" in r.json()["detail"]

@@ -18,6 +18,7 @@ from gewu.business.db import Business
 from gewu.config import Settings
 from gewu.memory import MemoryStore
 from gewu.rag.store import DocInfo, Stats
+from gewu.session.store import SessionStore
 from tests.conftest import make_logged_client
 
 
@@ -43,7 +44,7 @@ class FakeRetriever:
         self.k = k
         self.calls: list[tuple[str, int]] = []
 
-    def search(self, query: str, k: int) -> list:
+    def search(self, query: str, k: int = 0, *, expand: bool = True) -> list:
         self.calls.append((query, k))
         return list(self.hits)
 
@@ -53,6 +54,7 @@ def make_client(
     biz: Business,
     mem: MemoryStore,
     auth: AuthStore,
+    sess: SessionStore,
     usage: dict | None = None,
     retriever: FakeRetriever | None = None,
 ) -> TestClient:
@@ -75,14 +77,15 @@ def make_client(
         business=biz,
         memory=mem,
         auth=auth,
+        sessions=sess,
         retriever=retriever or FakeRetriever(),
     )
     return TestClient(app)
 
 
-def test_health_contract(tmp_path: Path, biz, mem, auth):
+def test_health_contract(tmp_path: Path, biz, mem, auth, sess):
     today = date.today().isoformat()
-    c = make_client(tmp_path, biz, mem, auth, usage={"date": today, "tokens": 123})
+    c = make_client(tmp_path, biz, mem, auth, sess, usage={"date": today, "tokens": 123})
     r = c.get("/api/health")
     assert r.status_code == 200
     body = r.json()
@@ -95,13 +98,13 @@ def test_health_contract(tmp_path: Path, biz, mem, auth):
     assert body["budget"] == {"used": 123, "limit": 2_000_000}
 
 
-def test_health_budget_resets_cross_day(tmp_path: Path, biz, mem, auth):
+def test_health_budget_resets_cross_day(tmp_path: Path, biz, mem, auth, sess):
     yesterday = (date.today() - timedelta(days=1)).isoformat()
-    c = make_client(tmp_path, biz, mem, auth, usage={"date": yesterday, "tokens": 999})
+    c = make_client(tmp_path, biz, mem, auth, sess, usage={"date": yesterday, "tokens": 999})
     assert c.get("/api/health").json()["budget"]["used"] == 0
 
 
-def test_health_llm_false_without_key(tmp_path: Path, biz, mem, auth):
+def test_health_llm_false_without_key(tmp_path: Path, biz, mem, auth, sess):
     (tmp_path / "usage.json").write_text("{}", encoding="utf-8")
     settings = Settings(llm_api_key="", embed_api_key="", data_dir=tmp_path)
     store = FakeStore(Stats(docs=0, chunks=0, embedded=False), [])
@@ -111,6 +114,7 @@ def test_health_llm_false_without_key(tmp_path: Path, biz, mem, auth):
         business=biz,
         memory=mem,
         auth=auth,
+        sessions=sess,
         retriever=FakeRetriever(),
     )
     body = TestClient(app).get("/api/health").json()
@@ -118,8 +122,8 @@ def test_health_llm_false_without_key(tmp_path: Path, biz, mem, auth):
     assert body["embeddings"] is False
 
 
-def test_docs_contract(tmp_path: Path, biz, mem, auth):
-    c = make_client(tmp_path, biz, mem, auth)
+def test_docs_contract(tmp_path: Path, biz, mem, auth, sess):
+    c = make_client(tmp_path, biz, mem, auth, sess)
     r = c.get("/api/docs")
     assert r.status_code == 200
     docs = r.json()
@@ -133,13 +137,13 @@ def test_docs_contract(tmp_path: Path, biz, mem, auth):
     }
 
 
-def test_business_overview_requires_login(tmp_path: Path, biz, mem, auth):
-    c = make_client(tmp_path, biz, mem, auth)
+def test_business_overview_requires_login(tmp_path: Path, biz, mem, auth, sess):
+    c = make_client(tmp_path, biz, mem, auth, sess)
     assert c.get("/api/business/overview").status_code == 401
 
 
-def test_business_overview_mine_view_filters_by_email(tmp_path: Path, biz, mem, auth):
-    app = make_client(tmp_path, biz, mem, auth).app
+def test_business_overview_mine_view_filters_by_email(tmp_path: Path, biz, mem, auth, sess):
+    app = make_client(tmp_path, biz, mem, auth, sess).app
     c = make_logged_client(app, auth, email="u1@example.com")
     # 本人一条有效预约；陌生人一条预约 + 一张请假单（本人视图不可见）
     assert biz.book_venue(
@@ -157,8 +161,8 @@ def test_business_overview_mine_view_filters_by_email(tmp_path: Path, biz, mem, 
     assert body["tickets"] == []
 
 
-def test_business_overview_admin_all(tmp_path: Path, biz, mem, auth):
-    app = make_client(tmp_path, biz, mem, auth).app
+def test_business_overview_admin_all(tmp_path: Path, biz, mem, auth, sess):
+    app = make_client(tmp_path, biz, mem, auth, sess).app
     admin = make_logged_client(app, auth, email="boss@example.com", admin=True)
     student = make_logged_client(app, auth, email="s1@example.com")
     assert biz.book_venue("venue-basketball", "2099-10-01", "10:00-12:00", "", "s1@example.com").ok
@@ -170,8 +174,8 @@ def test_business_overview_admin_all(tmp_path: Path, biz, mem, auth):
     assert len(body["bookings"]) == 1
 
 
-def test_business_reset_admin_only(tmp_path: Path, biz, mem, auth):
-    app = make_client(tmp_path, biz, mem, auth).app
+def test_business_reset_admin_only(tmp_path: Path, biz, mem, auth, sess):
+    app = make_client(tmp_path, biz, mem, auth, sess).app
     student = make_logged_client(app, auth, email="s1@example.com")
     admin = make_logged_client(app, auth, email="boss@example.com", admin=True)
     assert biz.book_venue("venue-basketball", "2099-10-01", "10:00-12:00", "", "s1@example.com").ok
@@ -182,6 +186,6 @@ def test_business_reset_admin_only(tmp_path: Path, biz, mem, auth):
     assert biz.all_bookings() == []
 
 
-def test_search_requires_login(tmp_path: Path, biz, mem, auth):
-    c = make_client(tmp_path, biz, mem, auth)
+def test_search_requires_login(tmp_path: Path, biz, mem, auth, sess):
+    c = make_client(tmp_path, biz, mem, auth, sess)
     assert c.post("/api/search", json={"query": "图书馆", "k": 3}).status_code == 401

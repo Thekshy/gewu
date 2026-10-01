@@ -160,6 +160,95 @@ export async function logout(): Promise<void> {
   await fetch(`${API_BASE}/api/auth/logout`, { method: "POST" }).catch(() => {});
 }
 
+// ---------- 会话（P22：会话为服务端资源，CRUD + 历史恢复） ----------
+
+export type SessionKind = "chat" | "compare";
+
+export interface SessionInfo {
+  session_id: string;
+  title: string;
+  kind: SessionKind;
+  created_at: string;
+  updated_at: string;
+}
+
+/** 历史恢复的对话级消息（事件级细节不恢复，纯文本）。 */
+export interface HistoryMessage {
+  role: "user" | "assistant";
+  text: string;
+}
+
+export async function createSession(kind: SessionKind = "chat"): Promise<SessionInfo> {
+  const res = await apiFetch(`${API_BASE}/api/sessions`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ kind }),
+  });
+  if (!res.ok) throw new Error(await detailOf(res));
+  return (await res.json()) as SessionInfo;
+}
+
+export async function listSessions(kind?: SessionKind): Promise<SessionInfo[]> {
+  const res = await apiFetch(`${API_BASE}/api/sessions${kind ? `?kind=${kind}` : ""}`);
+  if (!res.ok) throw new Error(await detailOf(res));
+  return (await res.json()) as SessionInfo[];
+}
+
+export async function renameSession(id: string, title: string): Promise<SessionInfo> {
+  const res = await apiFetch(`${API_BASE}/api/sessions/${id}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ title }),
+  });
+  if (!res.ok) throw new Error(await detailOf(res));
+  return (await res.json()) as SessionInfo;
+}
+
+export async function deleteSession(id: string): Promise<void> {
+  const res = await apiFetch(`${API_BASE}/api/sessions/${id}`, { method: "DELETE" });
+  if (!res.ok) throw new Error(await detailOf(res));
+}
+
+export async function fetchMessages(id: string): Promise<HistoryMessage[]> {
+  const res = await apiFetch(`${API_BASE}/api/sessions/${id}/messages`);
+  if (!res.ok) throw new Error(await detailOf(res));
+  const body = (await res.json()) as { messages: HistoryMessage[] };
+  return body.messages ?? [];
+}
+
+// ---------- 长期记忆（P22：fact 用户可见可管） ----------
+
+export type FactKind = "profile" | "preference" | "constraint";
+
+export interface Fact {
+  kind: FactKind;
+  key: string;
+  value: string;
+}
+
+export async function listFacts(): Promise<Fact[]> {
+  const res = await apiFetch(`${API_BASE}/api/memory/facts`);
+  if (!res.ok) throw new Error(await detailOf(res));
+  return (await res.json()) as Fact[];
+}
+
+export async function upsertFact(fact: Fact): Promise<void> {
+  const res = await apiFetch(`${API_BASE}/api/memory/facts`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(fact),
+  });
+  if (!res.ok) throw new Error(await detailOf(res));
+}
+
+export async function deleteFact(kind: FactKind, key: string): Promise<void> {
+  const res = await apiFetch(
+    `${API_BASE}/api/memory/facts?kind=${encodeURIComponent(kind)}&key=${encodeURIComponent(key)}`,
+    { method: "DELETE" },
+  );
+  if (!res.ok) throw new Error(await detailOf(res));
+}
+
 // ---------- 业务端点 ----------
 
 export async function fetchHealth(): Promise<HealthInfo | null> {
@@ -202,15 +291,16 @@ export async function search(query: string, k = 5): Promise<SearchHit[]> {
 }
 
 export interface ChatOpts {
-  sessionId?: string;
+  sessionId: string;
 }
 
-/** 调用 /api/chat 的 SSE 流，逐事件回调（P21：登录态由同源 cookie 携带）。 */
+/** 调用 /api/chat 的 SSE 流，逐事件回调（P21：登录态由同源 cookie 携带；
+ * P22：sessionId 必传——会话须先经 POST /api/sessions 登记属本人）。 */
 export async function streamChat(
   question: string,
   mode: ChatMode,
   onEvent: (ev: ChatEvent) => void,
-  opts: ChatOpts = {},
+  opts: ChatOpts,
 ): Promise<void> {
   const res = await apiFetch(`${API_BASE}/api/chat`, {
     method: "POST",
@@ -218,7 +308,7 @@ export async function streamChat(
     body: JSON.stringify({
       question,
       mode,
-      session_id: opts.sessionId ?? "default",
+      session_id: opts.sessionId,
     }),
   });
   if (!res.ok || !res.body) {
