@@ -180,7 +180,7 @@ export default function Compare() {
           <div className="min-w-0 flex-1">
             <h1 className="font-display text-xl font-semibold">对比实验台</h1>
             <p className="text-sm text-muted-foreground">
-              同一问题并发两条链路：级联路由 + 固定 workflow ↔ ReAct 自主组合工具
+              同一问题并发两条链路：agent-first 单循环 ↔ 级联路由固定 workflow（论文双底座对照）
             </p>
           </div>
           <Select value={role} onValueChange={(v) => setRole(v as Role)}>
@@ -234,8 +234,8 @@ export default function Compare() {
         <div className="grid gap-4 md:grid-cols-2">
           <TrackPanel
             tag="A"
-            title="级联路由 + 固定 workflow"
-            note="mode=auto：L0 规则快路径 → L1 小模型五分类 → L2 主模型复核；路由决定后续固定链路"
+            title="Agent-first 单循环（主路）"
+            note="mode=auto：guard 安检 + create_agent 单循环，模型每轮自主选工具；写操作仍走确认门"
             round={ra}
             busy={a.busy}
             onConfirm={() => void run("a", "确认")}
@@ -243,8 +243,8 @@ export default function Compare() {
           />
           <TrackPanel
             tag="B"
-            title="ReAct 自主组合工具"
-            note="mode=react：路由事件仅参考，实际由模型每轮自主决定调用哪个工具（🔧），写操作仍走确认流"
+            title="级联路由 + 固定 workflow（对照基线）"
+            note="mode=classic：L0 规则快路径 → L1 小模型五分类 → L2 主模型复核；路由决定后续固定链路"
             round={rb}
             busy={b.busy}
             onConfirm={() => void run("b", "确认")}
@@ -263,8 +263,8 @@ export default function Compare() {
                 <TableHeader>
                   <TableRow>
                     <TableHead className="w-28"></TableHead>
-                    <TableHead>A · 级联 workflow</TableHead>
-                    <TableHead>B · ReAct</TableHead>
+                    <TableHead>A · agent-first 循环</TableHead>
+                    <TableHead>B · classic 级联</TableHead>
                   </TableRow>
                 </TableHeader>
                 <TableBody>
@@ -274,7 +274,7 @@ export default function Compare() {
                       {ra.route} · {ra.reason}
                     </TableCell>
                     <TableCell title={rb.reason}>
-                      {rb.route}（参考） · 实际 ReAct
+                      {rb.route} · 级联判定决定固定链路
                     </TableCell>
                   </TableRow>
                   <TableRow>
