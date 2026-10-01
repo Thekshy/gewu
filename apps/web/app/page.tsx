@@ -1,6 +1,8 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+import { useTheme } from "next-themes";
+import { motion } from "motion/react";
 import { Info, Loader2, Send, Sparkles, TriangleAlert } from "lucide-react";
 import {
   API_BASE,
@@ -17,6 +19,9 @@ import {
   type Step,
 } from "@/lib/api";
 import Answer from "@/components/answer";
+import Aurora from "@/components/Aurora";
+import BlurText from "@/components/BlurText";
+import ClickSpark from "@/components/ClickSpark";
 import {
   CitationsRow,
   ConfirmCard,
@@ -72,6 +77,7 @@ export default function Home() {
   const [role, setRole] = useState<Role>("student");
   const [sending, setSending] = useState(false);
   const [health, setHealth] = useState<HealthInfo | null>(null);
+  const { resolvedTheme } = useTheme();
   const bottomRef = useRef<HTMLDivElement>(null);
   const sessionId = useRef<string>(
     typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `s-${Date.now()}`,
@@ -199,29 +205,64 @@ export default function Home() {
       <section aria-label="对话区" className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-3xl space-y-4 px-4 py-6">
           {messages.length === 0 && (
-            <div className="flex flex-col items-center gap-3 pt-16 text-center">
-              <div
+            <div className="relative flex min-h-[65vh] flex-col items-center justify-center gap-3 text-center">
+              <div className="absolute inset-0 -z-10 opacity-70 [mask-image:radial-gradient(ellipse_65%_55%_at_50%_45%,black_25%,transparent_78%)]">
+                <Aurora
+                  colorStops={["#22d3ee", "#0e7490", "#818cf8"]}
+                  amplitude={0.8}
+                  blend={0.6}
+                  speed={0.45}
+                  lightMode={resolvedTheme !== "dark"}
+                />
+              </div>
+              <motion.div
+                initial={{ opacity: 0, scale: 0.85 }}
+                animate={{ opacity: 1, scale: 1 }}
+                transition={{ duration: 0.45, ease: "easeOut" }}
                 className="flex size-14 items-center justify-center rounded-2xl bg-gradient-to-br from-cyan-600 to-teal-700 text-2xl font-semibold text-white shadow-md"
                 aria-hidden
               >
                 格
-              </div>
-              <p className="text-lg font-medium">问校园政策，或者直接办事——预约场馆、提交请假。</p>
-              <p className="max-w-md text-sm text-muted-foreground">
+              </motion.div>
+              <BlurText
+                text="问校园政策，或者直接办事——预约场馆、提交请假。"
+                animateBy="letters"
+                delay={55}
+                stepDuration={0.3}
+                className="justify-center text-lg font-medium leading-relaxed"
+              />
+              <motion.p
+                initial={{ opacity: 0 }}
+                animate={{ opacity: 1 }}
+                transition={{ delay: 1.2, duration: 0.5 }}
+                className="max-w-md text-sm text-muted-foreground"
+              >
                 办理类请求会经过：槽位收集 → 确认摘要 → 执行 → 回执；写操作必须确认后才会执行。
-              </p>
+              </motion.p>
             </div>
           )}
 
           {messages.map((msg, i) =>
             msg.role === "user" ? (
-              <div key={i} className="flex justify-end">
+              <motion.div
+                key={i}
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.25, ease: "easeOut" }}
+                className="flex justify-end"
+              >
                 <div className="max-w-[85%] rounded-2xl rounded-br-sm bg-primary px-4 py-2.5 text-sm leading-relaxed text-primary-foreground">
                   {msg.text}
                 </div>
-              </div>
+              </motion.div>
             ) : (
-              <div key={i} className="flex items-start gap-2.5">
+              <motion.div
+                key={i}
+                initial={{ opacity: 0, y: 10 }}
+                animate={{ opacity: 1, y: 0 }}
+                transition={{ duration: 0.25, ease: "easeOut" }}
+                className="flex items-start gap-2.5"
+              >
                 <div
                   className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary"
                   aria-hidden
@@ -262,7 +303,7 @@ export default function Home() {
                     <DoneMeta latency={msg.latency} doneReason={msg.doneReason} />
                   )}
                 </div>
-              </div>
+              </motion.div>
             ),
           )}
           <div ref={bottomRef} />
@@ -321,10 +362,14 @@ export default function Home() {
                 }
               }}
             />
-            <Button onClick={() => send()} disabled={sending || !input.trim()} className="h-9 shrink-0">
-              {sending ? <Loader2 className="animate-spin" aria-hidden /> : <Send aria-hidden />}
-              {sending ? "处理中…" : "发送"}
-            </Button>
+            <div className="shrink-0">
+              <ClickSpark sparkColor="#ffffff" sparkCount={8} duration={500}>
+                <Button onClick={() => send()} disabled={sending || !input.trim()} className="h-9">
+                  {sending ? <Loader2 className="animate-spin" aria-hidden /> : <Send aria-hidden />}
+                  {sending ? "处理中…" : "发送"}
+                </Button>
+              </ClickSpark>
+            </div>
           </div>
         </div>
       </div>

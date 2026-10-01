@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useState } from "react";
 import { CircleAlert, RefreshCw, RotateCcw, Search } from "lucide-react";
+import CountUp from "@/components/CountUp";
+import SpotlightCard from "@/components/SpotlightCard";
 import {
   API_BASE,
   businessReset,
@@ -27,7 +29,7 @@ import {
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -46,13 +48,13 @@ function Panel({
   children: React.ReactNode;
 }) {
   return (
-    <Card className="gap-4">
+    <SpotlightCard>
       <CardHeader>
         <CardTitle className="text-sm">{title}</CardTitle>
         {note && <CardDescription>{note}</CardDescription>}
       </CardHeader>
       <CardContent>{children}</CardContent>
-    </Card>
+    </SpotlightCard>
   );
 }
 
@@ -87,11 +89,14 @@ function Health({ health }: { health: HealthInfo | null }) {
         </Badge>
       </div>
       <p className="text-muted-foreground">
-        语料 {health.docs} 篇 / {health.chunks} chunks
+        语料 <CountUp to={health.docs} duration={1} /> 篇 /{" "}
+        <CountUp to={health.chunks} duration={1} /> chunks
       </p>
       <div className="space-y-1.5">
         <p className="text-xs text-muted-foreground">
-          今日 token 预算 {health.budget.used.toLocaleString()} / {health.budget.limit.toLocaleString()}
+          今日 token 预算{" "}
+          <CountUp to={health.budget.used} duration={1.5} separator="," /> /{" "}
+          {health.budget.limit.toLocaleString()}
           <span className="ml-2 tabular-nums">{pct.toFixed(1)}%</span>
         </p>
         <Progress value={pct} className="max-w-sm" />

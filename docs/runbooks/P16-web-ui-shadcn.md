@@ -187,3 +187,36 @@ composer 交互细节保留：Enter 发送 / Shift+Enter 换行 / `isComposing` 
 - compare B 轨工具 chip（Wrench Badge）展示分支待下次 ReAct 带工具调用的真跑顺带确认。
 - 降级 banner（停后端 / 无 key）待用户下次演示前重启环境时顺带确认。
 - sonner toast 未装（暂无场景）；framer-motion 微动效、移动端专项为后续可选加餐。
+
+## 8. 动效加餐：reactbits（2026-10-01 同日第二段）
+
+> **背景**：用户看过 reactbits.dev，诉求是「好看的动画、页面更高级」——shadcn 骨架
+> 之外的动效层。reactbits 与 shadcn 同理念（源码 copy、按组件取用，MIT+Commons
+> Clause），官方支持 shadcn CLI registry 直装，与 P16 底座无缝叠加。
+
+**落地**
+- `components.json` 挂 `@react-bits` registry → `npx shadcn add @react-bits/<Name>-TS-TW`，
+  五个组件源码入库：Aurora（WebGL 极光，ogl）、BlurText（逐字模糊入场，motion）、
+  SpotlightCard（鼠标聚光）、ClickSpark（点击火花 canvas）、CountUp（数字滚动 spring）。
+  新增依赖：motion（framer-motion 继任）、ogl。
+- 接入点（克制原则——空态 hero 一处浓墨、其余微交互）：
+  - 聊天空态 hero：Aurora 铺底（青-靛 colorStops、lightMode 随主题、径向 mask 收边
+    不干扰正文）+ BlurText 标题（CJK 无空格 → `animateBy="letters"` delay=55ms）+ logo 弹入；
+  - 消息行 motion 入场（fade+y 250ms）；发送按钮 ClickSpark 白色火花；
+  - console：四 Panel → SpotlightCard（聚光色 `color-mix(--primary 16%)` 亮暗自适应，
+    容器类对齐 ui/card 使 CardHeader/Content 直接可用）+ 健康数字 CountUp。
+- 源码改造一处：SpotlightCard 原版硬编码深色底（bg-neutral-900）→ 主题 token 化，
+  文件头注释注明改动来源。
+
+**真跑验收**：发送链路经 ClickSpark 包裹全通（图书馆借书直答 7126ms）；聚光效果
+程序化验证（dispatch mousemove → opacity 0.6 + radial-gradient at 鼠标位）；亮/暗
+双主题 Aurora 目检（暗色光晕柔和不过亮）；tsc + next build 绿。
+
+**偏离与坑**
+- compare 页动效（TrackPanel 入场等）**暂缓**：P17 会话正并发重构该页（agent-first
+  双轨语义 + api.ts ChatMode 契约变更在途），避免同文件冲突；待 P17 收口后补。
+- **并发会话 git 教训**：P17 会话已 stage 的 apps/server 删除（react.py /
+  test_react.py，agent-first 重构删除物）被本会话「整 index 快照」式 commit 卷入，
+  首笔提交混入两个 P17 删除文件——已 soft reset 剔除重提交并还原其 staged 状态。
+  并发会话共用一个 index 时，提交应使用 `git commit -- <paths>`（pathspec 限定）
+  或提交前核对 `git status` 第一列。
