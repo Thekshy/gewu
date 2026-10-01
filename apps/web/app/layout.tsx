@@ -40,6 +40,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               </div>
             </header>
             <div className="min-h-0 flex-1">{children}</div>
+            {/* 全页胶片颗粒：3% 噪点叠加，质感层（globals.css .grain-overlay） */}
+            <div aria-hidden className="grain-overlay" />
           </TooltipProvider>
         </ThemeProvider>
       </body>

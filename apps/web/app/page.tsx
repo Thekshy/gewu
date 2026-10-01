@@ -34,6 +34,7 @@ import {
   TypingDots,
 } from "@/components/message-parts";
 import { Alert, AlertDescription } from "@/components/ui/alert";
+import { BorderBeam } from "@/components/ui/border-beam";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
@@ -209,7 +210,7 @@ export default function Home() {
         </div>
       )}
 
-      <section aria-label="对话区" className="min-h-0 flex-1 overflow-y-auto">
+      <section aria-label="对话区" aria-live="polite" aria-atomic="false" className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-3xl space-y-4 px-4 py-6">
           {messages.length === 0 && (
             <div className="relative flex min-h-[65vh] flex-col items-center justify-center gap-3 text-center">
@@ -276,16 +277,28 @@ export default function Home() {
                 >
                   <Sparkles className="size-4" />
                 </div>
-                <div className="min-w-0 flex-1 space-y-2.5 rounded-2xl rounded-tl-sm bg-card/85 px-4 py-3 shadow-sm shadow-foreground/5 ring-1 ring-foreground/10 backdrop-blur-sm">
+                <div className="relative min-w-0 flex-1 space-y-2.5 rounded-2xl rounded-tl-sm bg-card/85 px-4 py-3 shadow-sm shadow-foreground/5 ring-1 ring-foreground/10 backdrop-blur-sm">
+                  {/* 生成中：边框流光（Magic UI BorderBeam），完成即卸载 */}
+                  {!msg.done && (
+                    <BorderBeam size={60} duration={5} colorFrom="#22d3ee" colorTo="#6366f1" />
+                  )}
                   <div className="flex flex-wrap items-center gap-2">
                     {msg.route && <RouteBadge route={msg.route} reason={msg.reason} />}
                   </div>
                   <ResearchTrace steps={msg.steps} defaultOpen={!msg.done} />
                   {msg.status && <StatusLine text={msg.status} />}
                   {msg.slotQ && <SlotCard slot={msg.slotQ.slot} />}
-                  {msg.text && <Answer text={msg.text} />}
+                  {msg.text && <Answer text={msg.text} streaming={!msg.done} />}
                   {!msg.text && !msg.status && msg.steps.length === 0 && !msg.done && (
-                    <TypingDots />
+                    <div role="status" className="space-y-3">
+                      <TypingDots />
+                      {/* 首包前骨架：模拟文字节奏的 shimmer 占位行 */}
+                      <div className="max-w-md space-y-2 pt-1" aria-hidden>
+                        <div className="shimmer-line h-3 w-full rounded-md" />
+                        <div className="shimmer-line h-3 w-10/12 rounded-md" />
+                        <div className="shimmer-line h-3 w-7/12 rounded-md" />
+                      </div>
+                    </div>
                   )}
 
                   {msg.pendingAction && !msg.actionResult && msg.done && (

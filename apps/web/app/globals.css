@@ -86,19 +86,19 @@
 }
 
 .dark {
-    --background: oklch(0.145 0 0);
+    --background: oklch(0.16 0.014 275);
     --foreground: oklch(0.985 0 0);
-    --card: oklch(0.205 0 0);
+    --card: oklch(0.205 0.016 275);
     --card-foreground: oklch(0.985 0 0);
-    --popover: oklch(0.205 0 0);
+    --popover: oklch(0.205 0.016 275);
     --popover-foreground: oklch(0.985 0 0);
     --primary: oklch(0.74 0.09 220);
     --primary-foreground: oklch(0.16 0.03 230);
-    --secondary: oklch(0.269 0 0);
+    --secondary: oklch(0.269 0.018 275);
     --secondary-foreground: oklch(0.985 0 0);
-    --muted: oklch(0.269 0 0);
+    --muted: oklch(0.269 0.018 275);
     --muted-foreground: oklch(0.708 0 0);
-    --accent: oklch(0.269 0 0);
+    --accent: oklch(0.269 0.018 275);
     --accent-foreground: oklch(0.985 0 0);
     --destructive: oklch(0.704 0.191 22.216);
     --border: oklch(1 0 0 / 10%);
@@ -129,4 +129,53 @@
   html {
     @apply font-sans;
     }
+}
+/* ── AI 原生交互动效层（2026-10-01）────────────────────────── */
+
+/* 流式回答末尾的闪烁光标：挂在 streaming 容器最后一个块元素上，纯 CSS 无需 JS 定位 */
+@keyframes caret-blink {
+  50% {
+    opacity: 0;
+  }
+}
+.streaming-caret > :last-child::after {
+  content: "";
+  display: inline-block;
+  width: 2px;
+  height: 1em;
+  margin-left: 2px;
+  vertical-align: text-bottom;
+  border-radius: 1px;
+  background: var(--primary);
+  animation: caret-blink 1s steps(1) infinite;
+}
+
+/* 首包前的骨架占位行：模拟文字节奏的 shimmer 扫光 */
+@keyframes shimmer-sweep {
+  from {
+    background-position: 200% 0;
+  }
+  to {
+    background-position: -200% 0;
+  }
+}
+.shimmer-line {
+  background: linear-gradient(
+    90deg,
+    var(--muted) 35%,
+    color-mix(in oklab, var(--muted), var(--foreground) 14%) 50%,
+    var(--muted) 65%
+  );
+  background-size: 200% 100%;
+  animation: shimmer-sweep 1.5s linear infinite;
+}
+
+/* 全页噪点纹理（胶片颗粒感，叠加在一切之上但不可交互） */
+.grain-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 60;
+  pointer-events: none;
+  opacity: 0.032;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
 }

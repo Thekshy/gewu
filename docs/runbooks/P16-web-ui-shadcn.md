@@ -237,3 +237,22 @@ composer 交互细节保留：Enter 发送 / Shift+Enter 换行 / `isComposing` 
 真跑验证：奖学金直答全链路（12405ms）、亮/暗双主题截图目检（暗色为完全体）、
 tsc+build 绿。构建注意：P17 会话并发跑 next build 会与本会话撞 `.next`
 （ENOENT pages-manifest），错峰重跑即可。
+
+### 8.2 AI 原生交互五件套（2026-10-01 第四段，调研后的定向补强）
+
+> 调研结论（groovyweb AI 应用 UI 趋势 / thefrontkit 聊天最佳实践）：高级感的下一层
+> 是「AI 原生交互模式」而非视觉风格。落地五件 + 可访问性：
+- **BorderBeam 流光边框**（Magic UI，shadcn registry 直装 `magicui.design/r/border-beam.json`）：
+  assistant 卡片 `!msg.done` 期间边框青→靛光带循环（offsetPath 动画），完成即卸载；
+- **流式光标**：Answer 加 `streaming` prop → `.streaming-caret > :last-child::after`
+  纯 CSS 2px 主色竖条闪烁（1s steps），无需 JS 追踪文本末尾；
+- **Shimmer 骨架行**：首包前 TypingDots + 三行递减宽度 shimmer 占位（模拟文字节奏，
+  role=status），替代单一 spinner 语义；
+- **暗色底蓝黑化**：background/card/popover/secondary/muted/accent 全系加 275 色相
+  低chroma（0.014~0.018），对齐 #0D0D14 一类的「AI 产品蓝黑」；
+- **全页噪点层**：`.grain-overlay` 固定层 3.2% SVG feTurbulence 胶片颗粒，z-60 不可交互；
+- 对话区加 `aria-live="polite" aria-atomic="false"`（流式可访问性基线）。
+验证：办理/直答两轮真跑（流光生成中可见、done 后卸载）、光标 ::after 程序化断言
+（content/width/主色/动画名）、暗色蓝黑目检、tsc+build 绿。
+缓存入 backlog：引用来源卡（需 citations 事件携带节选）、stop/retry（需 abort 通道）——
+均涉 SSE 契约，等 P17 收口。
