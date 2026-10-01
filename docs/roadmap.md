@@ -85,6 +85,8 @@
       [P21 任务书](runbooks/P21-user-auth-foundation.md)（2026-10-01 执行完毕：
       SSE 过 next rewrite 透传 0.17s 首事件验证、真跑剧本八步全过、191 单测）
 - [ ] P22 会话与记忆管理：会话归属表/列表/改名/删除 + 前端多会话侧边栏 +
-      memory_fact 用户可见可管理
+      memory_fact 用户可见可管理——
+      [P22 任务书](runbooks/P22-session-and-memory-management.md)（已立项待执行：
+      服务端显式创建/历史完整恢复/独立页 /memory 三拍板）
 - [ ] P23 管理后台：admin 用户/用量/会话巡查 + 邀请码发放 UI + per-user
       token 预算
