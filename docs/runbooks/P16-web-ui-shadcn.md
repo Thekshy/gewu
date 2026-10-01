@@ -220,3 +220,20 @@ composer 交互细节保留：Enter 发送 / Shift+Enter 换行 / `isComposing` 
   首笔提交混入两个 P17 删除文件——已 soft reset 剔除重提交并还原其 staged 状态。
   并发会话共用一个 index 时，提交应使用 `git commit -- <paths>`（pathspec 限定）
   或提交前核对 `git status` 第一列。
+
+### 8.1 高级感补强（同日第三段，用户反馈「还是偏传统」后）
+
+诊断：对话区一旦开始聊就是纯白/纯黑平面（Aurora 只活在空态）、纯色发送按钮无光晕、
+气泡与 composer 是标准描边盒、等待态是 spinner+文字——「传统感」来自这些平铺直叙。
+补强（全部主题 token 驱动，亮暗自适应）：
+- **全程环境光**：聊天页 main 顶部常驻两个渐变光斑（primary/indigo blur-3xl）+
+  微点阵纹理（radial-gradient 1px 网格 + mask 顶部衰减）；
+- **玻璃质感**：assistant 气泡 bg-card/85 + backdrop-blur + ring；composer 玻璃卡
+  （bg-card/80 + shadow-lg + focus 光环升级为 primary/10）；
+- **渐变主色**：用户气泡 cyan→teal 渐变 + 投影；发送按钮渐变 + glow shadow；
+- **ConfirmCard 渐变描边**（p-px 渐变底 + 内层卡）——待确认卡成为消息流最亮一块；
+- **TypingDots**：等待首包改三弹跳圆点（motion 循环）替代 spinner+文字；
+- console：Progress 渐变填充、CountUp 数字 text-primary。
+真跑验证：奖学金直答全链路（12405ms）、亮/暗双主题截图目检（暗色为完全体）、
+tsc+build 绿。构建注意：P17 会话并发跑 next build 会与本会话撞 `.next`
+（ENOENT pages-manifest），错峰重跑即可。

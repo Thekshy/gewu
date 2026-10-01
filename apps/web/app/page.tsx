@@ -31,6 +31,7 @@ import {
   RouteBadge,
   SlotCard,
   StatusLine,
+  TypingDots,
 } from "@/components/message-parts";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -182,7 +183,13 @@ export default function Home() {
   }
 
   return (
-    <main className="flex h-full flex-col">
+    <main className="relative flex h-full flex-col">
+      {/* 环境光：全程存在的顶部氛围（渐变光斑 + 微点阵），不只空态才有 */}
+      <div aria-hidden className="pointer-events-none absolute inset-x-0 top-0 -z-10 h-96 overflow-hidden">
+        <div className="absolute -top-24 left-1/4 size-96 rounded-full bg-primary/10 blur-3xl dark:bg-primary/15" />
+        <div className="absolute -top-10 right-1/4 size-72 rounded-full bg-indigo-400/10 blur-3xl dark:bg-indigo-400/15" />
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_1px_1px,var(--color-foreground)_1px,transparent_0)] bg-[size:22px_22px] opacity-[0.05] [mask-image:radial-gradient(70%_60%_at_50%_0%,black,transparent)] dark:opacity-[0.07]" />
+      </div>
       {health && !health.llm && (
         <div className="mx-auto w-full max-w-3xl space-y-2 px-4 pt-3">
           <Alert className="py-2.5">
@@ -251,7 +258,7 @@ export default function Home() {
                 transition={{ duration: 0.25, ease: "easeOut" }}
                 className="flex justify-end"
               >
-                <div className="max-w-[85%] rounded-2xl rounded-br-sm bg-primary px-4 py-2.5 text-sm leading-relaxed text-primary-foreground">
+                <div className="max-w-[85%] rounded-2xl rounded-br-sm bg-[image:linear-gradient(140deg,var(--color-cyan-600),var(--color-teal-700))] px-4 py-2.5 text-sm leading-relaxed text-white shadow-sm shadow-cyan-700/20">
                   {msg.text}
                 </div>
               </motion.div>
@@ -269,7 +276,7 @@ export default function Home() {
                 >
                   <Sparkles className="size-4" />
                 </div>
-                <div className="min-w-0 flex-1 space-y-2.5 rounded-2xl rounded-tl-sm border bg-card px-4 py-3 shadow-xs">
+                <div className="min-w-0 flex-1 space-y-2.5 rounded-2xl rounded-tl-sm bg-card/85 px-4 py-3 shadow-sm shadow-foreground/5 ring-1 ring-foreground/10 backdrop-blur-sm">
                   <div className="flex flex-wrap items-center gap-2">
                     {msg.route && <RouteBadge route={msg.route} reason={msg.reason} />}
                   </div>
@@ -278,7 +285,7 @@ export default function Home() {
                   {msg.slotQ && <SlotCard slot={msg.slotQ.slot} />}
                   {msg.text && <Answer text={msg.text} />}
                   {!msg.text && !msg.status && msg.steps.length === 0 && !msg.done && (
-                    <StatusLine text="思考中…" />
+                    <TypingDots />
                   )}
 
                   {msg.pendingAction && !msg.actionResult && msg.done && (
@@ -324,7 +331,7 @@ export default function Home() {
               </button>
             ))}
           </div>
-          <div className="flex items-end gap-2 rounded-2xl border bg-card p-2 shadow-xs focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/20">
+          <div className="flex items-end gap-2 rounded-2xl border bg-card/80 p-2 shadow-lg shadow-foreground/5 backdrop-blur-md transition-colors focus-within:border-primary/40 focus-within:ring-4 focus-within:ring-primary/10">
             <Select value={role} onValueChange={(v) => setRole(v as Role)}>
               <SelectTrigger className="h-9 w-27 shrink-0" aria-label="演示身份（权限不同）">
                 <SelectValue>{ROLE_OPTIONS.find((o) => o.value === role)?.label}</SelectValue>
@@ -364,7 +371,11 @@ export default function Home() {
             />
             <div className="shrink-0">
               <ClickSpark sparkColor="#ffffff" sparkCount={8} duration={500}>
-                <Button onClick={() => send()} disabled={sending || !input.trim()} className="h-9">
+                <Button
+                  onClick={() => send()}
+                  disabled={sending || !input.trim()}
+                  className="h-9 bg-[image:linear-gradient(140deg,var(--color-cyan-500),var(--color-teal-600))] text-white shadow-md shadow-cyan-600/25 transition-all hover:bg-[image:linear-gradient(140deg,var(--color-cyan-400),var(--color-teal-500))] hover:shadow-lg hover:shadow-cyan-600/30"
+                >
                   {sending ? <Loader2 className="animate-spin" aria-hidden /> : <Send aria-hidden />}
                   {sending ? "处理中…" : "发送"}
                 </Button>

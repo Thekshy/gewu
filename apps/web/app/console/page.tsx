@@ -89,17 +89,20 @@ function Health({ health }: { health: HealthInfo | null }) {
         </Badge>
       </div>
       <p className="text-muted-foreground">
-        语料 <CountUp to={health.docs} duration={1} /> 篇 /{" "}
-        <CountUp to={health.chunks} duration={1} /> chunks
+        语料 <CountUp to={health.docs} duration={1} className="font-semibold text-primary" /> 篇 /{" "}
+        <CountUp to={health.chunks} duration={1} className="font-semibold text-primary" /> chunks
       </p>
       <div className="space-y-1.5">
         <p className="text-xs text-muted-foreground">
           今日 token 预算{" "}
-          <CountUp to={health.budget.used} duration={1.5} separator="," /> /{" "}
+          <CountUp to={health.budget.used} duration={1.5} separator="," className="font-semibold text-primary" /> /{" "}
           {health.budget.limit.toLocaleString()}
           <span className="ml-2 tabular-nums">{pct.toFixed(1)}%</span>
         </p>
-        <Progress value={pct} className="max-w-sm" />
+        <Progress
+          value={pct}
+          className="max-w-sm [&_[data-slot=progress-indicator]]:bg-gradient-to-r [&_[data-slot=progress-indicator]]:from-cyan-500 [&_[data-slot=progress-indicator]]:to-teal-500"
+        />
       </div>
     </div>
   );

@@ -1,5 +1,6 @@
 "use client";
 
+import { motion } from "motion/react";
 import {
   BookMarked,
   CheckCircle2,
@@ -59,6 +60,25 @@ export function StatusLine({ text }: { text: string }) {
   );
 }
 
+/** 等待 LLM 首包的弹跳圆点指示器（比 spinner+文字更有「在思考」的呼吸感）。 */
+export function TypingDots({ label = "思考中" }: { label?: string }) {
+  return (
+    <span className="inline-flex items-center gap-2.5 text-sm text-muted-foreground">
+      <span className="inline-flex items-center gap-1" aria-hidden>
+        {[0, 1, 2].map((i) => (
+          <motion.span
+            key={i}
+            className="size-1.5 rounded-full bg-primary/70"
+            animate={{ y: [0, -4, 0], opacity: [0.35, 1, 0.35] }}
+            transition={{ duration: 0.9, repeat: Infinity, delay: i * 0.15, ease: "easeInOut" }}
+          />
+        ))}
+      </span>
+      {label}…
+    </span>
+  );
+}
+
 export function ResearchTrace({ steps, defaultOpen }: { steps: Step[]; defaultOpen: boolean }) {
   if (steps.length === 0) return null;
   return (
@@ -110,30 +130,33 @@ export function ConfirmCard({
   disabled?: boolean;
 }) {
   return (
-    <Card className="gap-3 py-4">
-      <CardHeader>
-        <CardTitle className="text-sm">
-          待确认 · {pending.label}
-          <span className="ml-2 font-mono text-xs font-normal text-muted-foreground">{pending.tool}</span>
-        </CardTitle>
-      </CardHeader>
-      <CardContent>
-        <dl className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-1 text-sm">
-          {Object.entries(pending.args).map(([k, v]) => (
-            <div key={k} className="col-span-2 grid grid-cols-subgrid">
-              <dt className="text-muted-foreground">{k}</dt>
-              <dd className="break-words font-medium">{v}</dd>
-            </div>
-          ))}
-        </dl>
-      </CardContent>
-      <CardFooter className="gap-2">
-        <Button onClick={onConfirm} disabled={disabled}>{confirmLabel}</Button>
-        <Button variant="outline" onClick={onCancel} disabled={disabled}>
-          取消
-        </Button>
-      </CardFooter>
-    </Card>
+    // 渐变描边（p-px + 内层圆角）让「待确认」卡成为消息流里最亮的一块
+    <div className="rounded-xl bg-gradient-to-br from-primary/50 via-primary/15 to-transparent p-px shadow-sm">
+      <Card className="gap-3 rounded-[11px] border-0 bg-card py-4 shadow-none ring-0">
+        <CardHeader>
+          <CardTitle className="text-sm">
+            待确认 · {pending.label}
+            <span className="ml-2 font-mono text-xs font-normal text-muted-foreground">{pending.tool}</span>
+          </CardTitle>
+        </CardHeader>
+        <CardContent>
+          <dl className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-1 text-sm">
+            {Object.entries(pending.args).map(([k, v]) => (
+              <div key={k} className="col-span-2 grid grid-cols-subgrid">
+                <dt className="text-muted-foreground">{k}</dt>
+                <dd className="break-words font-medium">{v}</dd>
+              </div>
+            ))}
+          </dl>
+        </CardContent>
+        <CardFooter className="gap-2">
+          <Button onClick={onConfirm} disabled={disabled}>{confirmLabel}</Button>
+          <Button variant="outline" onClick={onCancel} disabled={disabled}>
+            取消
+          </Button>
+        </CardFooter>
+      </Card>
+    </div>
   );
 }
 
