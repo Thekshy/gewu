@@ -76,7 +76,9 @@ def build_agent_tools(llm, business, tools: dict, retriever: Retriever) -> list:
         """混合检索校园政策知识库（转专业/保研/奖学金/图书馆/宿舍/校历/请假规定等），返回带来源的条款原文。
 
         回答任何校园政策、制度、规定类事实问题前必须先用本工具检索；
-        引用资料时标注 [编号] 与文档标题。k 为返回条数（1~10）。
+        query 必须保留用户原话中的关键实体与数字，再补充政策术语
+        （如：最多→上限，挂科→不及格/补考）；引用资料时标注 [编号] 与
+        文档标题。k 为返回条数（1~10）。
         """
         emit(ev.status_evt("检索知识库…"))
         q = (query or "").strip()
@@ -85,7 +87,8 @@ def build_agent_tools(llm, business, tools: dict, retriever: Retriever) -> list:
                 update={"messages": [_tool_msg(runtime, "缺少参数 query", "search_knowledge")]}
             )
         n = int(k) if isinstance(k, (int, float)) and 1 <= int(k) <= 10 else 5
-        hits = [_hit_dict(h) for h in retriever.search(q, n)]
+        # expand=False：query 已是本工具调用方提炼的关键词串，跳过 rewriter 二次改写（P24-2）
+        hits = [_hit_dict(h) for h in retriever.search(q, n, expand=False)]
         if not hits:
             return Command(
                 update={"messages": [_tool_msg(runtime, "未检索到相关资料。", "search_knowledge")]}
@@ -124,7 +127,8 @@ def build_agent_tools(llm, business, tools: dict, retriever: Retriever) -> list:
         pool: dict[int, dict] = {}
         order: list[int] = []
         for i, sub in enumerate(subs):
-            hits = [_hit_dict(h) for h in retriever.search(sub, retriever.k)]
+            # expand=False：sub 是 plan 拆解产物已是关键词串（P24-2）
+            hits = [_hit_dict(h) for h in retriever.search(sub, retriever.k, expand=False)]
             titles: list[str] = []
             seen: set[str] = set()
             for h in hits[:3]:

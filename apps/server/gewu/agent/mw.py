@@ -15,10 +15,16 @@
   （classic tx_confirm 语义），在 HITL 中断之前发射。
 - RouteEventMiddleware：after_agent 按本轮工具轨迹合成 effective route 补发
   （两段式第二段）。
+- SearchQueryGuardMiddleware：search_knowledge 检索词与原问题零重合时拼回
+  原话（P24-3；docstring 引导是软防线，本件是硬防线）。
+
+P24-1：UsageRecordMiddleware 兼任 agent 主循环 [llm] per-call 观测（ms +
+ctx_profile，补 create_agent 内部 model.invoke 不经 LLMService 封装的盲区）。
 """
 
 from __future__ import annotations
 
+import time
 from typing import Annotated, Any, NotRequired
 
 from langchain.agents.middleware import AgentMiddleware
@@ -29,6 +35,7 @@ from gewu.agent import events as ev
 from gewu.agent.emitter import emit
 from gewu.agent.prompts import agent_system_prompt
 from gewu.agent.tx import FLOW_DEFS, build_confirm, normalize_slot, slot_meta
+from gewu.llm.service import ctx_profile
 
 # 写工具四件（HITL 确认门对象，与 tools.py read_only=False 对齐）。
 WRITE_TOOLS = {"book_venue", "cancel_booking", "submit_leave", "approve_leave"}
@@ -141,14 +148,25 @@ class AgentPromptMiddleware(AgentMiddleware):
 
 
 class UsageRecordMiddleware(AgentMiddleware):
-    """主循环用量记账（LLMService 预算闸口径；classic 链路在 LLMService 内记）。"""
+    """主循环用量记账（LLMService 预算闸口径；classic 链路在 LLMService 内记）。
+
+    P24-1 兼任观测：每次模型调用打 [llm] agent主循环一行（ms + ctx_profile），
+    补 agent 主循环不经 chat_stream/chat_with_tools 封装的埋点盲区；格式含
+    chars= 使 log-report.sh 的 ctx_chars 聚合自动吃到主循环数据。
+    """
 
     def __init__(self, llm) -> None:
         super().__init__()
         self._llm = llm
 
     def wrap_model_call(self, request, handler):
+        t0 = time.monotonic()
         resp = handler(request)
+        print(
+            f"[llm] agent主循环 ms={int((time.monotonic() - t0) * 1000)} "
+            f"{ctx_profile(request.messages)}",
+            flush=True,
+        )
         for m in resp.result:
             usage = getattr(m, "usage_metadata", None)
             if usage:
@@ -247,6 +265,38 @@ class ResearchLimitMiddleware(AgentMiddleware):
                 name="deep_research",
                 tool_call_id=request.tool_call.get("id", ""),
             )
+        return handler(request)
+
+
+def _cjk_bigrams(s: str) -> set[str]:
+    """二字滑窗 bigram 集（丢词判定用，免分词器）。"""
+    return {s[i : i + 2] for i in range(len(s) - 1)}
+
+
+class SearchQueryGuardMiddleware(AgentMiddleware):
+    """search_knowledge 完全丢原词时代码兜底拼回原问题（P24-3）。
+
+    GLM 无视否定指令是已知坑（docstring 引导是软防线，本件是硬防线）。
+    只在原问题与检索词的 bigram 交集为空（完全丢词）时干预——拼接是增补
+    不是替换，召回只增不减；有重合（保住核心实体）则放行，避免口语原话
+    摊薄 BM25 关键词权重。deep_research 不拦：sub 是 plan 拆解产物本非原话。
+    """
+
+    def wrap_tool_call(self, request, handler):
+        call = request.tool_call
+        if call.get("name") != "search_knowledge":
+            return handler(request)
+        args = call.get("args") or {}
+        query = str(args.get("query", "") or "")
+        question = ""
+        for m in reversed(request.state.get("messages") or []):
+            if isinstance(m, HumanMessage):
+                question = str(m.content)
+                break
+        if query and question and not (_cjk_bigrams(question) & _cjk_bigrams(query)):
+            call = {**call, "args": {**args, "query": f"{question} {query}"}}
+            print(f"[rag] 检索词与原问题零重合，已拼回原问题：q={query!r}", flush=True)
+            return handler(request.override(tool_call=call))
         return handler(request)
 
 

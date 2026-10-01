@@ -285,3 +285,28 @@ def test_single_way_fallback_normalizes_scores():
     rr = Retriever(_store_two_ways(), k=3, client=FakeLLM(has_key=False))
     hits = rr.search("q", 3)
     assert [h.chunk_id for h in hits] == [9, 3]
+
+
+# ---------- P24-2：expand 参数与改写去重 ----------
+
+
+def test_search_expand_false_skips_rewriter():
+    llm = FakeLLM(rewrite="上限 外借数量")
+    rr = Retriever(_store_two_ways(), k=3, client=llm)
+    rr.search("工具自拟关键词串", 3, expand=False)
+    assert llm.chat_calls == []  # 未走 rewriter（reranker 缺省关 → 零 LLM 调用）
+
+
+def test_search_expand_true_still_rewrites():
+    llm = FakeLLM(rewrite="上限 外借数量")
+    rr = Retriever(_store_two_ways(), k=3, client=llm)
+    rr.search("最多能借几本", 3)
+    assert llm.chat_calls[0][0].startswith("你是校园政策检索的查询改写器")
+
+
+def test_rewriter_expand_dedupes_repeated_tokens():
+    # 线上实证场景：改写输出重复「食堂位置」→ 保序去重后只留一个
+    llm = FakeLLM(rewrite="食堂位置 用餐安排 食堂位置")
+    rr = Retriever(_store_two_ways(), k=3, client=llm)
+    out = rr.rewriter.expand("食堂位置 就餐指南")
+    assert out == "食堂位置 就餐指南 用餐安排"

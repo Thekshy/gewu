@@ -10,7 +10,9 @@ from langchain.agents.middleware.types import ModelRequest, ModelResponse, ToolC
 from langchain_core.messages import AIMessage, HumanMessage, ToolMessage
 
 from gewu.agent.mw import (
+    SearchQueryGuardMiddleware,
     TruncationDefenseMiddleware,
+    UsageRecordMiddleware,
     WriteSlotGateMiddleware,
     _merge_citations,
     effective_route,
@@ -258,3 +260,70 @@ def test_resume_confirm_word_beats_soft_supplement(biz):
     }
     dec = hitl_decisions(payload, "确认", FakeAgentLLM(), biz)
     assert dec["decisions"] == [{"type": "approve"}]
+
+
+# ---------- P24-1/P24-3：主循环埋点与检索词代码闸 ----------
+
+
+def test_usage_record_prints_agent_loop_telemetry(capsys):
+    class _Svc:
+        def record_usage(self, n):
+            pass
+
+    mw = UsageRecordMiddleware(_Svc())
+    req = ModelRequest(model=None, messages=[HumanMessage(content="问"), AIMessage(content="答")])
+    mw.wrap_model_call(req, lambda r: ModelResponse(result=[AIMessage(content="答")]))
+    out = capsys.readouterr().out
+    assert "[llm] agent主循环 ms=" in out
+    assert "msgs=2 chars=" in out  # ctx_profile 复用（log-report.sh 的 chars= 正则兼容）
+
+
+def _guard_req(name: str, args: dict, question: str) -> ToolCallRequest:
+    return ToolCallRequest(
+        tool_call=_tool_call(name, args),
+        tool=None,
+        state={"messages": [HumanMessage(content=question)]},
+        runtime=None,
+    )
+
+
+def test_search_query_guard_appends_question_on_zero_overlap():
+    mw = SearchQueryGuardMiddleware()
+    seen = []
+
+    def handler(r):
+        seen.append(r.tool_call["args"]["query"])
+        return ToolMessage(content="ok", tool_call_id="c1")
+
+    req = _guard_req("search_knowledge", {"query": "补考安排"}, "体育挂科了怎么办")
+    mw.wrap_tool_call(req, handler)
+    assert seen == ["体育挂科了怎么办 补考安排"]  # 零重合：原话拼在前（增补不替换）
+
+
+def test_search_query_guard_passes_when_entity_kept():
+    mw = SearchQueryGuardMiddleware()
+    seen = []
+
+    def handler(r):
+        seen.append(r.tool_call["args"]["query"])
+        return ToolMessage(content="ok", tool_call_id="c1")
+
+    # 线上实例：「食堂」bigram 命中 → 不干预
+    req = _guard_req("search_knowledge", {"query": "食堂位置 就餐指南"}, "你知道学校食堂在哪买")
+    mw.wrap_tool_call(req, handler)
+    assert seen == ["食堂位置 就餐指南"]
+
+
+def test_search_query_guard_ignores_deep_research():
+    mw = SearchQueryGuardMiddleware()
+    seen = []
+
+    def handler(r):
+        seen.append(r.tool_call["args"]["question"])
+        return ToolMessage(content="ok", tool_call_id="c1")
+
+    # deep_research 不拦：sub 是 plan 拆解产物本非原话
+    mw.wrap_tool_call(
+        _guard_req("deep_research", {"question": "转专业并且保研"}, "转专业和保研冲突吗"), handler
+    )
+    assert seen == ["转专业并且保研"]

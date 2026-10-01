@@ -91,10 +91,13 @@ class Retriever:
         self.keyword_weight = keyword_weight
         self.rerank_threshold = rerank_threshold
 
-    def search(self, query: str, k: int = 0) -> list[Hit]:
+    def search(self, query: str, k: int = 0, *, expand: bool = True) -> list[Hit]:
+        """expand=False 供工具路径跳过二次改写——query 已是 LLM 提炼的关键词串，
+        再过 rewriter 构成双重改写（P24-2；线上实证重复词「食堂位置」×2）。"""
         if k <= 0:
             k = self.k
-        query = self.rewriter.expand(query)  # 口语 → 政策术语（无 key 时原样返回）
+        if expand:
+            query = self.rewriter.expand(query)  # 口语 → 政策术语（无 key 时原样返回）
 
         has_emb = self.store.has_embeddings()
         if not has_emb:
@@ -263,6 +266,8 @@ class Rewriter:
             return query
         rewritten = rewritten.strip('"“” \n\t')
         result = f"{query} {rewritten}" if rewritten else query
+        # 去重（P24-2）：改写串与原词按空格 token 保序去重（线上实证「食堂位置」×2）
+        result = " ".join(dict.fromkeys(result.split())) if result else result
         with self._mu:
             self._cache[query] = result
         return result

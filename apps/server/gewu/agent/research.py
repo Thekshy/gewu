@@ -53,7 +53,8 @@ def run_research(state: dict, llm: LLMService, retriever: Retriever) -> dict:
     pool: dict[int, dict] = {}  # chunk_id → Hit，跨子问题去重
     order: list[int] = []  # 到达顺序
     for i, sub in enumerate(subquestions):
-        hits = [_hit_to_dict(h) for h in retriever.search(sub)]
+        # expand=False：sub 是 plan 拆解产物已是关键词串（P24-2）
+        hits = [_hit_to_dict(h) for h in retriever.search(sub, expand=False)]
         titles: list[str] = []
         seen: set[str] = set()
         for h in hits[:3]:

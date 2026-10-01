@@ -12,6 +12,7 @@ classic 分支保持手写图不动（对照组双底座叙事）。中间件栈
     HumanInTheLoopMiddleware   after_model：写工具四件 interrupt 确认门
     PendingActionMiddleware    after_model：确认摘要先于中断发射
     WriteSlotGateMiddleware    wrap_tool_call：缺必填参数 → slot_question 收集
+    SearchQueryGuardMiddleware wrap_tool_call：检索词零重合拼回原话（P24-3）
     RouteEventMiddleware       after_agent：effective route 合成补发
     SummarizationMiddleware    上下文压缩（P13 顺延线收口）
 """
@@ -35,6 +36,7 @@ from gewu.agent.mw import (
     PendingActionMiddleware,
     ResearchLimitMiddleware,
     RouteEventMiddleware,
+    SearchQueryGuardMiddleware,
     TruncationDefenseMiddleware,
     UsageRecordMiddleware,
     WriteSlotGateMiddleware,
@@ -79,6 +81,7 @@ def build_agent(settings, llm, retriever, business, tools: dict):
             PendingActionMiddleware(business),
             WriteSlotGateMiddleware(business),
             ResearchLimitMiddleware(),
+            SearchQueryGuardMiddleware(),
             RouteEventMiddleware(),
             SummarizationMiddleware(
                 model=small_model,

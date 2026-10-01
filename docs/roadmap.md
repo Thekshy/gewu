@@ -90,3 +90,13 @@
       服务端显式创建/历史完整恢复/独立页 /memory 三拍板）
 - [ ] P23 管理后台：admin 用户/用量/会话巡查 + 邀请码发放 UI + per-user
       token 预算
+- [x] P24 线上观测补盲与检索链路提速：agent 主循环 [llm] per-call 埋点
+      （UsageRecordMiddleware，闭 538b9cf 盲区）+ 工具路径免二次改写
+      （search expand=False + Rewriter 去重，线上「食堂位置」×2 实证）+
+      检索词丢原话代码闸（SearchQueryGuardMiddleware）+ 延迟归因真跑
+      （auto 轮 14837ms 拆账，POOL_N 缩缩减评测门禁可选）——线上日志取证
+      2026-10-01，语料缺口线暂缓——
+      [P24 任务书](runbooks/P24-telemetry-and-retrieval-tuning.md)（2026-10-01
+      执行完毕：212 测全绿、线上三轮真跑（食堂轮 agent主循环 ×2 埋点落地
+      5026+3112ms、检索串重复词消失、办理 VE-0272）、两次主模型串行占 56%
+      坐实结构性成本、POOL_N 未达加菜门槛）

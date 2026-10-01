@@ -79,7 +79,7 @@ class FakeRetriever:
         self.calls: list[str] = []
         self.k = 5
 
-    def search(self, query: str, k: int) -> list[Hit]:
+    def search(self, query: str, k: int = 0, *, expand: bool = True) -> list[Hit]:
         self.calls.append(query)
         return list(self.hits)
 
