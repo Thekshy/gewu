@@ -20,7 +20,7 @@ from gewu.business.db import Business
 from gewu.config import load_dotenv
 from gewu.memory import MemoryStore
 from gewu.rag.store import Store
-from gewu.session.store import SessionStore
+from gewu.session.store import FeedbackStore, SessionStore
 from gewu.usage import UsageStore
 
 LOCK_KEY = 941012  # 与 Go testLockKey 同值（任意常量，全仓库唯一即可）
@@ -126,6 +126,19 @@ def _sess_store(pg_lock: str, pg_dsn: str) -> SessionStore:
 def sess(_sess_store: SessionStore) -> SessionStore:
     _sess_store.wipe()
     return _sess_store
+
+
+@pytest.fixture(scope="session")
+def _fb_store(pg_lock: str, pg_dsn: str) -> FeedbackStore:
+    fb = FeedbackStore(pg_dsn)
+    yield fb
+    fb.close()
+
+
+@pytest.fixture
+def fb(_fb_store: FeedbackStore) -> FeedbackStore:
+    _fb_store.wipe()
+    return _fb_store
 
 
 @pytest.fixture(scope="session")

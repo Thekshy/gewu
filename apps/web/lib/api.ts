@@ -249,6 +249,23 @@ export async function deleteFact(kind: FactKind, key: string): Promise<void> {
   if (!res.ok) throw new Error(await detailOf(res));
 }
 
+// ---------- 消息反馈（P25：america.gov Good/Bad response 同款，upsert 覆盖语义） ----------
+
+export type FeedbackRating = "good" | "bad";
+
+export async function sendFeedback(
+  sessionId: string,
+  question: string,
+  rating: FeedbackRating,
+): Promise<void> {
+  const res = await apiFetch(`${API_BASE}/api/feedback`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ session_id: sessionId, question, rating }),
+  });
+  if (!res.ok) throw new Error(await detailOf(res));
+}
+
 // ---------- 管理后台（P23：均 admin） ----------
 
 export interface AdminStats {

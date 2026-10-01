@@ -88,6 +88,28 @@ token 记账按用户落 PG 并配 per-user 限额闸。以下条目**修订/新
 - `users` 表加列 `daily_token_limit BIGINT NULL`（幂等 ALTER）。
 - 前端 nav 第五项「管理」仅 admin 渲染；`/admin` 页守卫 `useRequireAdmin`。
 
+## 0.8 P25 对话体验契约（follow_ups 事件 + feedback 端点 + 机构蓝换肤）
+
+P25 起回答侧增加渐进增强三件（对标 america.gov/chat，DESIGN.md 同步改版 P25
+机构蓝版）；以下条目**新增**本文相应原文：
+
+- **SSE 新事件 `follow_ups`**（§3 事件表同步）：在 `done` **之后**追发
+  `{"type":"follow_ups","items":[str,…]}`——生成走小模型通道（flash），
+  8s 超时/异常静默降级（无事件=无追问）。**生成门（Q5）**：仅
+  `route ∈ {factual,research,hybrid}` 且 `reason=completed` 且无 HITL
+  悬停（`snap.next` 非空 = 确认门在等用户）时生成。输出过三层代码守卫
+  （JSON 解析/长度 6~30/不等于原问/保序去重/剩余 ≥2），残缺即弃。
+  前端契约：`done` 即解锁输入（follow_ups 晚到渐进渲染，不阻塞下一问）。
+- **新端点 `POST /api/feedback`**（§2 路由表同步）：`{session_id, question,
+  rating}`，rating ∈ good|bad；登录 + 会话归属校验（他人/不存在统一 404）；
+  成功 204。**upsert 覆盖语义**：唯一键 `("user", session_id, question)`，
+  同轮改主意覆盖不双行；question ≤500 与 chat 同限。无 GET（admin 聚合
+  留 P23 台账后续）。新表 `message_feedback`（探测式软降级：PG 不可达
+  端点 503，不拦主链路）。
+- **前端换肤**：token 层机构蓝替换（primary `#1a3a5c`/canvas `#fafbfd`/
+  新 `--link` `#1157d0`/暗色海军蓝 `#10161f`+冰蓝 `#8ab0dd`），用户消息
+  改 primary 实底气泡，prose 链接走 link 蓝。DESIGN.md P25 版为契约本体。
+
 ## 1. 服务总览
 
 - 监听端口 `:8000`(HTTP)。
@@ -125,6 +147,7 @@ token 记账按用户落 PG 并配 per-user 限额闸。以下条目**修订/新
 | GET | `/api/admin/sessions` | 会话巡查（P23，admin，列表级） |
 | DELETE | `/api/admin/sessions/{id}` | 删任一会话（P23，admin，连带） |
 | GET | `/api/admin/usage` | 用量趋势与 top（P23，admin） |
+| POST | `/api/feedback` | 消息反馈 👍/👎（P25，upsert 覆盖） |
 
 ### 2.1 GET /api/health
 
@@ -194,6 +217,7 @@ k/query 越界返回 422。【差异决定】FastAPI 的 pydantic 校验错误�
 | `action_result` | `tool`, `success`, `message`, `receipt`(可 null) | 工具执行结果 |
 | `error` | `message` | 兜底错误(含预算超限),后跟 done |
 | `done` | `latency_ms`(整型,本轮耗时), `reason`(可选,见 §4) | 每轮最后一个事件 |
+| `follow_ups` | `items: [str,…]`(2~3 条追问) | P25:done **之后**追发(渐进增强);生成门=知识型路由+completed+无 HITL 悬停,失败/超时静默不发(§0.8) |
 
 `route` 取值:`factual | research | refusal | transaction | hybrid`。
 

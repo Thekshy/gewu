@@ -12,6 +12,8 @@ P22：session_id 必填且必须为已登记属本人的会话（POST /api/sessi
 刷 updated_at + 首见空 title 回填首问前 20 字（SessionStore.note_turn）。
 P23：per-user token 限额闸（users.daily_token_limit ?? DAILY_USER_BUDGET，
 超限 429 文案区分全局闸）；contextvar set 供 LLMService 记账归属。
+P25：done 之后按 Q5 门追发 follow_ups 事件（知识型路由+正常收尾+无 HITL
+悬停才生成；flash 小模型 8s 超时静默降级——主路径零延迟增量）。
 """
 
 from __future__ import annotations
@@ -26,6 +28,7 @@ from fastapi import APIRouter, Body, HTTPException, Request
 from fastapi.responses import StreamingResponse
 
 from gewu.agent import events as ev
+from gewu.agent.followups import generate_follow_ups, should_generate
 from gewu.agent.state import new_state
 from gewu.api.auth import require_user
 from gewu.usage import current_user
@@ -157,6 +160,8 @@ def chat(request: Request, payload: Annotated[dict, Body(...)]):
         t0 = time.monotonic()
         truncated = False
         answer = ""
+        citations: list[dict] = []
+        hitl_paused = False
         trace = {"route": "", "route_layer": "", "steps": 0, "tool": 0}
 
         def turn_log(reason: str) -> None:
@@ -199,16 +204,21 @@ def chat(request: Request, payload: Annotated[dict, Body(...)]):
                 if t == "route":
                     trace["route"] = evt.get("route", "")
                     trace["route_layer"] = evt.get("layer", "")
+                elif t == "citations":
+                    citations = evt.get("items") or []
                 elif t in ("status", "step"):
                     trace["steps"] += 1
                 elif t in ("pending_action", "action_result"):
                     trace["tool"] += 1
                 yield _sse(evt)
-            # 终态读取（interrupt 悬停时为当前值）：answer/truncated 单点真相。
+            # 终态读取（interrupt 悬停时为当前值）：answer/truncated 单点真相；
+            # snap.next 非空 = HITL 确认门悬停（follow_ups 的 Q5 门输入之一）。
             try:
-                vals = graph.get_state(config).values or {}
+                snap = graph.get_state(config)
+                vals = snap.values or {}
                 truncated = bool(vals.get("truncated"))
                 answer = vals.get("answer") or ""
+                hitl_paused = bool(snap.next)
             except Exception:  # noqa: BLE001
                 pass
         except GeneratorExit:
@@ -222,6 +232,15 @@ def chat(request: Request, payload: Annotated[dict, Body(...)]):
         reason = "max_tokens" if truncated else "completed"
         turn_log(reason)
         yield _sse(ev.done_evt(int((time.monotonic() - t0) * 1000), reason))
+        # P25：追问在 done 之后追发（前端 done 即解锁输入，晚到不阻塞下一问）；
+        # Q5 门 + 三层守卫 + 8s 超时全在 followups 模块内，失败静默无事件。
+        if should_generate(trace["route"], reason, hitl_paused):
+            titles = [str(c.get("title") or "") for c in citations]
+            items = generate_follow_ups(
+                request.app.state.llm, req["user"], req["question"], answer, titles
+            )
+            if items:
+                yield _sse(ev.follow_ups_evt(items))
         if os.environ.get("MEMORY_CONSOLIDATE", "on") == "on":
             _consolidate_async(request, req, req["question"], answer)
 

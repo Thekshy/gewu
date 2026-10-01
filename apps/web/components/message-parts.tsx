@@ -1,16 +1,22 @@
 "use client";
 
+import { useState } from "react";
 import { motion } from "motion/react";
 import {
   BookMarked,
+  Check,
   CheckCircle2,
   ChevronRight,
+  Copy,
   Loader2,
+  ThumbsDown,
+  ThumbsUp,
   XCircle,
 } from "lucide-react";
 import type { ActionResult, Citation, DoneReason, PendingAction, Step } from "@/lib/api";
 import { DONE_BADGE, ROUTE_LABEL, SLOT_LABEL } from "@/lib/labels";
 import { cn } from "@/lib/utils";
+import SourcesDialog from "@/components/sources-dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
@@ -33,7 +39,8 @@ import {
 } from "@/components/ui/tooltip";
 
 /** 聊天主页与 compare 轨道共用的消息积木：路由徽章 / 研究过程 / 槽位卡 /
- * 确认卡 / 回执 / 引用 / 结束元信息。纯展示，不含任何数据流。 */
+ * 确认卡 / 回执 / 引用 / 消息操作条 / 结束元信息。纯展示不含数据流——
+ * 反馈上报由页面层经 onFeedback 回调注入（P25）。 */
 
 const ROUTE_VARIANT: Record<string, "default" | "secondary" | "outline" | "destructive"> = {
   factual: "secondary",
@@ -194,6 +201,85 @@ export function CitationsRow({ citations, withSource }: { citations: Citation[];
           <TooltipContent className="font-mono text-xs">{c.doc_id}</TooltipContent>
         </Tooltip>
       ))}
+    </div>
+  );
+}
+
+export function MessageActions({
+  citations,
+  text,
+  feedback,
+  onFeedback,
+  onlyCopy,
+}: {
+  citations: Citation[];
+  text: string;
+  feedback?: "good" | "bad" | null;
+  onFeedback?: (rating: "good" | "bad") => void;
+  onlyCopy?: boolean;
+}) {
+  /** P25-3 消息操作条（DESIGN.md message-actions）：回答底部的安静尾件——
+   * 「来源 N」（开 SourcesDialog）/ 👍 / 👎 / 复制。无底色不套卡；历史恢复的
+   * 静态消息 onlyCopy（事件级细节不恢复）。反馈上报走回调（本组件纯展示）。 */
+  const [copied, setCopied] = useState(false);
+
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(text);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+    } catch {
+      // 剪贴板不可用（非安全上下文等）：静默，按钮态不变
+    }
+  }
+
+  return (
+    <div className="mt-1 flex flex-wrap items-center gap-1.5">
+      {!onlyCopy && citations.length > 0 && <SourcesDialog citations={citations} />}
+      {!onlyCopy && (
+        <>
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label="这个回答有帮助"
+            className={
+              "size-7 text-muted-foreground" +
+              (feedback === "good" ? " text-primary" : " hover:text-foreground")
+            }
+            disabled={feedback != null}
+            onClick={() => onFeedback?.("good")}
+          >
+            <ThumbsUp className="size-3.5" aria-hidden />
+          </Button>
+          <Button
+            variant="ghost"
+            size="icon"
+            aria-label="这个回答没有帮助"
+            className={
+              "size-7 text-muted-foreground" +
+              (feedback === "bad" ? " text-primary" : " hover:text-foreground")
+            }
+            disabled={feedback != null}
+            onClick={() => onFeedback?.("bad")}
+          >
+            <ThumbsDown className="size-3.5" aria-hidden />
+          </Button>
+        </>
+      )}
+      <Button
+        variant="ghost"
+        size="sm"
+        aria-label="复制回答全文"
+        className="h-7 gap-1.5 px-2 text-xs font-normal text-muted-foreground hover:text-foreground"
+        onClick={() => void copy()}
+      >
+        {copied ? (
+          <Check className="size-3.5" aria-hidden />
+        ) : (
+          <Copy className="size-3.5" aria-hidden />
+        )}
+        {copied ? "已复制" : "复制"}
+      </Button>
     </div>
   );
 }

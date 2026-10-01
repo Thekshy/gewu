@@ -171,3 +171,71 @@ class SessionStore:
                 ' WHERE session_id = %s AND "user" = %s',
                 (first_question[:title_limit], session_id, user),
             )
+
+
+# ---------- P25-2：消息反馈（👍/👎 落库，upsert 覆盖语义） ----------
+
+_FEEDBACK_SCHEMA = """
+CREATE TABLE IF NOT EXISTS message_feedback (
+    id         BIGSERIAL PRIMARY KEY,
+    "user"     TEXT NOT NULL,
+    session_id TEXT NOT NULL,
+    question   TEXT NOT NULL,
+    rating     TEXT NOT NULL CHECK (rating IN ('good', 'bad')),
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    UNIQUE ("user", session_id, question)
+);
+"""
+
+
+class FeedbackStore:
+    """消息反馈存储：一轮一评（唯一键 "user"+session_id+question），改主意覆盖不双行。"""
+
+    def __init__(self, dsn: str) -> None:
+        self._pool = ConnectionPool(dsn, min_size=1, max_size=2, open=True, name="gewu-fb")
+        with self._pool.connection() as conn:
+            conn.execute(_FEEDBACK_SCHEMA)
+
+    def close(self) -> None:
+        self._pool.close()
+
+    def wipe(self) -> None:
+        """测试专用：清全表。"""
+        with self._pool.connection() as conn:
+            conn.execute("DELETE FROM message_feedback")
+
+    def upsert(self, user: str, session_id: str, question: str, rating: str) -> None:
+        if rating not in ("good", "bad"):
+            raise ValueError("rating 必须为 good/bad")
+        with self._pool.connection() as conn:
+            conn.execute(
+                'INSERT INTO message_feedback ("user", session_id, question, rating)'
+                " VALUES (%s, %s, %s, %s)"
+                ' ON CONFLICT ("user", session_id, question)'
+                " DO UPDATE SET rating = EXCLUDED.rating, created_at = now()",
+                (user, session_id, question, rating),
+            )
+
+    def get(self, user: str, session_id: str, question: str) -> str | None:
+        """单评读取（测试与后续 admin join 用）。"""
+        with self._pool.connection() as conn:
+            row = conn.execute(
+                'SELECT rating FROM message_feedback WHERE "user" = %s'
+                " AND session_id = %s AND question = %s",
+                (user, session_id, question),
+            ).fetchone()
+        return row[0] if row else None
+
+    def count(self) -> int:
+        with self._pool.connection() as conn:
+            row = conn.execute("SELECT COUNT(*) FROM message_feedback").fetchone()
+        return int(row[0])
+
+
+def make_feedback_store(dsn: str) -> FeedbackStore | None:
+    """探测式软降级（make_usage_store 同款）：PG 不可达返回 None，端点 503。"""
+    try:
+        return FeedbackStore(dsn)
+    except Exception as e:  # noqa: BLE001
+        print(f"[app] message_feedback 不可用（{e}），/api/feedback 将 503", flush=True)
+        return None

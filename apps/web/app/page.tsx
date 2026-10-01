@@ -2,7 +2,16 @@
 
 import { useEffect, useRef, useState } from "react";
 import { motion } from "motion/react";
-import { Info, Loader2, PanelLeft, Send, Sparkles, TriangleAlert, X } from "lucide-react";
+import {
+  ChevronRight,
+  Info,
+  Loader2,
+  PanelLeft,
+  Send,
+  Sparkles,
+  TriangleAlert,
+  X,
+} from "lucide-react";
 import {
   API_BASE,
   createSession,
@@ -11,12 +20,14 @@ import {
   fetchMessages,
   listSessions,
   renameSession,
+  sendFeedback,
   streamChat,
   type ActionResult,
   type ChatEvent,
   type ChatMode,
   type Citation,
   type DoneReason,
+  type FeedbackRating,
   type HealthInfo,
   type HistoryMessage,
   type PendingAction,
@@ -32,6 +43,7 @@ import {
   CitationsRow,
   ConfirmCard,
   DoneMeta,
+  MessageActions,
   ReceiptAlert,
   ResearchTrace,
   RouteBadge,
@@ -58,6 +70,10 @@ interface Msg {
   doneReason?: DoneReason;
   error?: string;
   done: boolean;
+  /** P25：done 之后 SSE 追发的建议追问（晚到渐进渲染）；点击后本组置灰。 */
+  followUps?: string[];
+  followUpSent?: boolean;
+  feedback?: FeedbackRating;
 }
 
 /** 历史恢复（P22）：对话级纯文本 → 现有消息结构（静态态，不渲染事件级卡片）。 */
@@ -140,6 +156,34 @@ export default function Home() {
       const i = next.length - 1;
       next[i] = typeof patch === "function" ? patch(next[i]) : { ...next[i], ...patch };
       return next;
+    });
+  }
+
+  function patchAt(i: number, patch: Partial<Msg>) {
+    setMessages((prev) => {
+      if (i < 0 || i >= prev.length) return prev;
+      const next = [...prev];
+      next[i] = { ...next[i], ...patch };
+      return next;
+    });
+  }
+
+  /** P25：👍/👎 落库（乐观置灰，失败回弹）；轮次锚 = 该回答上方最近的用户问题。 */
+  function rate(i: number, rating: FeedbackRating) {
+    const target = messages[i];
+    if (!target || target.feedback) return;
+    let question = "";
+    for (let j = i - 1; j >= 0; j--) {
+      if (messages[j].role === "user") {
+        question = messages[j].text;
+        break;
+      }
+    }
+    if (!question || !sessionId.current) return;
+    patchAt(i, { feedback: rating });
+    sendFeedback(sessionId.current, question, rating).catch((err) => {
+      console.warn("反馈上报失败（已回弹）：", err);
+      patchAt(i, { feedback: undefined });
     });
   }
 
@@ -258,6 +302,10 @@ export default function Home() {
             case "error":
               patchLast({ error: String(ev.message ?? "未知错误") });
               break;
+            case "follow_ups":
+              // P25：done 之后晚到（flash 生成 ≤8s），渐进渲染不阻塞输入
+              patchLast({ followUps: (ev.items as string[]) ?? [] });
+              break;
             case "done":
               patchLast({
                 done: true,
@@ -265,6 +313,8 @@ export default function Home() {
                 status: undefined,
                 doneReason: (ev.reason as DoneReason) || "completed",
               });
+              // done 即解锁输入（follow_ups 可能晚到；aborted/error 走 finally 兜底）
+              setSending(false);
               break;
           }
         },
@@ -292,7 +342,25 @@ export default function Home() {
 
   return (
     <main className="relative flex h-full flex-col">
-      {/* 环境光：画布顶部的暖色氛围（陶土/琥珀光斑 + 微点阵），编辑式纸感的呼吸（DESIGN.md empty-state） */}
+      {/* skip 链接（P25 a11y，america.gov 三连 skip 的从简两枚）：focus 时可见 */}
+      <a
+        href="#latest-msg"
+        className="sr-only focus:not-sr-only focus:absolute focus:left-2 focus:top-2 focus:z-50 focus:rounded-md focus:bg-background focus:px-3 focus:py-1.5 focus:text-sm focus:shadow-md"
+      >
+        跳到最新回答
+      </a>
+      <a
+        href="#composer-input"
+        className="sr-only focus:not-sr-only focus:absolute focus:left-2 focus:top-2 focus:z-50 focus:rounded-md focus:bg-background focus:px-3 focus:py-1.5 focus:text-sm focus:shadow-md"
+      >
+        跳到输入框
+      </a>
+      {/* 环境光：画布顶部的冷色氛围（navy 光斑 + 微点阵，token 化随 P25 换肤自动呈蓝） */}
+      <div aria-hidden className="pointer-events-none absolute inset-x-0 top-0 -z-10 h-96 overflow-hidden">
+        <div className="absolute -top-24 left-1/4 size-96 rounded-full bg-primary/[0.07] blur-3xl dark:bg-primary/10" />
+        <div className="absolute -top-10 right-1/4 size-72 rounded-full bg-amber-400/[0.07] blur-3xl dark:bg-amber-400/10" />
+        <div className="absolute inset-0 bg-[radial-gradient(circle_at_1px_1px,var(--color-foreground)_1px,transparent_0)] bg-[size:22px_22px] opacity-[0.05] [mask-image:radial-gradient(70%_60%_at_50%_0%,black,transparent)] dark:opacity-[0.07]" />
+      </div>
       <div aria-hidden className="pointer-events-none absolute inset-x-0 top-0 -z-10 h-96 overflow-hidden">
         <div className="absolute -top-24 left-1/4 size-96 rounded-full bg-primary/[0.07] blur-3xl dark:bg-primary/10" />
         <div className="absolute -top-10 right-1/4 size-72 rounded-full bg-amber-400/[0.07] blur-3xl dark:bg-amber-400/10" />
@@ -378,6 +446,10 @@ export default function Home() {
                   <p className="max-w-md text-sm text-muted-foreground">
                     办理类请求会经过：槽位收集 → 确认摘要 → 执行 → 回执；写操作必须确认后才会执行。
                   </p>
+                  {/* 信任行（P25，america.gov 信任声明同款姿态） */}
+                  <p className="max-w-md text-xs text-muted-foreground">
+                    回答仅基于钱塘大学官方制度文档生成，全部引用可溯源到发文部门。
+                  </p>
                 </div>
               )}
 
@@ -390,8 +462,8 @@ export default function Home() {
                     transition={{ duration: 0.25, ease: "easeOut" }}
                     className="flex justify-end"
                   >
-                    {/* 用户消息：安静色块，无渐变无描边（DESIGN.md user-message） */}
-                    <div className="max-w-[85%] rounded-2xl rounded-br-sm bg-secondary px-4 py-2.5 text-sm leading-relaxed text-secondary-foreground">
+                    {/* 用户消息：primary 实底气泡（P25 起，america.gov 同款；DESIGN.md user-message） */}
+                    <div className="max-w-[85%] rounded-2xl rounded-br-sm bg-primary px-4 py-2.5 text-sm leading-relaxed text-primary-foreground">
                       {msg.text}
                     </div>
                   </motion.div>
@@ -446,8 +518,49 @@ export default function Home() {
                       {msg.error && (
                         <Alert variant="destructive" className="py-2.5">
                           <TriangleAlert className="size-4" aria-hidden />
-                          <AlertDescription>出错了：{msg.error}</AlertDescription>
+                          <AlertDescription>
+                            出错了：{msg.error}
+                            {messages[i - 1]?.role === "user" && (
+                              <button
+                                className="ml-2 underline underline-offset-2 disabled:pointer-events-none disabled:opacity-50"
+                                onClick={() => send(messages[i - 1].text)}
+                                disabled={sending}
+                              >
+                                重试
+                              </button>
+                            )}
+                          </AlertDescription>
                         </Alert>
+                      )}
+                      {msg.done && !msg.error && (
+                        <MessageActions
+                          citations={msg.citations}
+                          text={msg.text}
+                          feedback={msg.feedback}
+                          onFeedback={(r) => rate(i, r)}
+                          onlyCopy={msg.route === undefined && msg.latency === undefined}
+                        />
+                      )}
+                      {msg.done && !msg.error && msg.followUps && msg.followUps.length > 0 && (
+                        <div className="flex flex-wrap gap-2 pt-1">
+                          {msg.followUps.map((q) => (
+                            <motion.button
+                              key={q}
+                              initial={{ opacity: 0, y: 6 }}
+                              animate={{ opacity: 1, y: 0 }}
+                              transition={{ duration: 0.25, ease: "easeOut" }}
+                              onClick={() => {
+                                patchAt(i, { followUpSent: true });
+                                send(q);
+                              }}
+                              disabled={sending || msg.followUpSent}
+                              className="inline-flex items-center gap-1 rounded-full border bg-card px-3 py-1 text-xs text-muted-foreground transition-colors hover:border-primary/40 hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
+                            >
+                              <ChevronRight className="size-3" aria-hidden />
+                              {q}
+                            </motion.button>
+                          ))}
+                        </div>
                       )}
                       {msg.done && (
                         <DoneMeta latency={msg.latency} doneReason={msg.doneReason} />
@@ -456,7 +569,7 @@ export default function Home() {
                   </motion.div>
                 ),
               )}
-              <div ref={bottomRef} />
+              <div id="latest-msg" ref={bottomRef} />
             </div>
           </section>
 
@@ -500,6 +613,7 @@ export default function Home() {
                   </SelectContent>
                 </Select>
                 <textarea
+                  id="composer-input"
                   value={input}
                   placeholder={
                     currentSession ? "输入你的问题，Enter 发送，Shift+Enter 换行" : "正在准备会话…"

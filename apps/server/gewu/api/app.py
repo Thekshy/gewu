@@ -15,6 +15,7 @@ from gewu.agent.graph import build_graph
 from gewu.api import admin as admin_routes
 from gewu.api import auth as auth_routes
 from gewu.api import chat as chat_routes
+from gewu.api import feedback as feedback_routes
 from gewu.api import memory as memory_routes
 from gewu.api import routes
 from gewu.api import sessions as session_routes
@@ -27,7 +28,7 @@ from gewu.memory import MemoryStore
 from gewu.middleware import RateLimitMiddleware, TraceIDMiddleware
 from gewu.rag.retrieve import LLMReranker, Retriever
 from gewu.rag.store import DocStore, Store
-from gewu.session.store import SessionStore
+from gewu.session.store import SessionStore, make_feedback_store
 from gewu.usage import make_usage_store
 
 
@@ -82,6 +83,7 @@ def create_app(
     memory: MemoryStore | None = None,
     auth: AuthStore | None = None,
     sessions: SessionStore | None = None,
+    feedback=None,
     usage=_UNSET,
     checkpointer=None,
 ) -> FastAPI:
@@ -126,6 +128,8 @@ def create_app(
     app.state.auth = auth if auth is not None else AuthStore(settings.pg_dsn)
     # P22：会话域（chat 归属校验/CRUD）；checkpointer 可注入（测试断言连带删除行数）
     app.state.sessions = sessions if sessions is not None else SessionStore(settings.pg_dsn)
+    # P25-2：消息反馈——探测式软降级（PG 不可达 None → 端点 503，不拦主链路）
+    app.state.feedback = feedback if feedback is not None else make_feedback_store(settings.pg_dsn)
     app.state.checkpointer = (
         checkpointer if checkpointer is not None else _make_checkpointer(settings)
     )
@@ -143,4 +147,5 @@ def create_app(
     app.include_router(session_routes.router)
     app.include_router(memory_routes.router)
     app.include_router(admin_routes.router)
+    app.include_router(feedback_routes.router)
     return app

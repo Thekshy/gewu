@@ -105,3 +105,14 @@
       执行完毕：212 测全绿、线上三轮真跑（食堂轮 agent主循环 ×2 埋点落地
       5026+3112ms、检索串重复词消失、办理 VE-0272）、两次主模型串行占 56%
       坐实结构性成本、POOL_N 未达加菜门槛）
+- [x] P25 对话体验对齐 america.gov：**结构+皮肤都仿**（用户复拍板）——机构蓝
+      换肤（DESIGN.md P25 版：navy #1a3a5c/冷调近白画布/link 蓝新 token/用户
+      消息实底气泡/暗色海军蓝+冰蓝）+ 消息操作条（来源 N/赞踩/复制）+ 来源按
+      发文部门分组 Dialog + done 后 flash 生成追问 pills（SSE 追发 follow_ups，
+      主路径零延迟增量、8s 超时静默、三层代码守卫）+ POST /api/feedback
+      （upsert 覆盖）+ 空态信任行 + skip 链接 ×2 + 错误态重试钮——
+      [P25 任务书](runbooks/P25-conversation-experience-parity.md)
+      （2026-10-01 执行完毕：240 单测（+15）、design-lint 六页零 finding
+      （换肤零改动即过=token 层收口兑现）、curl+浏览器真跑剧本全过（真 flash
+      追问三轮质量在线、feedback good→bad 覆盖单行 PG 断言、停服重试闭环）；
+      compare 双轨零改动保对照干净）

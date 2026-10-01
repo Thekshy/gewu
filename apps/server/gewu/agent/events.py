@@ -80,3 +80,8 @@ def done_evt(latency_ms: int, reason: str = "") -> dict:
     if reason:
         ev["reason"] = reason
     return ev
+
+
+def follow_ups_evt(items: list[str]) -> dict:
+    """P25：done 之后追发的建议追问（america.gov 同款模式；生成失败/超时不发）。"""
+    return {"type": "follow_ups", "items": items or []}

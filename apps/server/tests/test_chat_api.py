@@ -246,6 +246,63 @@ def test_chat_error_path_emits_error_and_done(tmp_path: Path, biz, mem, auth, se
     assert events[-1]["reason"] == "error"
 
 
+class FollowUpLLM(FakeChatLLM):
+    """direct 链路替身：chat() 吐合法追问 JSON（小模型通道复用同一替身）。"""
+
+    def __init__(self) -> None:
+        super().__init__(["开放时间", "是 7:30。"])
+        self.follow_up_reply = (
+            '["借的书过期了会罚款吗？", "一次最多能借几本书？", "可以在图书馆订自习室吗？"]'
+        )
+
+    def chat(self, messages, *, small=False, json_mode=False, temperature=0.0, max_tokens=2048):
+        return self.follow_up_reply
+
+
+def test_chat_follow_ups_after_done(tmp_path: Path, biz, mem, auth, sess):
+    """P25：factual+completed → done 之后追发 follow_ups（事件序 done→follow_ups）。"""
+    c = make_client(tmp_path, biz, mem, auth, sess, llm=FollowUpLLM())
+    r = c.post(
+        "/api/chat",
+        json={"question": "图书馆几点开门", "mode": "direct", "session_id": "t"},
+    )
+    events = _parse_sse(r.text)
+    types = [e["type"] for e in events]
+    assert types.count("follow_ups") == 1
+    assert types.index("done") == len(types) - 2
+    assert types[-1] == "follow_ups"
+    assert events[-1]["items"] == [
+        "借的书过期了会罚款吗？",
+        "一次最多能借几本书？",
+        "可以在图书馆订自习室吗？",
+    ]
+
+
+def test_chat_no_follow_ups_when_route_refusal(tmp_path: Path, biz, mem, auth, sess):
+    """refusal 轮不生成追问（Q5 门；替身 chat 有返回但路由不在白名单）。"""
+
+    class BoomGraph:
+        """首发 refusal 路由事件后正常收束的假图（不触发真实编排）。"""
+
+        def __init__(self) -> None:
+            self._n = 0
+
+        def stream(self, *_a, **_k):
+            from gewu.agent import events as ev  # noqa: PLC0415
+
+            if self._n == 0:
+                self._n += 1
+                yield ((), ev.route_evt("refusal", "与知识库无关", False))
+                yield ((), ev.answer_evt("抱歉，这不在校园制度范围内。"))
+            else:
+                return
+
+    c = make_client(tmp_path, biz, mem, auth, sess, llm=FollowUpLLM(), graph=BoomGraph())
+    r = c.post("/api/chat", json={"question": "今天股市行情", "mode": "direct", "session_id": "u"})
+    events = _parse_sse(r.text)
+    assert not any(e["type"] == "follow_ups" for e in events)
+
+
 def test_new_state_defaults():
     s = new_state("q", "auto", "sid", "student", "u1@example.com")
     assert s["resolved"] == "q"

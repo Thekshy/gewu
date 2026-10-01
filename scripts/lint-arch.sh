@@ -22,7 +22,7 @@ check() { # check <描述> <文件glob> <禁止pattern>
 
 # app.py 是装配工厂（Go cmd/server/main.go 的等价物，构造 LLMService 合法）；
 # 路由实现层（routes/chat/sessions/memory/admin）禁止直接 import llm。
-check "api 路由层禁止直接 import llm" "apps/server/gewu/api/routes.py apps/server/gewu/api/chat.py apps/server/gewu/api/sessions.py apps/server/gewu/api/memory.py apps/server/gewu/api/admin.py" "from gewu.llm\|import gewu.llm"
+check "api 路由层禁止直接 import llm" "apps/server/gewu/api/routes.py apps/server/gewu/api/chat.py apps/server/gewu/api/sessions.py apps/server/gewu/api/memory.py apps/server/gewu/api/admin.py apps/server/gewu/api/feedback.py" "from gewu.llm\|import gewu.llm"
 check "rag ↛ agent（反向）" "apps/server/gewu/rag" "from gewu.agent\|import gewu.agent"
 check "llm ↛ agent（反向）" "apps/server/gewu/llm" "from gewu.agent\|import gewu.agent"
 check "business ↛ agent（反向）" "apps/server/gewu/business" "from gewu.agent\|import gewu.agent"
