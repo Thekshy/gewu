@@ -4,14 +4,15 @@
 
 ## 系统组成
 
-gewu 是一个**模块化单体**：FastAPI 服务进程承载全部会话编排与业务逻辑，Next.js 前端静态托管，持久化分置在 PostgreSQL（知识库 + 会话检查点）与 SQLite（业务/记忆）两类存储中；LLM 与 Embedding 经 OpenAI 兼容协议访问外部 API。
+gewu 是一个**模块化单体**：FastAPI 服务进程承载全部会话编排与业务逻辑，Next.js 前端静态托管，持久化统一在 PostgreSQL（知识库 + 会话检查点 + 业务台账 + 长期记忆 + 用户/会话，P21 起 SQLite 全部退役）；LLM 与 Embedding 经 OpenAI 兼容协议访问外部 API。
 
 | 组件 | 位置 | 端口/形态 | 职责 |
 | --- | --- | --- | --- |
 | server | `apps/server/`（Python 3.12+ / uv） | `:8000` | 主服务：REST API、SSE 流式问答、LangGraph 会话编排、RAG 检索、业务执行。装配入口 `main.py` → 工厂 `gewu/api/app.py` |
 | web | `apps/web/`（Next.js） | dev `:3000` | 聊天界面 / 三路线对比实验台 / 控制台；手写 SSE 解析（`lib/api.ts`），对 interrupt 无感知 |
 | PostgreSQL | docker-compose（pgvector 镜像） | `:5433` | 知识库三表（docs/chunks/vectors，FTS + halfvec HNSW）与 LangGraph checkpoints 表族，共用一个实例 |
-| SQLite | `data/business.db` / `data/memory.db` | 进程内文件 | mock 业务台账（预约/请假单）与长期记忆（fact/episodic），量级未触发迁移 |
+| PG（业务/记忆） | `business.*` / `memory_*` 表 | psycopg pool | mock 业务台账（预约/请假单）与长期记忆（fact/episodic），P21-2 自 SQLite 迁入 |
+| PG（auth） | `users` / `auth_sessions` / `invite_codes` | psycopg pool | P21 用户体系：邀请码封闭注册、cookie 会话、role 权威 |
 | LLM API | 外部（OpenAI 兼容） | HTTPS | glm-5.3（主模型）+ glm-5.3-flash（小模型）双档；embedding-3（2048 维） |
 
 运行形态刻意保持单一：`make run`（或 `docker compose up`）起全部依赖，`make pg-up` 只拉 PG。没有多进程编排、没有消息队列——这是微服务退役后的刻意选择（见文末）。
@@ -25,7 +26,7 @@ gewu 是一个**模块化单体**：FastAPI 服务进程承载全部会话编排
 | 模型接入 | langchain-openai（ChatOpenAI） | OpenAI 兼容协议，换端点即换供应商；智谱 thinking 私有参数按开关注入 |
 | 向量/关键词 | PostgreSQL + pgvector（halfvec HNSW + tsvector GIN） | 读写收口存储函数，见 [04](04-rag-retrieval.md) |
 | 会话持久化 | LangGraph PostgresSaver | 同一 PG 实例，checkpoints/checkpoint_blobs/checkpoint_writes 表族 |
-| 业务/记忆 | sqlite3 标准库（单连接 + 锁） | mock 业务与长期记忆，见 [07](07-state-persistence.md) |
+| 业务/记忆/认证 | psycopg（ConnectionPool，rag.Store 同款） | mock 业务、长期记忆与用户认证，见 [07](07-state-persistence.md)/[11](11-auth.md) |
 | 工具链 | uv + ruff + pytest + GitHub Actions | CI 双 job（server + web），门禁见 [09](09-cross-cutting.md) |
 
 ## 模块间通信
@@ -34,7 +35,7 @@ gewu 是一个**模块化单体**：FastAPI 服务进程承载全部会话编排
 | --- | --- | --- |
 | 浏览器 → server | HTTP + **SSE**（`POST /api/chat`） | `data: {json}\n\n` 分帧，UTF-8 原文不转义；十类事件契约见 [08](08-api-contract.md) |
 | server → PostgreSQL | psycopg3 连接池（psycopg_pool） | 知识库走存储函数（`rag_fts_search`/`rag_upsert_doc`）；checkpointer 要求 autocommit 连接 |
-| server → SQLite | 进程内 sqlite3 | business.db 与 memory.db 各自单连接 + threading.Lock |
+| server → PG（业务/记忆/auth） | psycopg ConnectionPool | 三域各自连接池；复合写操作持进程锁保持单写者语义 |
 | agent → rag/llm/business | 进程内函数调用，经 Protocol 接口 | `Retriever` 依赖 `RetrievalStore`/`RagLLM` 最小协议，测试用 Fake 同构替换 |
 | 主图 ↔ ReAct 子图 | `config.configurable` 注入 `ReactContext` | 运行时对象（检索器/业务系统/工具表）不能进 state——checkpointer 的 msgpack 序列化会拒绝 |
 | server → LLM API | HTTPS（OpenAI 兼容 `/chat/completions`、`/embeddings`） | 双模型缓存分发；用量经 `TokenBudget` 统一入账 |
@@ -61,7 +62,7 @@ flowchart TB
         MEM[memory 长期记忆]
     end
     PG[(PostgreSQL<br/>docs/chunks/vectors<br/>+ checkpoints)]
-    SQ[(SQLite<br/>business.db · memory.db)]
+    PG2[(PG business/memory/auth<br/>users · auth_sessions · invite_codes)]
     EXT[[LLM / Embedding API<br/>OpenAI 兼容]]
 
     UI -->|HTTP/SSE| MW --> API --> GRAPH
@@ -104,7 +105,7 @@ flowchart TB
 | `eval/` | 评测资产：数据集、run_eval.py、检索对照脚本、reports/ 全量留档，见 [10](10-evaluation.md) |
 | `scripts/` | lint-arch.sh（依赖守护）等工程脚本 |
 | `docker/` + `docker-compose.yml` | PG（pgvector:pg17）与本地依赖编排 |
-| `data/` | 运行时产物：business.db / memory.db / usage.json（git 忽略） |
+| `data/` | 运行时产物：usage.json（token 预算）与 archive/（SQLite 退役归档，git 忽略） |
 
 ## 为什么是模块化单体
 

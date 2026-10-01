@@ -1,14 +1,14 @@
 # 07 · 状态与持久化
 
-系统里有四类生命周期不同的状态，各有明确的存放地与失效语义。会话与办理流程状态由 LangGraph 的 PostgresSaver 接管（P14 Q4 原生机制，吸收了 Go 时代的自研 sessions.db）；业务与记忆留在 SQLite；每日用量是进程外一个 JSON 文件。本文给出每一类的装配方式、读写路径与失效行为。
+系统里有四类生命周期不同的状态，各有明确的存放地与失效语义。会话与办理流程状态由 LangGraph 的 PostgresSaver 接管（P14 Q4 原生机制，吸收了 Go 时代的自研 sessions.db）；业务与记忆自 P21-2 起同库迁入 PG（SQLite 退役，凭证/用户见 [11](11-auth.md)）；每日用量是进程外一个 JSON 文件。本文给出每一类的装配方式、读写路径与失效行为。
 
 ## 状态总览
 
 | 状态 | 存放 | 生命周期 | 失效 |
 | --- | --- | --- | --- |
 | 会话与办理流程（ChatState） | **PG checkpoints**（PostgresSaver） | 跨请求、跨进程重启 | thread 级；办理完成/取消时显式清 |
-| 业务数据（预约/请假单） | SQLite `business.db` | 永久（演示语义） | `/api/business/reset` 手动清 |
-| 长期记忆（fact/episodic） | SQLite `memory.db` | 永久积累 | 同 key UPSERT 覆盖 |
+| 业务数据（预约/请假单） | PG 表 `bookings`/`leave_tickets` | 永久（演示语义） | `/api/business/reset` 手动清（P21 起 admin-only） |
+| 长期记忆（fact/episodic） | PG 表 `memory_fact`/`memory_episodic` | 永久积累 | 同 key UPSERT 覆盖；user_id=P21 起为真实 email |
 | 每日 token 用量 | `data/usage.json` | 当天 | 跨天自动归零 |
 
 ## PostgresSaver（P14 Q4 原生机制）
@@ -36,12 +36,12 @@ def _make_checkpointer(settings: Settings):
 
 ## 长期记忆（`gewu/memory.py`）
 
-分层两库（SQLite 单连接 + threading.Lock，建表幂等）：
+分层两域表（psycopg ConnectionPool + 建表幂等 DDL，P21-2 自 SQLite 平移）：
 
 | 表 | 内容 | 写入时机 | 读取用途 |
 | --- | --- | --- | --- |
 | `memory_fact` | 用户级结构化事实（kind: profile/preference/constraint + key/value） | 每轮会话结束后 flash **异步**抽取，同 `(user,kind,key)` UPSERT 覆盖 | 注入 prompt 最近 20 条（`MAX_FACTS_IN_CONTEXT`） |
-| `memory_episodic` | 会话原文 user/assistant 双条 | 每轮**同步**落库（毫秒级 SQLite 写） | 指代补全（resolve_query）的近 6 条输入 + 记忆块的「近期对话要点」4 条 |
+| `memory_episodic` | 会话原文 user/assistant 双条 | 每轮**同步**落库（毫秒级 PG 写） | 指代补全（resolve_query）的近 6 条输入 + 记忆块的「近期对话要点」4 条 |
 
 同步/异步的分工是有意的：episodic 同步落库保证下一轮指代补全**立刻**能看到上一轮原文，不受异步抽取延迟影响；fact 抽取不在用户等待路径做 LLM（固化失败只打日志，原文已留存）。
 
@@ -64,8 +64,8 @@ sequenceDiagram
     participant A as POST /api/chat
     participant G as 主图（checkpointer）
     participant PG as PG checkpoints
-    participant M as memory.db
-    participant B as business.db
+    participant M as PG memory_*
+    participant B as PG business.*
     participant J as data/usage.json
 
     U->>A: 第 N 轮消息

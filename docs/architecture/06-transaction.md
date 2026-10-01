@@ -99,7 +99,7 @@ sequenceDiagram
     participant U as 用户
     participant G as tx_gate（interrupt 恢复后）
     participant T as call_tool
-    participant B as business.db
+    participant B as PG business.*
 
     U->>G: 「确认」
     G->>T: execute_tool(book_venue, slots)
@@ -130,7 +130,7 @@ def call_tool(tools, business, name, args, role, user) -> Result:
 
 学生调 `approve_leave`/`pending_leaves`（counselor 专属）被明确拒绝，评测集有专项用例。工具的角色/读写属性表见 [05](05-react-agent.md)。
 
-- **业务规则与语料一致**：请假 1—3 天辅导员批、3 天以上 7 天以内学院批、超过 7 天教务处批（`approver_of`）；场馆每时段容量（羽毛球馆 2 组/篮球场 1 组/研讨间各 1），「每人每天 2 时段」配额在业务库判定——mock 层也按真实语义实现（`gewu/business/db.py`，SQLite）。
+- **业务规则与语料一致**：请假 1—3 天辅导员批、3 天以上 7 天以内学院批、超过 7 天教务处批（`approver_of`）；场馆每时段容量（羽毛球馆 2 组/篮球场 1 组/研讨间各 1），「每人每天 2 时段」配额在业务库判定——mock 层也按真实语义实现（`gewu/business/db.py`，P21-2 起 PG；`user` 列在 PG 为保留字，SQL 内一律双引号）。
 
 ## 相关文件
 
@@ -145,4 +145,4 @@ def call_tool(tools, business, name, args, role, user) -> Result:
 
 ---
 
-下一篇《07 · 状态与持久化》盘点四类状态的生命周期：PG checkpoints、SQLite 双库与每日预算。
+下一篇《07 · 状态与持久化》盘点四类状态的生命周期：PG checkpoints、业务/记忆表与每日预算。

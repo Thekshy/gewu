@@ -3,6 +3,7 @@ import { Geist, Geist_Mono, Noto_Serif_SC } from "next/font/google";
 import Link from "next/link";
 import Nav from "@/components/nav";
 import ThemeToggle from "@/components/theme-toggle";
+import UserMenu from "@/components/user-menu";
 import { ThemeProvider } from "@/components/theme-provider";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
@@ -49,7 +50,8 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
                 <span className="hidden text-xs text-muted-foreground sm:inline">校园智能问答</span>
               </Link>
               <Nav />
-              <div className="ml-auto flex items-center">
+              <div className="ml-auto flex items-center gap-2">
+                <UserMenu />
                 <ThemeToggle />
               </div>
             </header>

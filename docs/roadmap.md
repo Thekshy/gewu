@@ -79,10 +79,11 @@
 - [ ] agent 轨多轮办理稳定化：tx-002/tx-003 对话式收集的 GLM 非确定（P17 已知 flaky，重放全对）；
       classic 轨论文完成后按退役模式收口（tag+留档+删码）
 - [ ] 长期记忆消亡与用户侧可见性（当前仅注入不可管理）——P22 承接
-- [ ] P21 用户体系·认证地基：邀请码封闭注册（内测）+ argon2 密码 + httpOnly
+- [x] P21 用户体系·认证地基：邀请码封闭注册（内测）+ argon2 密码 + httpOnly
       cookie + role 服务端化（tools_for 权限矩阵坐实）+ business/memory 迁 PG
       （P13 遗留闭线）+ CORS 收紧/前端同源代理——
-      [P21 任务书](runbooks/P21-user-auth-foundation.md)
+      [P21 任务书](runbooks/P21-user-auth-foundation.md)（2026-10-01 执行完毕：
+      SSE 过 next rewrite 透传 0.17s 首事件验证、真跑剧本八步全过、191 单测）
 - [ ] P22 会话与记忆管理：会话归属表/列表/改名/删除 + 前端多会话侧边栏 +
       memory_fact 用户可见可管理
 - [ ] P23 管理后台：admin 用户/用量/会话巡查 + 邀请码发放 UI + per-user

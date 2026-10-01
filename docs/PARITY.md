@@ -16,6 +16,29 @@ SSE 十类事件形状不变但语义扩展：① mode 枚举扩 `classic`（cas
 （resume 值翻译为 decisions，`resume.py` 收口，前端零感知）。字段级契约仍以本文为准；
 classic 链路以下原文继续有效（mode=classic 时的行为规格）。
 
+## 0.5 P21 认证契约（用户体系）
+
+P21 起引入用户体系（邀请码封闭注册·内测），以下条目**修订**本文相应原文：
+
+- **CORS**：`allow_origins=["*"]` 收紧为 `CORS_ORIGINS` 白名单（默认空=仅同源），
+  并开 `allow_credentials`；前端改为经 next rewrites 同源代理访问（`/api/:path*`
+  → `127.0.0.1:8000`），SSE 流式透传已验证（首事件 0.17s、无整段缓冲）。
+- **新增认证四端点**：`POST /api/auth/register`（422 格式/长度、400 邀请码无效
+  或用尽、409 邮箱已注册；成功即登录）、`POST /api/auth/login`（失败统一 401
+  「邮箱或密码错误」）、`POST /api/auth/logout`、`GET /api/auth/me`。会话凭证
+  =httpOnly cookie `gewu_session`（服务端 auth_sessions 表存 token sha256，
+  30d 滑动续期；`COOKIE_SECURE` 控 Secure）。
+- **role 参数废弃**：`POST /api/chat` 请求体 `role` 不再解析（服务端
+  `users.role` 唯一权威；携带该字段不报错、不生效）；未登录 401
+  `{"detail":"未登录或会话已过期"}`。`user_id` 由 `demo-{role}` 改为登录 email
+  （记忆/台账真实归属）。
+- **范围收紧**：`/api/search` 需登录；`/api/business/overview` 登录者本人视图
+  （响应新增 `scope:"mine"|"all"`），admin 可 `?all=1`；`/api/business/reset`
+  仅 admin（非 admin 403）。`/api/health`、`/api/docs` 保持公开。
+- **存储注记**：business/memory 自 SQLite 迁 PG（P21-2，闭 P13 遗留），对外
+  行为零变化；单号 `VE-XXXX/LV-XXXX` 形态不变。评测 harness 进程内直调编排层，
+  不受 HTTP 认证影响。
+
 ## 1. 服务总览
 
 - 监听端口 `:8000`(HTTP)。
@@ -31,8 +54,12 @@ classic 链路以下原文继续有效（mode=classic 时的行为规格）。
 | GET | `/api/docs` | 已入库文档列表 |
 | POST | `/api/search` | 调试:混合检索 |
 | POST | `/api/chat` | SSE 流式问答 |
-| POST | `/api/business/reset` | 清空 mock 业务数据 |
-| GET | `/api/business/overview` | 查看当前预约与请假单 |
+| POST | `/api/business/reset` | 清空 mock 业务数据（P21 起 admin-only） |
+| GET | `/api/business/overview` | 查看当前预约与请假单（P21 起本人视图） |
+| POST | `/api/auth/register` | 邀请码注册（P21，注册即登录） |
+| POST | `/api/auth/login` | 登录（下发会话 cookie） |
+| POST | `/api/auth/logout` | 登出（会话即失效） |
+| GET | `/api/auth/me` | 当前登录用户 |
 
 ### 2.1 GET /api/health
 

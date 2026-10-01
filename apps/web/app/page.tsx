@@ -14,9 +14,10 @@ import {
   type DoneReason,
   type HealthInfo,
   type PendingAction,
-  type Role,
   type Step,
 } from "@/lib/api";
+import { useRequireUser } from "@/lib/auth";
+import { ROLE_LABEL } from "@/lib/labels";
 import Answer from "@/components/answer";
 import BlurText from "@/components/BlurText";
 import {
@@ -51,10 +52,6 @@ interface Msg {
   done: boolean;
 }
 
-const ROLE_OPTIONS: { value: Role; label: string }[] = [
-  { value: "student", label: "学生身份" },
-  { value: "counselor", label: "辅导员身份" },
-];
 const MODE_OPTIONS: { value: ChatMode; label: string }[] = [
   { value: "auto", label: "自动路由" },
   { value: "direct", label: "强制直答" },
@@ -69,10 +66,10 @@ const SUGGESTIONS = [
 ];
 
 export default function Home() {
+  const { user } = useRequireUser(); // P21：登录页守卫；role 服务端权威（只读展示）
   const [messages, setMessages] = useState<Msg[]>([]);
   const [input, setInput] = useState("");
   const [mode, setMode] = useState<ChatMode>("auto");
-  const [role, setRole] = useState<Role>("student");
   const [sending, setSending] = useState(false);
   const [health, setHealth] = useState<HealthInfo | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -169,7 +166,7 @@ export default function Home() {
               break;
           }
         },
-        { sessionId: sessionId.current, role },
+        { sessionId: sessionId.current },
       );
     } catch (err) {
       patchLast({ error: err instanceof Error ? err.message : String(err), done: true });
@@ -329,20 +326,17 @@ export default function Home() {
               </button>
             ))}
           </div>
-          {/* composer：hairline 卡 + 主色 focus 环，实心主色发送钮（DESIGN.md composer） */}
+          {/* composer：hairline 卡 + 主色 focus 环，实心主色发送钮（DESIGN.md composer）。
+              身份为只读徽章——P21 起 role 服务端权威（users.role），不可在客户端切换 */}
           <div className="flex items-end gap-2 rounded-2xl border bg-card p-2 shadow-sm transition-colors focus-within:border-primary/50 focus-within:ring-4 focus-within:ring-primary/10">
-            <Select value={role} onValueChange={(v) => setRole(v as Role)}>
-              <SelectTrigger className="h-9 w-27 shrink-0" aria-label="演示身份（权限不同）">
-                <SelectValue>{ROLE_OPTIONS.find((o) => o.value === role)?.label}</SelectValue>
-              </SelectTrigger>
-              <SelectContent>
-                {ROLE_OPTIONS.map((o) => (
-                  <SelectItem key={o.value} value={o.value}>
-                    {o.label}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            {user && (
+              <span
+                className="h-9 shrink-0 rounded-lg bg-primary/10 px-3 text-xs font-medium leading-9 text-primary"
+                title={`${user.display_name || user.email} · 权限随账号角色`}
+              >
+                {ROLE_LABEL[user.role] ?? user.role}身份
+              </span>
+            )}
             <Select value={mode} onValueChange={(v) => setMode(v as ChatMode)}>
               <SelectTrigger className="h-9 w-31 shrink-0" aria-label="回答模式">
                 <SelectValue>{MODE_OPTIONS.find((o) => o.value === mode)?.label}</SelectValue>

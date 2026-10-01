@@ -13,10 +13,11 @@
 | [04](04-rag-retrieval.md) | 混合检索 | FTS + 向量 + RRF + 精排 + 父子块的完整漏斗，读写收口 PG 存储函数（含 DDL 关键代码） |
 | [05](05-react-agent.md) | agent 主循环 | create_agent 底座、middleware 栈（guard/截断防御/HITL/压缩）、防护语义平移对照 |
 | [06](06-transaction.md) | 知行执行层 | 工具识别、槽位元数据表、interrupt() 确认门、失败恢复与权限矩阵 |
-| [07](07-state-persistence.md) | 状态与持久化 | PG checkpointer / SQLite 双库 / usage.json 四类状态的生命周期与一轮会话的触达图 |
+| [07](07-state-persistence.md) | 状态与持久化 | PG checkpointer / 业务与记忆表 / usage.json 各类状态的生命周期与一轮会话的触达图 |
 | [08](08-api-contract.md) | 接口契约 | 六端点、SSE 十类事件字段表、实际事件流样例、interrupt/resume 桥与错误体约定 |
 | [09](09-cross-cutting.md) | 支撑域 | 配置键表、三层成本防线、模型分层、lint-arch 依赖守护与 CI 双 job |
 | [10](10-evaluation.md) | 评测体系 | 数据集样例、运行口径、flaky 判定与方差基线归因法 |
+| [11](11-auth.md) | 用户与认证 | 邀请码封闭注册、argon2+cookie 会话、role 服务端权威、三域迁 PG（P21） |
 
 **阅读路径**：新人从 01 → 02 顺读即可建立全景；写论文/找素材按主题直取。
 **代码地图**：`apps/server/gewu/`（api/agent/rag/llm/business + 顶层支撑件），

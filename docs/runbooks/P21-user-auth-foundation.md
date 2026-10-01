@@ -182,6 +182,56 @@ invite_codes(code TEXT PK, max_uses INT, used_count INT DEFAULT 0,
 - 邮箱验证 / 找回密码 / 改邮箱（涉台账 email 级联更新）：公测前评估。
 - HTTPS 与 Secure cookie：随 M4 Caddy 部署开启。
 
-## 6. 执行记录
+## 6. 执行记录（2026-10-01，当日完成）
 
-（待执行后回填）
+实现序：P21-0（摸底 + argon2-cffi 25.1.0 入 uv.lock）→ P21-1（auth 域三件：
+store/api/auth_tool）→ P21-2（business/memory 换 psycopg）→ P21-3（chat/routes
+收紧 + config 两键 + app 工厂接线）→ 测试改造（conftest 三夹具 + 登录客户端
+助手 + 8 文件适配 + test_auth 新增）→ P21-4 前端（rewrite/api.ts/login 页/
+UserMenu/role 徽章/console 守卫）→ 文档四件。
+
+**真跑剧本（八步全过，经 next 同源代理 :3101 → :8000）**：
+
+| # | 步骤 | 结果 |
+| --- | --- | --- |
+| 1 | `make invite USES=3` | 码 bf48b6ccd3 生成 |
+| 2 | 经代理注册 | 200 + cookie 下发 + 注册即登录（码核销） |
+| 3 | `/api/auth/me` | 200 {email, display_name, role:student} |
+| 4 | chat SSE（mode=direct） | **硬点通过**：route 事件 0.17s 首达、93 事件增量透传（answer_delta 分批到达）、done 4.35s——rewrite 无整段缓冲，无需退路 route handler |
+| 5 | overview | scope=mine（本人视图） |
+| 6 | 权限 | student reset 403 → `make admin` 提权 → reset 200 + ?all=1 scope=all |
+| 7 | 登出 | logout 200 → me 401（服务端 session 删除） |
+| 8 | 重启持久化 | 杀 uvicorn 重启 → 同 cookie me 200（PG 会话存活） |
+
+**门禁**：pytest 191 全绿（174 → +17：test_auth 12 + overview/reset/search 收紧 5）；
+ruff check + format 全绿；lint-arch 全绿（auth 域并入支撑域规则）；tsc + next build
+绿（/login 6.73kB）；design-lint 四页全绿（/login 新入检测清单，零 finding）。
+评测未重跑：eval harness 进程内直调编排层，不受 HTTP 认证影响（PARITY §0.5
+注记；chat.py 装配点只换身份来源，图与提示词零改动）。
+
+**拍板转实现决策**（任务书未预见，实现中定）：
+- `user` 是 PG 保留字——bookings/leave_tickets 列定义与全部 SQL 引用双引号
+  `"user"`（SQLite 时代无此约束，迁移首坑）；
+- reset() 与 wipe() 语义分离：SQLite AUTOINCREMENT 在 DELETE 后计数不归零，
+  reset 沿用（PARITY 行为不变），wipe（DELETE + setval）是测试专用保证 VE-0001
+  可断言；
+- business 表 date/slot/created_at 维持 TEXT（任务书草案写 timestamptz，实现
+  时降级：ISO 串字典序比较即正确语义，避免无谓转换）；memory 表 created_at/
+  updated_at 用 timestamptz（有排序需求）；
+- role 参数废弃采用「忽略不报错」（非 422）：旧调用方（compare 页/脚本）带
+  role 字段仍可跑，减一刀迁移摩擦；前端同票移除传参；
+- 邀请码过期测试不靠 days=0 边界（时钟偏差会翻车），测试直改 SQL 造过期。
+
+**撞坑记录**：
+- design-lint 四页「Navigation timeout」假失败：3200 端口挂着 P20 会话残留的
+  旧生产服（13:55 起，旧构建无 /login 无 rewrite），杀掉后干净全绿——脚本
+  cleanup 只管自己起的实例，跨会话残留要人工识别；
+- bash3.2 全角字符黏变量名复发：design-lint.sh `$name：` 在 FAIL 分支首次执行
+  时炸 unbound variable（P20 同款坑，此前只在 FAIL 分支才触发所以漏网），
+  改 `${name}：`；
+- curl cookie jar 的 `#HttpOnly_` 前缀行 MozillaCookieJar 解析不了（当注释跳过），
+  SSE 验证脚本手拼 Cookie 头绕过。
+
+**提交**：后端检查点（auth 域 + 迁移 + 收紧 + 测试）与前端/文档各一票，
+pathspec 限定避开并行会话的 log-report/icon.svg。SQLite 文件归档 data/archive/
+（business.db/memory.db/sessions.db），运行库重建。

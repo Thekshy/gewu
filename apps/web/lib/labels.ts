@@ -10,6 +10,13 @@ export const ROUTE_LABEL: Record<string, string> = {
   chitchat: "寒暄",
 };
 
+/** 用户角色（P21 服务端权威）→ 中文标签。 */
+export const ROLE_LABEL: Record<string, string> = {
+  student: "学生",
+  counselor: "辅导员",
+  admin: "管理员",
+};
+
 // transaction.go slotMetaTable 的槽位中文名（问题全文由 answer_delta 承载，标签只标注差哪个槽）
 export const SLOT_LABEL: Record<string, string> = {
   venue: "场馆",

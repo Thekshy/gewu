@@ -60,7 +60,7 @@ export interface SearchHit {
   text: string;
 }
 
-/** GET /api/business/overview：业务台账。 */
+/** GET /api/business/overview：业务台账（P21 起本人视图，admin ?all=1 全量）。 */
 export interface BookingFull {
   booking_id: string;
   venue: string;
@@ -81,16 +81,86 @@ export interface TicketView {
 }
 
 export interface BusinessOverview {
+  scope?: "mine" | "all";
   bookings: BookingFull[];
   tickets: TicketView[];
 }
 
-export type Role = "student" | "counselor";
+/** P21：登录用户（role 服务端权威，请求侧不再传 role）。 */
+export interface User {
+  email: string;
+  display_name: string;
+  role: "student" | "counselor" | "admin";
+}
 
 /** chat 请求 mode：auto（agent-first 主循环）/classic（级联路由基线）/direct/research/react（=auto，P17 合并）。 */
 export type ChatMode = "auto" | "direct" | "research" | "react" | "classic";
 
-export const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://127.0.0.1:8000";
+/**
+ * P21：默认同源相对路径——浏览器请求发给 next 自身，经 next.config rewrites
+ * 代理到 FastAPI（同源 cookie 会话零跨域配置）。NEXT_PUBLIC_API_BASE 保留
+ * 给直连调试（如绕过代理打 8000）。
+ */
+export const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "";
+
+/** 带错误体解析的 fetch 包装；401 统一跳登录（会话过期/未登录）。 */
+export async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
+  const res = await fetch(`${API_BASE}${path}`, init);
+  if (res.status === 401 && typeof window !== "undefined") {
+    if (!window.location.pathname.startsWith("/login")) {
+      window.location.href = "/login";
+    }
+    throw new Error("未登录或会话已过期");
+  }
+  return res;
+}
+
+async function detailOf(res: Response): Promise<string> {
+  const body = await res.json().catch(() => null);
+  return body?.detail ?? `请求失败（HTTP ${res.status}）`;
+}
+
+// ---------- 认证（P21） ----------
+
+export async function fetchMe(): Promise<User | null> {
+  try {
+    const res = await fetch(`${API_BASE}/api/auth/me`);
+    if (!res.ok) return null;
+    return (await res.json()) as User;
+  } catch {
+    return null;
+  }
+}
+
+export async function login(email: string, password: string): Promise<User> {
+  const res = await fetch(`${API_BASE}/api/auth/login`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password }),
+  });
+  if (!res.ok) throw new Error(await detailOf(res));
+  return (await res.json()) as User;
+}
+
+export async function register(
+  email: string,
+  password: string,
+  inviteCode: string,
+): Promise<User> {
+  const res = await fetch(`${API_BASE}/api/auth/register`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ email, password, invite_code: inviteCode }),
+  });
+  if (!res.ok) throw new Error(await detailOf(res));
+  return (await res.json()) as User;
+}
+
+export async function logout(): Promise<void> {
+  await fetch(`${API_BASE}/api/auth/logout`, { method: "POST" }).catch(() => {});
+}
+
+// ---------- 业务端点 ----------
 
 export async function fetchHealth(): Promise<HealthInfo | null> {
   try {
@@ -103,60 +173,56 @@ export async function fetchHealth(): Promise<HealthInfo | null> {
 }
 
 export async function fetchDocs(): Promise<DocInfo[]> {
-  const res = await fetch(`${API_BASE}/api/docs`);
+  const res = await apiFetch(`${API_BASE}/api/docs`);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return (await res.json()) as DocInfo[];
 }
 
-export async function fetchBusinessOverview(): Promise<BusinessOverview> {
-  const res = await fetch(`${API_BASE}/api/business/overview`);
+export async function fetchBusinessOverview(all = false): Promise<BusinessOverview> {
+  const res = await apiFetch(
+    `${API_BASE}/api/business/overview${all ? "?all=1" : ""}`,
+  );
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return (await res.json()) as BusinessOverview;
 }
 
 export async function businessReset(): Promise<void> {
-  const res = await fetch(`${API_BASE}/api/business/reset`, { method: "POST" });
-  if (!res.ok) throw new Error(`HTTP ${res.status}`);
+  const res = await apiFetch(`${API_BASE}/api/business/reset`, { method: "POST" });
+  if (!res.ok) throw new Error(await detailOf(res));
 }
 
 export async function search(query: string, k = 5): Promise<SearchHit[]> {
-  const res = await fetch(`${API_BASE}/api/search`, {
+  const res = await apiFetch(`${API_BASE}/api/search`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ query, k }),
   });
-  if (!res.ok) {
-    const detail = await res.json().catch(() => null);
-    throw new Error(detail?.detail ?? `HTTP ${res.status}`);
-  }
+  if (!res.ok) throw new Error(await detailOf(res));
   return (await res.json()) as SearchHit[];
 }
 
 export interface ChatOpts {
   sessionId?: string;
-  role?: Role;
 }
 
-/** 调用 /api/chat 的 SSE 流，逐事件回调。 */
+/** 调用 /api/chat 的 SSE 流，逐事件回调（P21：登录态由同源 cookie 携带）。 */
 export async function streamChat(
   question: string,
   mode: ChatMode,
   onEvent: (ev: ChatEvent) => void,
   opts: ChatOpts = {},
 ): Promise<void> {
-  const res = await fetch(`${API_BASE}/api/chat`, {
+  const res = await apiFetch(`${API_BASE}/api/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
       question,
       mode,
       session_id: opts.sessionId ?? "default",
-      role: opts.role ?? "student",
     }),
   });
   if (!res.ok || !res.body) {
-    const detail = await res.json().catch(() => null);
-    throw new Error(detail?.detail ?? `请求失败（HTTP ${res.status}）`);
+    throw new Error(await detailOf(res));
   }
 
   const reader = res.body.getReader();

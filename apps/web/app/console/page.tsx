@@ -15,6 +15,7 @@ import {
   type HealthInfo,
   type SearchHit,
 } from "@/lib/api";
+import { useRequireUser } from "@/lib/auth";
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -105,15 +106,15 @@ function Health({ health }: { health: HealthInfo | null }) {
   );
 }
 
-function Ledger() {
+function Ledger({ admin }: { admin: boolean }) {
   const [data, setData] = useState<BusinessOverview | null>(null);
   const [err, setErr] = useState("");
 
   const load = useCallback(() => {
-    fetchBusinessOverview()
+    fetchBusinessOverview(admin) // P21：本人视图；admin 看全量（后端 ?all=1）
       .then(setData)
       .catch((e) => setErr(e instanceof Error ? e.message : String(e)));
-  }, []);
+  }, [admin]);
 
   useEffect(load, [load]);
 
@@ -133,7 +134,12 @@ function Ledger() {
           <RefreshCw aria-hidden />
           刷新
         </Button>
-        <AlertDialog>
+        {data?.scope && (
+          <span className="text-xs text-muted-foreground">
+            {data.scope === "all" ? "全部台账（管理员）" : "本人台账"}
+          </span>
+        )}
+        {admin && <AlertDialog>
           <AlertDialogTrigger render={
             <Button variant="outline" size="sm">
               <RotateCcw aria-hidden />
@@ -144,7 +150,7 @@ function Ledger() {
             <AlertDialogHeader>
               <AlertDialogTitle>清空业务数据？</AlertDialogTitle>
               <AlertDialogDescription>
-                将删除全部场馆预约与请假单（SQLite business.db 落库数据），用于演示前重置。此操作不可撤销。
+                将删除全部场馆预约与请假单（PG 落库数据），用于演示前重置。仅管理员可执行。此操作不可撤销。
               </AlertDialogDescription>
             </AlertDialogHeader>
             <AlertDialogFooter>
@@ -155,7 +161,7 @@ function Ledger() {
               </AlertDialogCancel>
             </AlertDialogFooter>
           </AlertDialogContent>
-        </AlertDialog>
+        </AlertDialog>}
       </div>
       {err && (
         <Alert variant="destructive" className="mb-3 py-2.5">
@@ -348,6 +354,7 @@ function Corpus() {
 }
 
 export default function Console() {
+  const { user } = useRequireUser(); // P21：登录守卫；台账本人视图，admin 全量+重置
   const [health, setHealth] = useState<HealthInfo | null>(null);
   useEffect(() => {
     fetchHealth().then(setHealth);
@@ -367,8 +374,11 @@ export default function Console() {
           <Panel title="服务健康">
             <Health health={health} />
           </Panel>
-          <Panel title="业务台账" note="办理确认后真实落库（SQLite business.db）；演示前可一键重置">
-            <Ledger />
+          <Panel
+            title="业务台账"
+            note="办理确认后真实落库（PG）；登录者本人视图，管理员可看全部并重置"
+          >
+            <Ledger admin={user?.role === "admin"} />
           </Panel>
           <Panel title="检索调试" note="直接调 /api/search：BM25 + 向量 RRF 混合命中，不经 LLM">
             <SearchBench />

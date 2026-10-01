@@ -3,11 +3,11 @@
 import { useRef, useState } from "react";
 import { Loader2, Send } from "lucide-react";
 import TrackPanel, { type TimelineItem, type TrackRound } from "@/components/eventStream";
-import { streamChat, type ChatEvent, type ChatMode, type Role } from "@/lib/api";
+import { streamChat, type ChatEvent, type ChatMode } from "@/lib/api";
+import { useRequireUser } from "@/lib/auth";
 import { SLOT_LABEL } from "@/lib/labels";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
 // 对比实验台：同题并发打两条链路——A 轨 mode=auto（P17 起=agent-first 单循环：
@@ -38,14 +38,9 @@ function uuid(): string {
     : `s-${Date.now()}`;
 }
 
-const ROLE_OPTIONS: { value: Role; label: string }[] = [
-  { value: "student", label: "学生身份" },
-  { value: "counselor", label: "辅导员身份" },
-];
-
 export default function Compare() {
+  useRequireUser(); // P21：登录守卫（role 由服务端随会话下发）
   const [input, setInput] = useState("");
-  const [role, setRole] = useState<Role>("student");
   const [a, setA] = useState<TrackState>({ busy: false, rounds: [] });
   const [b, setB] = useState<TrackState>({ busy: false, rounds: [] });
   // 会话隔离的关键：两轨固定独立 session_id（useRef 跨渲染稳定），跨轮复用保持各自多轮上下文
@@ -88,7 +83,7 @@ export default function Compare() {
         question,
         mode,
         (ev: ChatEvent) => handleEvent(side, ev),
-        { sessionId: sessions.current[side], role },
+        { sessionId: sessions.current[side] },
       );
     } catch (err) {
       patchRound(side, { error: err instanceof Error ? err.message : String(err), done: true });
@@ -183,18 +178,6 @@ export default function Compare() {
               同一问题并发两条链路：agent-first 单循环 ↔ 级联路由固定 workflow（论文双底座对照）
             </p>
           </div>
-          <Select value={role} onValueChange={(v) => setRole(v as Role)}>
-            <SelectTrigger className="h-9 w-30 shrink-0" aria-label="演示身份（权限不同）">
-              <SelectValue>{ROLE_OPTIONS.find((o) => o.value === role)?.label}</SelectValue>
-            </SelectTrigger>
-            <SelectContent>
-              {ROLE_OPTIONS.map((o) => (
-                <SelectItem key={o.value} value={o.value}>
-                  {o.label}
-                </SelectItem>
-              ))}
-            </SelectContent>
-          </Select>
         </header>
 
         <div className="space-y-2">

@@ -45,14 +45,15 @@ if ! curl -sf --noproxy '*' -o /dev/null "$BASE"; then
   fi
 fi
 
-# --- impeccable detect 三页（exit 0=clean / 2=有 finding / 1=扫描失败）---
+# --- impeccable detect 四页（exit 0=clean / 2=有 finding / 1=扫描失败）---
 # 必须在 apps/web 下执行：检测器从 cwd 读取 .impeccable/config.json 白名单
-for path in "" "/compare" "/console"; do
+# P21 起 /login 入检测清单（登录/注册表单页）
+for path in "" "/compare" "/console" "/login"; do
   name=${path:-/}
   if (cd "$WEB" && npx -y impeccable detect "$BASE$path" >/tmp/gewu-design-lint-detect.log 2>&1); then
     echo "[design-lint] PASS detect $name"
   else
-    echo "[design-lint] FAIL detect $name："
+    echo "[design-lint] FAIL detect ${name}："
     cat /tmp/gewu-design-lint-detect.log
     fail=1
   fi
