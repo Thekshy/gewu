@@ -47,14 +47,13 @@ def run_research(state: dict, llm: LLMService, retriever: Retriever) -> dict:
     """
     from gewu.agent.graph import assemble_messages  # noqa: PLC0415 - 延迟导入避免环
 
-    k = 5
     emit(ev.status_evt("正在拆解问题…"))
     subquestions = plan(llm, state["resolved"])
 
     pool: dict[int, dict] = {}  # chunk_id → Hit，跨子问题去重
     order: list[int] = []  # 到达顺序
     for i, sub in enumerate(subquestions):
-        hits = [_hit_to_dict(h) for h in retriever.search(sub, k)]
+        hits = [_hit_to_dict(h) for h in retriever.search(sub)]
         titles: list[str] = []
         seen: set[str] = set()
         for h in hits[:3]:

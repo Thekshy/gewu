@@ -1,7 +1,9 @@
-"""混合检索管线（移植自 Go internal/rag/retrieve.go / rewrite.go / rerank.go）。
+"""混合检索管线（P15 起对齐 WeKnora：加权 RRF 融合 + 精排阈值容错）。
 
-漏斗：BM25/向量各取 poolN=20 → RRF 粗排 →（有 key 且开启 rerank）LLM 精排到
-topK → 按 parent_id 回取父块去重。查询侧口语→术语改写（有 key 即启用）。
+漏斗：BM25/向量各取 pool_n → 加权 RRF（向量 0.7/关键词 0.3，归一 [0,1]）→
+（有 key 且开启 rerank）LLM 精排（复合分排序 + 阈值过滤，全滤空自动退化）→
+按 parent_id 回取父块去重。查询侧口语→术语改写（有 key 即启用）。
+向量路瞬时失败退化为纯关键词：FTS 分按列表最大值归一，分数标尺不失效。
 """
 
 from __future__ import annotations
@@ -14,6 +16,10 @@ from gewu.rag.store import ChunkRow, DocMeta, Hit, MissingVectorsError, Scored, 
 
 POOL_N = 20
 RRF_K = 60
+# 精排容错（WeKnora rerank 同款语义）：阈值作用于 LLM 模型分（0~10），
+# 全滤空时阈值 ×0.7 重试一次（下限 FLOOR），仍空保留 top1（须 ≥ FLOOR）。
+RERANK_FLOOR = 1.5
+RERANK_MODEL_WEIGHT = 0.7  # 复合分 = 0.7×(模型分/10) + 0.3×融合归一分
 
 
 class RagLLM(Protocol):
@@ -50,8 +56,16 @@ class RetrievalStore(Protocol):
     def has_embeddings(self) -> bool: ...
 
 
+def _normalize_by_max(scored: list[Scored]) -> list[Scored]:
+    """按列表最大值归一到 [0,1]（无界 FTS 分在单路退化时的统一标尺）。"""
+    m = max((s.score for s in scored), default=0.0)
+    if m <= 0:
+        return [Scored(s.id, 0.0) for s in scored]
+    return [Scored(s.id, s.score / m) for s in scored]
+
+
 class Retriever:
-    """混合检索器：BM25 + 向量 → RRF 融合 →（可选）LLM 精排 → 父子扩展。"""
+    """混合检索器：BM25 + 向量 → 加权 RRF 融合 →（可选）LLM 精排 → 父子扩展。"""
 
     def __init__(
         self,
@@ -60,12 +74,22 @@ class Retriever:
         client: RagLLM | None,
         *,
         reranker: LLMReranker | None = None,
+        pool_n: int = POOL_N,
+        rrf_k: int = RRF_K,
+        vector_weight: float = 0.7,
+        keyword_weight: float = 0.3,
+        rerank_threshold: float = 2.0,
     ) -> None:
         self.store = store
         self.k = k
         self.client = client
         self.rewriter = Rewriter(client)
         self.reranker = reranker
+        self.pool_n = pool_n
+        self.rrf_k = rrf_k
+        self.vector_weight = vector_weight
+        self.keyword_weight = keyword_weight
+        self.rerank_threshold = rerank_threshold
 
     def search(self, query: str, k: int = 0) -> list[Hit]:
         if k <= 0:
@@ -74,26 +98,27 @@ class Retriever:
 
         has_emb = self.store.has_embeddings()
         if not has_emb:
-            raise MissingVectorsError("向量索引缺失，请配好 EMBED_* 后用 -rebuild 重建索引")
+            raise MissingVectorsError("向量索引缺失，请配好 EMBED_* 后用 --rebuild 重建索引")
 
-        pool = POOL_N
-        if k > pool:
-            pool = k
+        pool = max(self.pool_n, k)
         bm_scored = self.store.bm25_search(query, pool)
-        bm_ids = [sc.id for sc in bm_scored]
+        vec_scored = self._vector_scored(query, pool)
 
-        vec_ids = self._vector_candidates(query, pool)
+        if vec_scored:
+            fused = rrf_fuse(
+                [[s.id for s in bm_scored], [s.id for s in vec_scored]],
+                self.rrf_k,
+                [self.keyword_weight, self.vector_weight],
+            )
+        else:
+            # 单路退化（向量路瞬时失败/无 key）：FTS 分按列表最大值归一，
+            # 保持 [0,1] 分数标尺（WeKnora keyword-only 同款）。
+            fused = _normalize_by_max(bm_scored)
 
-        fused = bm_ids[:k]
-        if vec_ids:
-            fused = rrf_fuse([bm_ids, vec_ids], RRF_K)[:pool]
-        elif len(bm_ids) > pool:
-            fused = bm_ids[:pool]
+        ranked = self._rerank_or_keep(query, fused, k)
+        return self._expand_to_parents([s.id for s in ranked], k)
 
-        fused = self._rerank_or_keep(query, fused, k)
-        return self._expand_to_parents(fused, k)
-
-    def _vector_candidates(self, query: str, k: int) -> list[int]:
+    def _vector_scored(self, query: str, k: int) -> list[Scored]:
         """向量召回路：查询向量化失败（瞬时错误）时退化为纯 BM25（单次查询容错）。"""
         if self.client is None or not self.client.has_key():
             return []
@@ -105,30 +130,47 @@ class Retriever:
         if not vecs:
             return []
         try:
-            scored = self.store.vector_search(vecs[0], k)
+            return self.store.vector_search(vecs[0], k)
         except Exception as e:  # noqa: BLE001
             print(f"[rag] 向量检索失败，本查询退化为纯 BM25：{e}")
             return []
-        return [sc.id for sc in scored]
 
-    def _rerank_or_keep(self, query: str, ids: list[int], k: int) -> list[int]:
-        """有 key 且配置精排器时打分重排（平局保持 RRF 次序）；失败/关闭原样返回。"""
+    def _rerank_or_keep(self, query: str, fused: list[Scored], k: int) -> list[Scored]:
+        """LLM 精排（复合分排序 + 阈值过滤）；失败/关闭/候选不足时原样截断。
+
+        复合分 = RERANK_MODEL_WEIGHT×(模型分/10) + (1-w)×融合归一分，平局保持
+        融合序；阈值作用于模型分，全滤空时按 WeKnora 语义退化（×0.7 重试、
+        保底 top1），质量不足宁可少给——空命中走上游拒答路径。
+        """
         if (
             self.reranker is None
             or self.client is None
             or not self.client.has_key()
-            or len(ids) <= k
+            or len(fused) <= k
         ):
-            return ids[:k]
-        rows: dict[int, ChunkRow] = self.store.chunk_rows(ids)
-        texts = [rows[cid].text if cid in rows else "" for cid in ids]
+            return fused[:k]
+        rows: dict[int, ChunkRow] = self.store.chunk_rows([s.id for s in fused])
+        texts = [rows[s.id].text if s.id in rows else "" for s in fused]
         try:
-            scores = self.reranker.rerank(query, texts)
+            llm_scores = self.reranker.rerank(query, texts)
         except Exception as e:  # noqa: BLE001
             print(f"[rag] rerank 失败，退回 RRF 粗排顺序：{e}")
-            return ids[:k]
-        order = sorted(range(len(ids)), key=lambda i: (-scores[i], i))
-        return [ids[i] for i in order[:k]]
+            return fused[:k]
+        composite = [
+            RERANK_MODEL_WEIGHT * (llm_scores[i] / 10.0)
+            + (1.0 - RERANK_MODEL_WEIGHT) * fused[i].score
+            for i in range(len(fused))
+        ]
+        order = sorted(range(len(fused)), key=lambda i: (-composite[i], i))
+        kept = [i for i in order if llm_scores[i] >= self.rerank_threshold][:k]
+        if not kept:
+            relaxed = max(self.rerank_threshold * 0.7, RERANK_FLOOR)
+            kept = [i for i in order if llm_scores[i] >= relaxed][:k]
+            if kept:
+                print(f"[rag] 阈值 {self.rerank_threshold} 全滤空，退化至 {relaxed:.2f} 后保留")
+        if not kept and order and llm_scores[order[0]] >= RERANK_FLOOR:
+            kept = [order[0]]  # 保底：最优候选勉强及格即保留一条
+        return [fused[i] for i in kept]
 
     def _expand_to_parents(self, ids: list[int], k: int) -> list[Hit]:
         """父子扩展：命中子块按 parent_id 回取父块，同父去重（取最高命中的位次）。
@@ -190,13 +232,14 @@ class Retriever:
 class Rewriter:
     """进程内查询改写器（口语 → 政策术语检索串），带并发安全缓存。"""
 
-    def __init__(self, client: RagLLM | None) -> None:
+    def __init__(self, client: RagLLM | None, *, enabled: bool = True) -> None:
         self._client = client
+        self._enabled = enabled
         self._mu = threading.Lock()
         self._cache: dict[str, str] = {}
 
     def expand(self, query: str) -> str:
-        if self._client is None or not self._client.has_key():
+        if not self._enabled or self._client is None or not self._client.has_key():
             return query
         with self._mu:
             cached = self._cache.get(query)

@@ -48,7 +48,17 @@ def _make_checkpointer(settings: Settings):
 
 def _build_retriever(settings: Settings, store: Store, llm: LLMService) -> Retriever:
     reranker = LLMReranker(llm) if settings.rerank_mode != "off" else None
-    return Retriever(store, settings.retrieval_k, llm, reranker=reranker)
+    return Retriever(
+        store,
+        settings.retrieval_k,
+        llm,
+        reranker=reranker,
+        pool_n=settings.retrieval_pool_n,
+        rrf_k=settings.rrf_k,
+        vector_weight=settings.rrf_vector_weight,
+        keyword_weight=settings.rrf_keyword_weight,
+        rerank_threshold=settings.rerank_threshold,
+    )
 
 
 def create_app(

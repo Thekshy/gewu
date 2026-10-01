@@ -1,7 +1,7 @@
 SERVER_DIR := apps/server
 WEB_DIR := apps/web
 
-.PHONY: install-web run test lint eval demo clean lint-arch pg-up pg-down
+.PHONY: install-web run test lint eval ingest retrieval-eval variants demo clean lint-arch pg-up pg-down
 
 # ---------- 检索存储（P12：PostgreSQL + pgvector） ----------
 
@@ -50,12 +50,32 @@ lint:
 eval:
 	python3 eval/run_eval.py
 
+# 语料入库（P15）：REBUILD=1 清库重建（换切片策略/embedding 模型后必须）；
+# NO_EMBED=1 仅建 FTS 索引（检索侧会明确拒绝向量缺失）
+ingest: pg-up
+	cd $(SERVER_DIR) && uv run python ingest_main.py $(if $(REBUILD),--rebuild) $(if $(NO_EMBED),--no-embed)
+
+# 检索层评测（P15）：dataset 的 factual/multi_hop 题 → Recall@k/MRR/NDCG@k。
+# TAG=before|after 标注报告；NO_RERANK=1 / NO_REWRITE=1 / ROUNDS=2 分离方差；
+# EXTRA=1 并入口语化变体集 eval/retrieval-queries.jsonl（make variants 重新生成）
+retrieval-eval: pg-up
+	cd $(SERVER_DIR) && uv run python ../../eval/run_retrieval_eval.py \
+		$(if $(TAG),--tag $(TAG)) $(if $(NO_RERANK),--no-rerank) \
+		$(if $(NO_REWRITE),--no-rewrite) $(if $(ROUNDS),--rounds $(ROUNDS)) \
+		$(if $(EXTRA),--extra ../../eval/retrieval-queries.jsonl)
+
+# 生成检索评测的口语化/同义改写变体（flash 小模型，gold 继承原题）
+variants:
+	cd $(SERVER_DIR) && uv run python ../../eval/gen_query_variants.py
+
 # 一键起演示：双端（先 make install && make install-web）
 demo:
 	$(MAKE) -j2 run dev-web
 
 dev-web:
-	cd $(WEB_DIR) && npm run dev
+# Node>=22.4 带 stub 版 localStorage 全局，React 19 dev 构建在 SSR 期探测会炸
+# （localStorage.getItem is not a function）；给有效路径使其完整可用
+	cd $(WEB_DIR) && NODE_OPTIONS="--localstorage-file=/tmp/gewu-web-ls" npm run dev
 
 clean:
 	rm -rf $(SERVER_DIR)/.pytest_cache $(SERVER_DIR)/.ruff_cache

@@ -114,18 +114,35 @@ def _store_two_ways() -> FakeStore:
     )
 
 
-# ---------- RRF 融合 ----------
+# ---------- RRF 融合（P15 加权版：返回带归一分） ----------
 
 
 def test_rrf_fuse_interleaves_two_lists():
     fused = rrf_fuse([[1, 2, 3], [2, 4, 5]], 60)
     # 2 两路都出现得分最高；其余按 1/(60+rank+1) 与首现序排
-    assert fused[0] == 2
-    assert fused == [2, 1, 4, 3, 5]
+    assert [s.id for s in fused] == [2, 1, 4, 3, 5]
+    # 双路出现者拿最高归一分（两路均首位时恰为 1.0，此处 bm 路次位 → 0.99+）
+    assert fused[0].score > 0.98
 
 
 def test_rrf_fuse_tie_keeps_first_seen_order():
-    assert rrf_fuse([[1], [2]], 60) == [1, 2]
+    assert [s.id for s in rrf_fuse([[1], [2]], 60)] == [1, 2]
+
+
+def test_rrf_fuse_weighted_ranks():
+    # 向量权重 0.7：向量路 rank=2（4）压过关键词路 rank=2（3）
+    fused = rrf_fuse([[1, 2, 3], [2, 4]], 60, weights=[0.3, 0.7])
+    assert [s.id for s in fused] == [2, 4, 1, 3]
+    # 归一分 ∈ (0,1]：双路冠军逼近 1，纯向量亚军 ≈ 0.7，关键词季军 ≈ 0.3
+    assert fused[0].score > 0.98
+    assert 0.6 < fused[1].score < 0.8
+    assert fused[3].score < fused[2].score < 0.35
+
+
+def test_rrf_fuse_equal_weights_match_legacy_order():
+    # 等权退化：与旧版序一致（加权是旧版的单调变换）
+    fused = rrf_fuse([[1, 2, 3], [2, 4]])
+    assert [s.id for s in fused] == [2, 1, 4, 3]
 
 
 # ---------- 精排分数解析 ----------
@@ -194,13 +211,14 @@ def test_search_no_vectors_in_index_raises():
 
 def test_reranker_reorders_and_falls_back_on_error():
     store = _store_two_ways()
-    # 候选 [2,1,4,3] 打分 [0,1,10,5] → 精排序 [4,3,1,2] 截 k=3 [4,3,1] → [8,3,9]
+    # 加权融合候选 [2,4,1,3] 打分 [0,1,10,5]：复合分序 [1,3,2,4]，阈值 2.0
+    # 滤掉 0/1 分 → 保留 [1,3] → 1 归父块 9、3 flat → [9,3]
     rr = Retriever(
         store, k=3, client=FakeLLM(), reranker=LLMReranker(FakeLLM(rerank_scores=[0, 1, 10, 5]))
     )
-    assert [h.chunk_id for h in rr.search("q", 3)] == [8, 3, 9]
+    assert [h.chunk_id for h in rr.search("q", 3)] == [9, 3]
 
-    # 失败退回 RRF 粗排：[2,1,4] → 1/2 同父去重 → [9,8]
+    # 失败退回 RRF 粗排：[2,4,1] → 1/2 同父去重 → [9,8]
     rr2 = Retriever(store, k=3, client=FakeLLM(), reranker=LLMReranker(FakeLLM(rerank_fail=True)))
     assert [h.chunk_id for h in rr2.search("q", 3)] == [9, 8]
 
@@ -210,3 +228,60 @@ def test_reranker_skipped_when_candidates_fit_k():
     rr = Retriever(_store_two_ways(), k=5, client=llm, reranker=LLMReranker(llm))
     rr.search("q", 5)  # 候选 4 ≤ k=5 → 不精排（Go rerankOrKeep 语义）
     assert llm.chat_calls[-1][0].startswith("你是校园政策检索的查询改写器")
+
+
+# ---------- 精排阈值容错（P15：WeKnora 退化语义） ----------
+
+
+def test_rerank_threshold_filters_low_scores():
+    # 候选 [2,4,1,3] 打分 [8, 1, 7, 0]：阈值 2.0 滤掉 1/0 分 → 保留 [2,1]
+    # （复合分序 [2,1,4,3]）→ 同父块 9 去重 → [9]
+    rr = Retriever(
+        _store_two_ways(),
+        k=3,
+        client=FakeLLM(),
+        reranker=LLMReranker(FakeLLM(rerank_scores=[8, 1, 7, 0])),
+    )
+    assert [h.chunk_id for h in rr.search("q", 3)] == [9]
+
+
+def test_rerank_threshold_relaxes_when_all_filtered():
+    # 全部低于阈值 2.0：退化阈值 max(2×0.7, 1.5)=1.5 重试 → 1.8/1.7 都保留
+    rr = Retriever(
+        _store_two_ways(),
+        k=3,
+        client=FakeLLM(),
+        reranker=LLMReranker(FakeLLM(rerank_scores=[1.8, 1.7, 1.0, 0.5])),
+    )
+    hits = rr.search("q", 3)
+    assert [h.chunk_id for h in hits] == [9, 8]  # 候选 2/4（1.8/1.7）保留 → 父块 9/8
+
+
+def test_rerank_returns_empty_when_nothing_reaches_floor():
+    # 全 0 分：阈值与保底（≥1.5）都不过 → 空命中（上游走拒答路径）
+    rr = Retriever(
+        _store_two_ways(),
+        k=3,
+        client=FakeLLM(),
+        reranker=LLMReranker(FakeLLM(rerank_scores=[0, 0, 0, 0])),
+    )
+    assert rr.search("q", 3) == []
+
+
+def test_rerank_keeps_top1_when_barely_passes_floor():
+    # 阈值全滤、退化后仅一个 1.5 分候选：保底保留 top1
+    rr = Retriever(
+        _store_two_ways(),
+        k=3,
+        client=FakeLLM(),
+        reranker=LLMReranker(FakeLLM(rerank_scores=[1.5, 0.2, 0.1, 0.0])),
+    )
+    hits = rr.search("q", 3)
+    assert [h.chunk_id for h in hits] == [9]  # 候选 2 → 父块 9
+
+
+def test_single_way_fallback_normalizes_scores():
+    # 无 key（向量路关闭）：纯 FTS 分按列表 max 归一（WeKnora keyword-only 语义）
+    rr = Retriever(_store_two_ways(), k=3, client=FakeLLM(has_key=False))
+    hits = rr.search("q", 3)
+    assert [h.chunk_id for h in hits] == [9, 3]

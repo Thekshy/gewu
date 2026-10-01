@@ -116,22 +116,30 @@ def normalized_query_vector(vec: list[float]) -> str:
     return "[" + ",".join(repr(x) for x in q) + "]"
 
 
-def rrf_fuse(rank_lists: list[list[int]], k: int = 60) -> list[int]:
-    """Reciprocal Rank Fusion：多路召回的排名融合。
+def rrf_fuse(
+    rank_lists: list[list[int]],
+    k: int = 60,
+    weights: list[float] | None = None,
+) -> list[Scored]:
+    """加权 Reciprocal Rank Fusion（WeKnora fuseWithRRF 同款，P15 升级）：
 
-    平分时按首次出现顺序（对齐 Go map 插入序 + 稳定排序语义）。
+    score = Σ wᵢ/(k+rankᵢ) ÷ (Σw)/(k+1)，归一到 [0,1]（rank=1 且单路独占时恰为 1）。
+    weights 缺省等权；平分时按首次出现顺序（对齐 Go map 插入序 + 稳定排序语义）。
     """
+    ws = list(weights) if weights is not None else [1.0] * len(rank_lists)
+    denom = (sum(ws) or 1.0) / (k + 1)
     scores: dict[int, float] = {}
     first_seen: dict[int, int] = {}
     order = 0
-    for lst in rank_lists:
+    for wi, lst in zip(ws, rank_lists, strict=True):
         for rank, cid in enumerate(lst):
             if cid not in scores:
                 first_seen[cid] = order
                 order += 1
                 scores[cid] = 0.0
-            scores[cid] += 1.0 / (k + rank + 1)
-    return sorted(scores, key=lambda cid: (-scores[cid], first_seen[cid]))
+            scores[cid] += wi / (k + rank + 1)
+    ranked = sorted(scores, key=lambda cid: (-scores[cid] / denom, first_seen[cid]))
+    return [Scored(cid, scores[cid] / denom) for cid in ranked]
 
 
 class Store:
