@@ -43,6 +43,14 @@ class FakeChatLLM:
     def embed(self, texts):
         return [[0.0] * 2048]
 
+    def agent_model(self, *, small: bool = False, max_tokens: int = 1200):
+        from tests.agent_fakes import FakeToolChatModel  # noqa: PLC0415
+
+        return FakeToolChatModel(responses=[])
+
+    def record_usage(self, total_tokens: int) -> None:
+        pass
+
 
 def _hit() -> dict:
     return {
@@ -85,7 +93,7 @@ def test_chat_validation(tmp_path: Path):
     cases = [
         ({"question": ""}, "问题不能为空"),
         ({"question": "字" * 501}, "问题过长"),
-        ({"question": "q", "mode": "bogus"}, "mode 必须为 auto/direct/research/react"),
+        ({"question": "q", "mode": "bogus"}, "mode 必须为 auto/direct/research/react/classic"),
         ({"question": "q", "role": "admin"}, "role 必须为 student/counselor"),
         ({"question": "q", "session_id": "s" * 65}, "session_id 过长（上限 64 字符）"),
         ({"question": 123}, "请求体不是合法 JSON"),

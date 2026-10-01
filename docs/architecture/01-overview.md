@@ -78,7 +78,7 @@ flowchart TB
 | 域 | 位置（相对 `apps/server/`） | 职责（一句话） |
 | --- | --- | --- |
 | 接口 | `gewu/api/` | 6 端点 + SSE 写出 + interrupt/resume 桥；只做 HTTP 语义 |
-| 编排 | `gewu/agent/` | 主图（graph.py）、ReAct 子图（react.py）、路由（routing.py）、执行层（tx.py）、深研（research.py）、工具权限（tools.py）、状态（state.py）、事件（events.py）、提示词（prompts.py） |
+| 编排 | `gewu/agent/` | 外壳主图（graph.py）、agent 主循环装配（agent.py）、自研中间件族（mw.py）、guard 安检（guardrails.py）、主循环工具集（agenttools.py）、resume 翻译（resume.py）、路由（routing.py，classic）、执行层（tx.py）、深研（research.py）、工具权限（tools.py）、状态（state.py）、事件（events.py）、提示词（prompts.py） |
 | 检索 | `gewu/rag/` | 混合检索管线（retrieve.py）、PG 存取（store.py）、DDL 权威（schema.py） |
 | 模型访问 | `gewu/llm/` | ChatOpenAI 工厂（chat.py）+ 自定义 Embeddings（embed.py）+ 门面（service.py） |
 | 业务 | `gewu/business/` | mock 场馆预约 + 请假审批（对角色无感知，权限在工具层） |

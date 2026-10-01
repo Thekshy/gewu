@@ -6,6 +6,16 @@
 > 与 web 前端跨实现复用。标注【差异决定】的条目是框架隐式行为的等价决定（历史
 > 措辞保留）。
 
+## 0. P17 超出 Go 终态的编排演进注记
+
+P17 起 `mode=auto`（默认）切换为 agent-first 单循环（LangChain `create_agent`+middleware），
+SSE 十类事件形状不变但语义扩展：① mode 枚举扩 `classic`（cascade 分支图整体降级为实验
+基线，行为零改动）；② route 事件两段式（guard 出口 provisional + 收尾 effective 补发，
+新增取值 `chitchat`——前端 labels 覆盖更新、评测 set 聚合兼容）；③ `react` 与 `auto` 同路
+（历史评测语义别名）；④ 写确认门从 tx_gate(interrupt 文本 resume) 平移为 HITL middleware
+（resume 值翻译为 decisions，`resume.py` 收口，前端零感知）。字段级契约仍以本文为准；
+classic 链路以下原文继续有效（mode=classic 时的行为规格）。
+
 ## 1. 服务总览
 
 - 监听端口 `:8000`(HTTP)。

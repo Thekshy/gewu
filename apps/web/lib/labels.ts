@@ -7,6 +7,7 @@ export const ROUTE_LABEL: Record<string, string> = {
   refusal: "范围外",
   transaction: "办理",
   hybrid: "问答 + 办理",
+  chitchat: "寒暄",
 };
 
 // transaction.go slotMetaTable 的槽位中文名（问题全文由 answer_delta 承载，标签只标注差哪个槽）

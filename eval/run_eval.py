@@ -167,18 +167,23 @@ class RunAgg:
     results: list = field(default_factory=list)
     errors: list = field(default_factory=list)
     latency_ms: int = 0
+    # agent 轨语义等价：某轮回答以问号收尾（自然语言追问，classic 的
+    # slot_question 事件等价物——工作流机制 vs 对话式收集）
+    asked_question: bool = False
 
 
 def _run_turns(sid: str, turns: list[str], role: str, mode: str = "auto") -> RunAgg:
     agg = RunAgg()
     t0 = time.perf_counter()
     for turn in turns:
+        turn_answer = ""
         for ev in chat_events(turn, sid, role, mode):
             et = ev.get("type")
             if et == "route":
                 agg.routes.add(ev.get("route"))
             elif et == "answer_delta":
                 agg.answer += ev.get("text", "")
+                turn_answer += ev.get("text", "")
             elif et == "citations":
                 agg.cited.update(c["doc_id"] for c in ev.get("items", []))
             elif et == "slot_question":
@@ -191,6 +196,8 @@ def _run_turns(sid: str, turns: list[str], role: str, mode: str = "auto") -> Run
                 agg.errors.append(ev.get("message", ""))
             elif et == "done":
                 agg.latency_ms += int(ev.get("latency_ms", 0))
+        if turn_answer.rstrip().endswith(("？", "?")):
+            agg.asked_question = True
     agg.latency_ms = agg.latency_ms or int((time.perf_counter() - t0) * 1000)
     return agg
 
@@ -206,7 +213,10 @@ def _expect_ok(exp: dict, agg: RunAgg, mode: str = "auto") -> bool:
         else:
             checks.append(exp["route"] in agg.routes)
     if "asked_slot" in exp:
-        checks.append(agg.asked_slot == exp["asked_slot"])
+        # P17 agent 轨：classic 的 slot_question 事件或对话式追问（问号收尾轮）
+        # 任一命中即视为已追问（双底座行为差异的语义等价口径）
+        asked = agg.asked_slot or agg.asked_question
+        checks.append(asked == exp["asked_slot"])
     if "pending_tool" in exp:
         checks.append(exp["pending_tool"] in agg.pending_tools)
     if "success" in exp:
@@ -258,6 +268,15 @@ def score_single(item: dict, agg: RunAgg) -> dict:
     if item["type"] == "refusal":
         refused = "refusal" in agg.routes or "只能回答" in agg.answer
         return {"pass": refused, "kw": None, "cite": None}
+    if item["type"] == "chitchat":
+        # P17 寒暄集：自然回复 + 零引用 + effective route=chitchat + 不触发拒答话术
+        ok = (
+            "只能回答" not in agg.answer
+            and bool(agg.answer.strip())
+            and not agg.cited
+            and "chitchat" in agg.routes
+        )
+        return {"pass": ok, "kw": None, "cite": None}
     kws = item.get("gold_keywords", [])
     kw_hit = any(_norm(k) in _norm(agg.answer) for k in kws) if kws else None
     expected = set(item.get("expected_docs", []))
@@ -273,8 +292,8 @@ def main() -> int:
     parser.add_argument("--dataset", default="eval/dataset.jsonl",
                         help="数据集路径（相对仓库根或绝对路径），如 eval/dataset-agent.jsonl")
     parser.add_argument("--tag", default="", help="报告标签（写入文件名与表头，如 agent-first）")
-    parser.add_argument("--mode", dest="mode_", default="auto", choices=["auto", "direct", "research", "react"],
-                        help="全部用例统一使用的 chat mode（P14：agent 集以 react 跑）")
+    parser.add_argument("--mode", dest="mode_", default="auto", choices=["auto", "direct", "research", "react", "classic"],
+                        help="全部用例统一使用的 chat mode（P17：classic=级联基线；react 与 auto 同路）")
     args = parser.parse_args()
 
     h = health()
@@ -337,7 +356,7 @@ def main() -> int:
     def avg_tokens(rs) -> str:
         return f"{sum(r['tokens'] for r in rs) / len(rs):.0f}" if rs else "-"
 
-    types = ["factual", "multi_hop", "refusal", "transaction", "hybrid"]
+    types = ["factual", "multi_hop", "refusal", "transaction", "hybrid", "chitchat"]
     lines = [
         "# 评测报告",
         "",

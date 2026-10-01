@@ -1,0 +1,296 @@
+"""agent-first 主循环的自定义中间件族与子图状态（P17-4/5）。
+
+件清单（装配顺序见 agent.py；wrap_* 外层=列表在前者）：
+- GewuAgentState：create_agent 的 state_schema 扩展（role/user/mem_block 经
+  input schema 从外壳流入；citations 带去重 reducer 供并行检索合并）。
+- AgentPromptMiddleware：system prompt 动态拼记忆块（wrap_model_call.override）。
+- UsageRecordMiddleware：主循环 token 记账走 LLMService 预算闸（口径与
+  classic 链路一致）。
+- TruncationDefenseMiddleware：P10 截断防御铁律平移——finish_reason=length
+  且带 tool_calls 时不执行工具，assistant 原样回填 + 合成错误 observation
+  重调模型（Pi 式，不记指纹）。
+- WriteSlotGateMiddleware：写工具缺必填参数时不执行，emit slot_question +
+  引导模型向用户收集（classic advance 追问语义的事件级等价物）。
+- PendingActionMiddleware：写工具参数齐 → emit pending_action + 确认摘要
+  （classic tx_confirm 语义），在 HITL 中断之前发射。
+- RouteEventMiddleware：after_agent 按本轮工具轨迹合成 effective route 补发
+  （两段式第二段）。
+"""
+
+from __future__ import annotations
+
+from typing import Annotated, Any, NotRequired
+
+from langchain.agents.middleware import AgentMiddleware
+from langchain.agents.middleware.types import AgentState, PrivateStateAttr
+from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+
+from gewu.agent import events as ev
+from gewu.agent.emitter import emit
+from gewu.agent.prompts import agent_system_prompt
+from gewu.agent.tx import FLOW_DEFS, build_confirm, normalize_slot, slot_meta
+
+# 写工具四件（HITL 确认门对象，与 tools.py read_only=False 对齐）。
+WRITE_TOOLS = {"book_venue", "cancel_booking", "submit_leave", "approve_leave"}
+
+
+def _merge_citations(existing: list | None, new: list | None) -> list:
+    """citations 通道 reducer：按 (doc_id,title) 去重合并，编号累计重排。"""
+    out: list[dict] = list(existing or [])
+    have = {(c["doc_id"], c["title"]) for c in out}
+    for c in new or []:
+        key = (c["doc_id"], c["title"])
+        if key in have:
+            continue
+        have.add(key)
+        out.append(ev.citation(len(out) + 1, c["doc_id"], c["title"], c["source"]))
+    return out
+
+
+class GewuAgentState(AgentState):
+    """主循环子图状态扩展。role/user/mem_block 由外壳 state 流入（input schema）。"""
+
+    role: NotRequired[str]
+    user: NotRequired[str]
+    mem_block: NotRequired[str]
+    citations: NotRequired[Annotated[list, _merge_citations]]
+    guard_action: NotRequired[Annotated[str, PrivateStateAttr]]  # allow|meta|block（本轮）
+
+
+# ---------- 消息行走辅助 ----------
+
+
+def last_ai_message(messages: list) -> AIMessage | None:
+    for m in reversed(messages or []):
+        if isinstance(m, AIMessage):
+            return m
+    return None
+
+
+def messages_since_last_human(messages: list) -> list:
+    """本轮的消息切片（最后一个 HumanMessage 之后，含其后全部）。"""
+    idx = -1
+    for i in range(len(messages or []) - 1, -1, -1):
+        if isinstance(messages[i], HumanMessage):
+            idx = i
+            break
+    return (messages or [])[idx + 1 :] if idx >= 0 else list(messages or [])
+
+
+def normalize_tool_args(meta: dict, tool: str, args: dict) -> dict[str, str]:
+    """模型给的原始参数过确定性解析器归一（日期换算、场馆名→ID；失败保留原值）。"""
+    out: dict[str, str] = {}
+    for k, v in (args or {}).items():
+        raw = v if isinstance(v, str) else str(v)
+        norm, ok = normalize_slot(meta, k, raw)
+        out[k] = norm if ok else raw
+    return out
+
+
+def write_call_ready(business, tool_call: dict) -> bool:
+    """写工具必填参数是否齐全（HITL when 谓词与槽位门共用；口径=字段在场）。"""
+    name = tool_call.get("name", "")
+    flow = FLOW_DEFS.get(name)
+    if not flow:
+        return True  # 非流程工具（防御：不在 FLOW_DEFS 的写工具不设门）
+    args = tool_call.get("args") or {}
+    return all(str(args.get(s, "") or "").strip() for s in flow["required"])
+
+
+def effective_route(messages: list) -> tuple[str, str]:
+    """本轮工具轨迹 → (effective route, reason)。意图分流的判断权在工具选择。"""
+    tools: list[str] = []
+    for m in messages_since_last_human(messages):
+        if isinstance(m, ToolMessage) and m.name:
+            tools.append(m.name)
+    searched = "search_knowledge" in tools
+    researched = "deep_research" in tools
+    wrote = any(t in WRITE_TOOLS for t in tools)
+    if wrote:
+        return ("hybrid", "本轮检索后办理") if searched else ("transaction", "本轮办理业务")
+    if researched:
+        return "research", "本轮深研"
+    if searched or tools:
+        return "factual", "本轮检索作答"
+    return "chitchat", "本轮零工具直答"
+
+
+def partial_answer(messages: list) -> str:
+    """轮次耗尽的兜底：从本轮工具观察合成部分结论（react.py partial_answer 同语义）。"""
+    lines = ["本轮未能完全办成，已查到的信息："]
+    for m in messages_since_last_human(messages):
+        if isinstance(m, ToolMessage) and m.content:
+            text = m.content if isinstance(m.content, str) else str(m.content)
+            lines.append("- " + text[:200])
+        if len(lines) >= 6:
+            break
+    return "\n".join(lines) if len(lines) > 1 else ""
+
+
+# ---------- 中间件 ----------
+
+
+class AgentPromptMiddleware(AgentMiddleware):
+    """system prompt 动态装配：主体 + 长期记忆块尾部注入。"""
+
+    def wrap_model_call(self, request, handler):
+        mem = request.state.get("mem_block", "")
+        return handler(
+            request.override(system_message=SystemMessage(content=agent_system_prompt(mem)))
+        )
+
+
+class UsageRecordMiddleware(AgentMiddleware):
+    """主循环用量记账（LLMService 预算闸口径；classic 链路在 LLMService 内记）。"""
+
+    def __init__(self, llm) -> None:
+        super().__init__()
+        self._llm = llm
+
+    def wrap_model_call(self, request, handler):
+        resp = handler(request)
+        for m in resp.result:
+            usage = getattr(m, "usage_metadata", None)
+            if usage:
+                self._llm.record_usage(int(usage.get("total_tokens", 0) or 0))
+        return resp
+
+
+class TruncationDefenseMiddleware(AgentMiddleware):
+    """P10 截断防御铁律（Pi 式）：length+tool_calls 不执行，回填重发。
+
+    官方无现成件；规则平移自 react.py 的 _route_after_agent/_make_truncated_node，
+    落点从「图条件边」改为「模型调用包裹层」（handler 重调即回到模型）。
+    """
+
+    MAX_REFIRE = 2  # 同一轮最多重发次数（防 length 死循环）
+
+    def _is_truncated(self, resp) -> bool:
+        if not resp.result:
+            return False
+        ai = resp.result[-1]
+        if not isinstance(ai, AIMessage) or not ai.tool_calls:
+            return False
+        meta = getattr(ai, "response_metadata", None) or {}
+        return str(meta.get("finish_reason", "") or "") == "length"
+
+    def wrap_model_call(self, request, handler):
+        resp = handler(request)
+        refires = 0
+        while self._is_truncated(resp) and refires < self.MAX_REFIRE:
+            ai = resp.result[-1]
+            synth = [
+                ToolMessage(
+                    content=(
+                        "输出达到 token 上限被截断，参数可能不完整，本次未执行。"
+                        "请重新发起完整调用。"
+                    ),
+                    tool_call_id=c["id"],
+                )
+                for c in ai.tool_calls
+            ]
+            print(f"[agent] 截断防御：length 带工具调用已拦截（第 {refires + 1} 次重发）")
+            request = request.override(messages=[*request.messages, ai, *synth])
+            resp = handler(request)
+            refires += 1
+        return resp
+
+
+class WriteSlotGateMiddleware(AgentMiddleware):
+    """写工具槽位门：缺必填参数不执行，emit slot_question + 引导模型收集。"""
+
+    def __init__(self, business) -> None:
+        super().__init__()
+        self._business = business
+
+    def wrap_tool_call(self, request, handler):
+        call = request.tool_call
+        name = call.get("name", "")
+        flow = FLOW_DEFS.get(name)
+        if name not in WRITE_TOOLS or not flow:
+            return handler(request)
+        args = call.get("args") or {}
+        meta = slot_meta(self._business)
+        missing = [s for s in flow["required"] if not str(args.get(s, "") or "").strip()]
+        if not missing:
+            return handler(request)
+        slot = missing[0]
+        ask = meta[slot]["ask"]
+        emit(ev.slot_question_evt(slot, ask))
+        return ToolMessage(
+            content=(
+                f"缺少必填参数 {slot}（{meta[slot]['label']}）。"
+                f"请直接向用户提问：「{ask}」收集到答案后再重新发起调用，不要编造参数。"
+            ),
+            name=name,
+            tool_call_id=call.get("id", ""),
+        )
+
+
+class ResearchLimitMiddleware(AgentMiddleware):
+    """deep_research 单轮限 1 次代码闸（flash 无视否定指令必须代码兜底）。"""
+
+    LIMIT = 1
+
+    def wrap_tool_call(self, request, handler):
+        if request.tool_call.get("name") != "deep_research":
+            return handler(request)
+        msgs = request.state.get("messages") or []
+        used = sum(
+            1
+            for m in messages_since_last_human(msgs)
+            if isinstance(m, ToolMessage) and m.name == "deep_research"
+        )
+        if used >= self.LIMIT:
+            return ToolMessage(
+                content="本轮 deep_research 调用次数已达上限（1 次）。请基于已有检索结果综合作答。",
+                name="deep_research",
+                tool_call_id=request.tool_call.get("id", ""),
+            )
+        return handler(request)
+
+
+class PendingActionMiddleware(AgentMiddleware):
+    """写工具参数齐 → 确认摘要（pending_action 事件 + 摘要文案），先于 HITL 中断。"""
+
+    def __init__(self, business) -> None:
+        super().__init__()
+        self._business = business
+
+    def after_model(self, state, runtime) -> dict[str, Any] | None:
+        ai = last_ai_message(state.get("messages") or [])
+        if ai is None or not ai.tool_calls:
+            return None
+        meta = slot_meta(self._business)
+        for call in ai.tool_calls:
+            name = call.get("name", "")
+            if name not in WRITE_TOOLS or not write_call_ready(self._business, call):
+                continue
+            norm = normalize_tool_args(meta, name, call.get("args") or {})
+            pa, text, _note = build_confirm({"tx_tool": name, "tx_slots": norm}, self._business)
+            emit(ev.status_evt("已整理办理信息，等待确认…"))
+            emit(pa)
+            emit(ev.answer_evt(text))
+            break  # 一次模型响应只发一份摘要（多写调用罕见，首个为准）
+        return None
+
+
+class RouteEventMiddleware(AgentMiddleware):
+    """after_agent 合成 effective route 事件（两段式第二段；guard block/meta 已发过）。"""
+
+    def after_agent(self, state, runtime) -> dict[str, Any] | None:
+        if state.get("guard_action") in ("block", "meta"):
+            return None
+        route, reason = effective_route(state.get("messages") or [])
+        emit(
+            ev.route_decision_evt(
+                {
+                    "route": route,
+                    "confidence": 0.9,
+                    "layer": "effective",
+                    "reason": reason,
+                    "by_llm": True,
+                }
+            )
+        )
+        return None

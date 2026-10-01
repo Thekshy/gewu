@@ -10,10 +10,10 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 
-// 对比实验台：同题并发打两条链路——A 轨 mode=auto（级联路由 + 固定 workflow）、
-// B 轨 mode=react（ReAct 引擎自主组合工具）。两轨 session 隔离：办理流程的槽位/确认
-// 状态各自独立，B 轨的确认不污染 A 轨。B 轨的 route 事件是级联判定（pipeline 仍先发
-// route 再进 ReAct），仅作参考，实际执行以工具时间线为准。
+// 对比实验台：同题并发打两条链路——A 轨 mode=auto（P17 起=agent-first 单循环：
+// guard 安检 + create_agent 工具自选）、B 轨 mode=classic（级联路由 + 固定 workflow，
+// 论文对照基线）。两轨 session 隔离：办理流程的槽位/确认状态各自独立。A 轨 route
+// 事件两段式（guard provisional + effective 工具轨迹合成），以 effective 为准。
 
 const SUGGESTIONS = [
   "帮我预约明天晚上 19:00-21:00 的羽毛球馆，班级比赛用",
@@ -80,7 +80,7 @@ export default function Compare() {
   }
 
   async function run(side: Side, question: string) {
-    const mode: ChatMode = side === "a" ? "auto" : "react";
+    const mode: ChatMode = side === "a" ? "auto" : "classic";
     setBusy(side, true);
     pushRound(side, newRound(question));
     try {

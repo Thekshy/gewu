@@ -1,9 +1,13 @@
-"""会话编排主图（移植自 Go internal/agent/pipeline.go 的分发结构）。
+"""会话编排主图（P17 agent-first：外壳手写薄图 + create_agent 子图双底座）。
 
-图结构（P14 分 ticket 扩展；条件边结构按最终形态一次搭好）：
-  START → resolve_query → route → {refusal, factual, research, hybrid, transaction, react}
-  factual → retrieve → answer_direct → END
-  其余分支随 P14-4~6 落位。
+图结构：
+  START → entry_gate → resolve_query → mode_dispatch
+      ├─ auto/react → agent_in → agent（create_agent 子图）→ agent_done → END
+      ├─ classic → route（cascade 级联）→ {refusal, factual, research, hybrid, transaction}
+      ├─ direct → retrieve → answer_direct → END
+      └─ research → research → END
+  classic 链路的 transaction/tx_confirm/tx_gate(interrupt)/tx_resume 原样保留
+  （论文对照基线）；agent 链路的写确认门在子图 HITL 中间件内，interrupt 冒泡。
 
 done 事件在 chat 端点单点发射（Go RunChat 单点语义的等价物）。
 """
@@ -12,14 +16,16 @@ from __future__ import annotations
 
 import re
 
+from langchain_core.messages import HumanMessage
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.graph import END, START, StateGraph
 from langgraph.types import Command
 
 from gewu.agent import events as ev
 from gewu.agent.emitter import emit
+from gewu.agent.mw import last_ai_message, partial_answer
 from gewu.agent.prompts import ANSWER_SYSTEM, NO_DATA_ANSWER, QUERY_REWRITE_SYSTEM, REFUSAL_ANSWER
-from gewu.agent.routing import CascadeRouter, fill_policy, react_plan_signal
+from gewu.agent.routing import CascadeRouter, fill_policy
 from gewu.agent.state import ChatState
 from gewu.config import Settings
 from gewu.jsonx import json_str, parse_json_object
@@ -127,54 +133,65 @@ def make_route_node(llm: LLMService, settings: Settings):
 
 
 def route_branch(state: ChatState) -> str:
-    """route → 各链路条件边（mode=react 显式 / REACT_MODE=on 信号转 ReAct，对齐 Go pipeline）。"""
-    if state["mode"] == "react":
-        return "react"
-    route = state["route"]["route"]
-    if state["mode"] == "auto" and route == "transaction" and react_plan_signal(state["resolved"]):
-        return "react"
-    return route
+    """classic/direct/research：route 决策 → 链路映射（direct/research 在 route
+    节点内构造 user-specified 决策包并发 route 事件——契约保持）。"""
+    return state["route"]["route"]
 
 
-def make_react_node(llm: LLMService, retriever: Retriever, business, tools: dict):
-    """主图 react 节点：跑 ReAct 子图；写操作转确认时把 tx 状态写回主 state。"""
-    from gewu.agent.react import ReactContext, build_react_subgraph
+def mode_dispatch(state: ChatState) -> str:
+    """resolve 后的分派（P17 控制权收口）。
 
-    sub = build_react_subgraph(llm)
+    classic/direct/research 走 route 节点（级联/用户指定，route 事件契约不变）；
+    auto/react 同路进 agent 子图（guard 的两段式 route 事件接管徽章）。
+    """
+    return "agent_in" if state["mode"] in ("auto", "react") else "route"
 
-    def react(state: ChatState) -> dict:
-        ctx = ReactContext(
-            retriever,
-            business,
-            tools,
-            state["role"],
-            state["user"],
-            state["route"].get("toolset", []),
-        )
-        result = sub.invoke(
-            {
-                "question": state["resolved"],
-                "role": state["role"],
-                "user": state["user"],
-                "session_id": state["session_id"],
-                "toolset": state["route"].get("toolset", []),
-                "mem_block": state.get("mem_block", ""),
-                "turn": 0,
-            },
-            config={"configurable": {"react_ctx": ctx}},  # 运行时对象不进 checkpoint
-        )
-        if result.get("stop") == "confirm":
-            return {
-                "tx_tool": result["tx_tool"],
-                "tx_slots": result["tx_slots"],
-                "tx_phase": "confirm",
-            }
-        final = result.get("final", "")
-        emit(ev.answer_evt(final))
-        emit(ev.citations_evt(result.get("citations", [])))
-        return {"answer": final, "citations": result.get("citations", [])}
 
-    return react
+def make_agent_in_node():
+    """agent 子图入口：本轮问题（指代消解后）入对话历史。"""
+
+    def agent_in(state: ChatState) -> dict:
+        return {"messages": [HumanMessage(content=state.get("resolved") or state["question"])]}
+
+    return agent_in
+
+
+def make_agent_done_node():
+    """agent 子图出口：answer 统一发射 + 截断标记 + 轮次耗尽兜底。
+
+    确认门中断轮不到这里（turn 悬停在子图内，摘要已由 PendingAction 发出）；
+    guard 短路轮也经过这里（消息由 guard 注入，answer 单点发射不重复）。
+    """
+
+    def agent_done(state: ChatState) -> dict:
+        msgs = state.get("messages") or []
+        ai = last_ai_message(msgs)
+        answer = ""
+        if ai is not None:
+            c = ai.content
+            answer = (
+                c
+                if isinstance(c, str)
+                else "".join(
+                    seg.get("text", "") if isinstance(seg, dict) else str(seg) for seg in c
+                )
+            )
+            if "Model call limits exceeded" in answer:
+                answer = ""  # 轮次耗尽：换部分结论兜底
+        if not answer.strip():
+            answer = partial_answer(msgs) or "未能获取足够信息回答该问题，请换个说法或补充细节。"
+        truncated = False
+        if ai is not None:
+            meta = getattr(ai, "response_metadata", None) or {}
+            if str(meta.get("finish_reason", "") or "") == "length":
+                truncated = True
+                emit(ev.status_evt("回答已达长度上限，可能被截断"))
+        citations = state.get("citations") or []
+        emit(ev.answer_evt(answer))
+        emit(ev.citations_evt(citations))
+        return {"answer": answer, "citations": citations, "truncated": truncated}
+
+    return agent_done
 
 
 def make_tx_confirm_node(business):
@@ -680,21 +697,28 @@ def build_graph(
     tools: dict | None = None,
     checkpointer=None,
     memory=None,
+    agent=None,
 ):
     """装配会话编排主图。checkpointer 缺省内存版（P14-6 换 PostgresSaver）。
 
-    tools 为业务工具表（权限矩阵）；react/tx 链路依赖，P14-4 起。
+    tools 为业务工具表（权限矩阵）。agent 为 create_agent 子图（P17 主循环），
+    缺省现场装配；测试可注入 fake 模型驱动的实例。
     """
+    from gewu.agent.agent import build_agent
     from gewu.agent.tools import tools_for
 
     tools = tools if tools is not None else tools_for()
+    if agent is None:
+        agent = build_agent(settings, llm, retriever, business, tools)
     g: StateGraph = StateGraph(ChatState)
     g.add_node("resolve_query", make_resolve_node(llm, settings, memory))
+    g.add_node("agent_in", make_agent_in_node())
+    g.add_node("agent", agent)
+    g.add_node("agent_done", make_agent_done_node())
     g.add_node("route", make_route_node(llm, settings))
     g.add_node("retrieve", make_retrieve_node(retriever))
     g.add_node("answer_direct", make_answer_node(llm))
     g.add_node("refusal", make_refusal_node())
-    g.add_node("react", make_react_node(llm, retriever, business, tools))
     g.add_node("tx_confirm", make_tx_confirm_node(business))
     g.add_node("tx_gate", make_tx_gate_node(llm, business, tools))
     g.add_node("tx_resume", make_tx_resume_node(llm, business, tools))
@@ -711,7 +735,19 @@ def build_graph(
             "tx_resume": "tx_resume",
         },
     )
-    g.add_edge("resolve_query", "route")
+    g.add_conditional_edges(
+        "resolve_query",
+        mode_dispatch,
+        {
+            "route": "route",
+            "retrieve": "retrieve",
+            "research": "research",
+            "agent_in": "agent_in",
+        },
+    )
+    g.add_edge("agent_in", "agent")
+    g.add_edge("agent", "agent_done")
+    g.add_edge("agent_done", END)
     g.add_conditional_edges(
         "route",
         route_branch,
@@ -721,7 +757,6 @@ def build_graph(
             "research": "research",
             "hybrid": "hybrid",
             "transaction": "transaction",
-            "react": "react",
         },
     )
     g.add_edge("retrieve", "answer_direct")
@@ -734,14 +769,6 @@ def build_graph(
         },
     )
     g.add_edge("refusal", END)
-    g.add_conditional_edges(
-        "react",
-        _after_react,
-        {
-            "tx_confirm": "tx_confirm",
-            "__end__": END,
-        },
-    )
     g.add_conditional_edges(
         "tx_confirm",
         _after_tx_confirm,
@@ -768,11 +795,6 @@ def build_graph(
         {"tx_confirm": "tx_confirm", "__end__": END},
     )
     return g.compile(checkpointer=checkpointer or MemorySaver())
-
-
-def _after_react(state: ChatState) -> str:
-    """react 后：写操作已转确认 → tx_confirm 发确认摘要；否则结束。"""
-    return "tx_confirm" if state.get("tx_phase") == "confirm" else "__end__"
 
 
 def _after_transaction(state: ChatState) -> str:

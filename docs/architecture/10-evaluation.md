@@ -6,8 +6,9 @@
 
 | 数据集 | 规模 | 断言方式 |
 | --- | --- | --- |
-| `dataset.jsonl` | 28 题：factual 7 / multi_hop 8 / refusal 3 / transaction 7 / hybrid 1（多轮 8 条） | gold_keywords + expected_docs 引用交集；transaction 断言**业务库真实状态** |
-| `dataset-agent.jsonl` | 8 题 | expect 结构化断言（route/success/booking/ticket/answer_contains）；P14 起以 `--mode react` 跑 |
+| `dataset.jsonl` | 28 题：factual 9 / multi_hop 8 / refusal 3 / transaction 7 / hybrid 1（多轮 8 条） | gold_keywords + expected_docs 引用交集；transaction 断言**业务库真实状态** |
+| `dataset-chitchat.jsonl` | 8 题（P17 新增）：你好/在吗/你是谁/能办什么/谢谢/早安等 | 不含「只能回答」+ 非空回答 + 零引用 + route 含 chitchat |
+| `dataset-agent.jsonl` | 8 题 | expect 结构化断言（route/success/booking/ticket/answer_contains）；`--mode react`（P17 起 react=auto 同路） |
 | `search-queries.jsonl` | 41 条 | 检索层 doc 级命中序列（对照实验用） |
 
 主集逐题是 JSON 行，断言素材显式声明：
@@ -26,10 +27,14 @@
 
 ```bash
 RATE_LIMIT_PER_MINUTE=600 make run          # 服务端
-python3 eval/run_eval.py --tag <标签>        # 主集 28 题
+python3 eval/run_eval.py --mode classic --tag classic    # classic 基线轨（P17）
+python3 eval/run_eval.py --tag agent-first               # agent-first 轨（mode=auto 默认）
+python3 eval/run_eval.py --dataset eval/dataset-chitchat.jsonl --tag chitchat
 python3 eval/run_eval.py --dataset eval/dataset-agent.jsonl --mode react --tag agent
 MEMORY_CONSOLIDATE=off …                     # 全量评测隔离记忆固化（见 07）
 ```
+
+**双轨口径（P17）**：classic 与 agent-first 跑同一 28 题主集——前者是「前置路由+手写图」对照基线，后者是默认链路；`asked_slot` 断言语义等价（classic 的 slot_question 事件 或 agent 的问号收尾轮，任一命中）。两流派延迟/token/正确率对照见 eval/reports/orchestration-20261001.md。
 
 报告（Markdown 指标表 + 逐题明细）落 `eval/reports/`，P 系列基线与 A/B 对照全部留档（P8-retire-baseline、P14-search-parity-* 系列、agent-first-ab 等 30+ 份）；业务库断言前先 reset（残留预约会占「每人每天 2 时段」配额）。
 
@@ -41,6 +46,7 @@ GLM 温度 0 仍非确定（flash 尤甚），评测失败集会漂移。仓库�
 | --- | --- |
 | mtfact-002 | flash 路由漂移 |
 | ag-know-002 / ag-tx-001~002 | ReAct 偶发不落工具 |
+| tx-002 / tx-003（agent 轨） | P17：多轮办理对话式收集的 GLM 非确定（同代码多轮通过/失败交替，tx-003 六轮完整重放全对） |
 
 首见记录：eval/reports/P8-retire-baseline.md §4；P14 全量 28/28 时 mtfact-002 曾 flaky 重跑过。
 

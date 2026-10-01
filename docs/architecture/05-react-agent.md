@@ -1,138 +1,67 @@
-# 05 · ReAct 子图（自主任务执行器）
+# 05 · agent 主循环（create_agent 底座 · P17）
 
-ReAct 是与 workflow 并存的第二条编排形态（`gewu/agent/react.py`）：模型通过原生 tool-calling 协议**自主决定**调用哪个工具、循环到信息足够为止——服务「路径不定」的开放任务；workflow（[03](03-routing.md)/[06](06-transaction.md) 的确定性链路）服务「路径已知」的任务。入口：请求 `mode=react` 显式指定，或 `REACT_MODE=on` 时路由拦截办理信号词。本文拆解子图结构、防护四件套与写操作转确认流。
+P17 起 `mode=auto/react` 的默认链路是 **agent-first 单循环**：LangChain 1.x `create_agent` 官方底座（生产级模型-工具循环 + middleware 家族）+ 五个自研中间件。模型通过原生 tool-calling 协议**自主决定**调用哪个工具、循环到信息足够为止；意图分流不再前置（[03](03-routing.md)），由 guard 安检（入口）与 effective route 合成（出口）两端表达。P14~P16 的手写 ReAct 子图（`react.py` 五节点引擎）已随本底座退役，其防护语义全部平移进中间件——本文按「官方件 / 平移件」双线拆解。classic 分支（mode=classic）保持手写图形态，构成双底座对照（论文素材，对照数据见 eval/reports/orchestration-*.md）。
 
-## 子图结构
+## 装配
 
-```mermaid
-flowchart TB
-    S((START)) --> AG[agent<br/>chat_with_tools<br/>max_tokens 1200]
-    AG -->|length 且带 tool_calls| TR[truncated<br/>不执行·合成错误 observation<br/>回填重发]
-    AG -->|有 tool_calls| EX[execute<br/>指纹去重·读写分治<br/>错误回填不断链]
-    AG -->|无 tool_calls| FIN[finalize<br/>唯一终止判据]
-    TR --> AG
-    EX -->|写操作参数齐| STOP[stop=confirm<br/>转主图确认门]
-    EX -->|轮次≥8| CV[converge<br/>强制收敛·部分结论兜底]
-    EX -->|继续| AG
-    FIN --> E((END))
-    CV --> E
-```
+`gewu/agent/agent.py` 的 `build_agent`：create_agent 编译产物直接 `add_node` 嵌套进外壳图（checkpointer 只挂顶层，子图 interrupt 冒泡暂停，[02](02-orchestration-graph.md)）。模型经 `llm.agent_model()` 工厂构造（温度/max_tokens 固化在实例，不经 LLMService 的 bind 链）；工具集 `agenttools.py` 全量 `@tool` 化（11 个：检索/日期/deep_research + 8 业务工具）。
 
-五个节点的分工：
+## 中间件栈（执行序：wrap_* 外层=列表在前者）
 
-| 节点 | 职责 | 关键细节 |
-| --- | --- | --- |
-| `agent` | `llm.chat_with_tools(msgs, ctx.schemas, max_tokens=1200)` 一轮决策 | 首轮装配 system（含记忆块尾部注入）+ human；产出存 `pending_ai`（dict 形态：content/tool_calls/finish_reason） |
-| `truncated` | 截断防御：**不执行**，合成错误 observation 回填 | `finish_reason=length` 且带 tool_calls 时进入；轮次 +1 后回 agent 重发 |
-| `execute` | 逐 call 执行：未知工具/指纹去重/读写分治/错误回填 | observation 截 1500 字（`OBSERVATION_LIMIT`）控上下文膨胀 |
-| `finalize` | 无 tool_calls 即最终回答 | content 为空时用已累积 observation 组织部分结论 |
-| `converge` | 轮次到顶的强制收敛 | 追加「不要再调工具」human 一次；失败用 partial_answer 兜底 |
+| 件 | 来源 | 钩子 | 职责 |
+| --- | --- | --- | --- |
+| `GuardMiddleware` | 自研（chat-langchain 同构） | before_agent，can_jump_to=end | lenient 安检：正则快路径（纯问候零 LLM）→ LLM 判 allow/meta/block（fail-open）；block/meta 短路收尾 |
+| `ModelCallLimitMiddleware` | 官方 | wrap_model_call | `run_limit=8`（旧 REACT_MAX_TURNS 等价） |
+| `TruncationDefenseMiddleware` | 自研平移 | wrap_model_call | **P10 截断防御铁律**：`finish_reason=length` 且带 tool_calls 时不执行，assistant 原样回填 + 合成错误 observation 重调 handler（Pi 式，重发不记指纹；上限 2 次防 length 死循环） |
+| `UsageRecordMiddleware` | 自研 | wrap_model_call | token 记账走 LLMService 预算闸（与 classic 同口径） |
+| `AgentPromptMiddleware` | 自研 | wrap_model_call | system prompt（AGENT_SYSTEM）+ 记忆块尾部注入（`request.override(system_message=…)`） |
+| `HumanInTheLoopMiddleware` | 官方 | after_model | 写工具四件 interrupt 确认门：`interrupt_on` 配 allowed_decisions=[approve,reject,respond] + `when=write_call_ready` 谓词（参数不齐不中断，交给槽位门） |
+| `PendingActionMiddleware` | 自研平移 | after_model | 确认摘要（pending_action + 文案）在 HITL 中断**之前**发射——interrupt 节点零副作用纪律（P14）的延续 |
+| `WriteSlotGateMiddleware` | 自研平移 | wrap_tool_call | 写工具缺必填参数不执行：emit slot_question + 引导模型向用户收集（classic advance 追问语义的事件级等价物） |
+| `ResearchLimitMiddleware` | 自研 | wrap_tool_call | deep_research 单轮限 1 次（flash 无视否定指令必须代码兜底） |
+| `RouteEventMiddleware` | 自研 | after_agent | effective route 合成补发（两段式第二段；guard block/meta 轮跳过） |
+| `SummarizationMiddleware` | 官方 | — | 上下文压缩（30k tokens 触发、保 20 条）——P13 顺延线收口 |
 
-子图自带独立的 `ReactState`（与主图 ChatState 分离）：`msgs` 直接持有 langchain 消息对象、`seen` 指纹计数表、`observations`/`citations` 累积、`stop`（`"" | "confirm"`）与回传主图的 `tx_tool`/`tx_slots`。
+## 防护语义平移对照（react.py → 中间件）
 
-## 运行时环境传递（ReactContext）
+| 旧四件套 | 新落点 |
+| --- | --- |
+| ① 唯一终止判据（无 tool_calls 即终答） | create_agent 原生循环（`model_to_tools` 条件边） |
+| ② 指纹去重 | 随引擎退役——repeat 场景由 ModelCallLimit 兜底（平移裁剪决策：flash 场景指纹误伤率高于死循环率） |
+| ③ 轮次上限 + 到顶收敛 | ModelCallLimit（exit_behavior=end 注入人工收尾消息）+ agent_done 的 partial_answer 兜底 |
+| ④ 截断防御（P10 铁律） | TruncationDefenseMiddleware（落点从图条件边改为 wrap_model_call 的 handler 重调——after_model 链上与 HITL 顺序纠缠，包裹层更干净） |
 
-**运行时对象不能进 state**——checkpointer 的 msgpack 序列化会拒绝检索器/业务系统这类对象，这是 LangGraph 的硬约束，也是 state 只放可持久化数据的纪律来源。环境经 `config.configurable` 注入：
+## 运行时环境传递
 
-```python
-ctx = ReactContext(retriever, business, tools, role, user, toolset)
-result = sub.invoke({...},
-    config={"configurable": {"react_ctx": ctx}})   # 运行时对象不进 checkpoint
-```
+运行时对象不能进 state（checkpointer msgpack 序列化拒绝，P14 硬约束）。P17 的解法比 P14 更彻底：**工具以闭包持有 business/tools/retriever**（`build_agent_tools` 装配期捕获），role/user/mem_block 经 `GewuAgentState` 的普通字段随外壳图 state 流入子图（自定义 TypedDict 字段天然过 input schema）——`config.configurable` 通道只剩 checkpointer 自己用。工具内取 state 经 `ToolRuntime`（langgraph 原生注入：`runtime.state`/`runtime.tool_call_id`）。
 
-`ReactContext` 构造时即完成**双重裁剪**：工具表按角色裁剪（`has_role(spec.roles, role)`，模型看不见=打不到），路由决策包的 toolset 白名单再收窄一层（`not allowed or name in allowed`）——最小权限。`schemas` 由内置两工具 + 可见业务工具动态生成，字段名与 workflow 槽位一致（确认流共用归一口径）。
-
-## 防护四件套
-
-**① 唯一终止判据**：模型不再产出 tool_calls 即最终回答——不用轮数猜终止，路径不定的问题该走几轮由模型自己决定：
-
-```python
-def _route_after_agent(state: ReactState) -> str:
-    ai = state["pending_ai"]
-    if ai["finish_reason"] == "length" and ai["tool_calls"]:
-        return "truncated"          # 截断防御铁律：length 判断先于工具解析（P10）
-    return "execute" if ai["tool_calls"] else "finalize"
-```
-
-**② 指纹去重**：同一 `(name, args)` 规范化指纹（`json.dumps` 排序 key）执行 2 次后第 3 次被拒，observation 提示换路或直接回答——防死循环：
-
-```python
-def _fingerprint(name: str, args: dict) -> str:
-    return name + "|" + json.dumps(args or {}, ensure_ascii=False, sort_keys=True)
-```
-
-**③ 轮次上限 + 到顶收敛**：`REACT_MAX_TURNS=8`（预算熔断之外的第二道闸）；到顶后 converge 强制收敛一次（「基于已有结果直接回答，不要再调工具」），失败则用已累积 observation 组织部分结论（前 5 条、各截 200 字），不留裸错误。
-
-**④ 截断防御（P10 铁律）**：`finish_reason=length` 且带 tool_calls 时**一律不执行**——截断的参数 JSON 可能不完整，执行会产生真实副作用。合成错误 observation 回填交模型重发（Pi 式修复）：
-
-```text
-"输出达到 token 上限被截断，参数可能不完整，本次未执行。请重新发起完整调用。"
-```
-
-实现为 agent 后的**条件路由**（`_route_after_agent` 中 length 判断先于工具解析）；**重发不记 seen 指纹**（未执行过的调用不得被去重误伤）。
-
-## 工具表
+## 工具表（agenttools.py）
 
 | 工具 | 类型 | 说明 |
 | --- | --- | --- |
-| `search_knowledge` | 内置读 | 混合检索；observation 为编号条款文本（各截 600 字），顺带累积 citations 去重（doc_id+title 键） |
-| `parse_date` | 内置读 | 确定性日期解析（`gewu/dates.py`），零 LLM 成本；observation 形如 `下周三 → 2026-10-07` |
-| `query_venues` / `my_bookings` / `leave_status` | 业务读 | 查场馆余量 / 本人预约 / 请假单状态 |
-| `pending_leaves` | 业务读（counselor） | 待审批清单 |
-| `book_venue` / `cancel_booking` / `submit_leave` | 业务写 | 不直接执行——见下节转确认流 |
-| `approve_leave` | 业务写（counselor） | 同上 |
+| `search_knowledge` | 读 | 混合检索；返回 `Command(update={messages, citations})`——observation 与引用通道一次更新（citations 带 (doc_id,title) 去重 reducer，并行 Send 安全合并） |
+| `parse_date` | 读 | 确定性日期解析（`gewu/dates.py`），零 LLM 成本 |
+| `deep_research` | 读 | 复用 research 管线（plan→逐路检索→聚合，flagship 综合留在主循环）；ResearchLimit 单轮 1 次 |
+| 8 个业务工具 | 读 4 / 写 4 | 薄包 `call_tool` 单一出口；**不做角色过滤**——权限判定保持在工具层单一出口，越权回执是有效 observation（模型转述，ag-read-002/tx-006 断言语义） |
 
-业务工具经 `agent.tools.call_tool` 单一出口执行——未知工具、越权、缺参在进入业务系统前拦截（权限矩阵见 [06](06-transaction.md)）；业务失败也是**有效 observation** 交模型决策（「时段冲突，可选…」模型能据此改约别的时间），例外捕获的报错同样回填为 `工具执行失败：…` 不断链。
+日期换算纪律（迁移中撞出来的坑）：工具描述强制日期参数传**中文原文**（「明天」「12月1日」），由 `normalize_tool_args` 在 call_tool 前过确定性解析器归一——LLM 自行换算会把「12月1日」写死成错误的年份。
 
-## 写操作转确认流
+## 写操作确认流（HITL）
 
-写工具在 ReAct 里**不直接执行**：必填参数齐 → 置 `stop="confirm"` 并把归一化后的槽位写回主图 state，由主图的 tx_confirm/tx_gate 接管（[06](06-transaction.md)）；参数不全 → observation 提示 agent 先向用户收集（不调工具、直接输出提问文本）。**模型可发起写操作，不能拍板**：
-
-```python
-elif ctx.is_write_tool(name):
-    ready, missing, norm_slots = _tx_ready(ctx, name, args)
-    if ready:
-        emit(ev.status_evt("已整理办理信息，等待确认…"))
-        return {"stop": "confirm", "tx_tool": name, "tx_slots": norm_slots, ...}
-    out = "缺少必填参数：" + "、".join(missing) + "。请先向用户收集这些信息…"
-```
-
-`_tx_ready` 与 workflow 用同一套 `FLOW_DEFS` 必填定义和 `normalize_slot` 归一口径——ReAct 与槽位收集两条路收集到的参数，进确认门时形状一致。
-
-## 一次 ReAct 运行的典型轨迹
-
-```mermaid
-sequenceDiagram
-    autonumber
-    participant M as 主图 react 节点
-    participant A as agent
-    participant E as execute
-    participant RT as 检索/业务工具
-    participant U as 用户（SSE）
-
-    M->>A: question + ReactContext（configurable）
-    A->>E: tool_calls=[search_knowledge("转专业条件")]
-    E->>RT: Retriever.search
-    E->>U: status（调用工具 search_knowledge…）
-    RT-->>E: 命中条款（observation + citations 累积）
-    E->>A: 消息对回填（assistant+tool 协议配对）
-    A->>E: tool_calls=[parse_date("下周三")]
-    E-->>A: 2026-10-07（确定性，零 LLM）
-    A->>E: tool_calls=[book_venue(羽毛球馆, 10-07, 19:00-21:00)]
-    E->>M: stop=confirm（参数齐，不执行）
-    M->>M: 回写 tx_tool/tx_slots → tx_confirm → tx_gate
-    M-->>U: pending_action 确认摘要 → interrupt 暂停
-```
+模型发起写工具调用后：参数不齐 → WriteSlotGate 拦截并引导收集；参数齐 → PendingActionMiddleware 发确认摘要 → HITL after_model `interrupt(HITLRequest)`（子图冒泡暂停）→ 用户回复经 `resume.py` 翻译为 decisions（approve=确认 / reject=取消 / respond=修改重发或切话题）→ 放行执行 → action_result 回执。**模型可发起写操作，不能拍板**——与 classic 的 tx_confirm/tx_gate 语义对齐（[06](06-transaction.md)），前端零改动。
 
 ## 相关文件
 
 | 文件 | 职责 |
 | --- | --- |
-| `gewu/agent/react.py` | 子图装配、节点、常量（maxTurns=8 / repeatLimit=2 / observationLimit=1500）、工具 schema |
-| `gewu/agent/tools.py` | 工具表、权限矩阵与 call_tool 单一出口 |
-| `gewu/agent/prompts.py` | ReAct system 提示词（记忆块尾部注入） |
-| `tests/test_react.py` | 含 G5 截断防御专项：截断那次不执行、重发才执行 |
+| `gewu/agent/agent.py` | create_agent 装配与中间件栈 |
+| `gewu/agent/mw.py` | 自研中间件族 + GewuAgentState + effective_route/槽位门纯函数 |
+| `gewu/agent/guardrails.py` | GuardMiddleware（快路径正则/lenient prompt/fail-open/会话感知） |
+| `gewu/agent/agenttools.py` | @tool 工具集（事件就地发射 + Command 状态更新） |
+| `gewu/agent/resume.py` | resume 桥翻译（用户文本 → HITL decisions） |
+| `gewu/agent/tools.py` | 业务工具表、权限矩阵与 call_tool 单一出口（双底座共用） |
+| `tests/test_agent_flow.py` / `tests/test_agent_mw.py` / `tests/test_guardrails.py` | 全链流测试 / 中间件单测 / guard 单测 |
 
 ---
 
-下一篇《06 · 知行执行层》进入写操作的完整生命周期：槽位收集、interrupt() 确认门、失败恢复与权限矩阵。
+下一篇《06 · 知行执行层》进入写操作的完整生命周期：classic workflow 与 agent HITL 两条确认链、失败恢复与权限矩阵。

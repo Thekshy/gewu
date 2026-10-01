@@ -68,5 +68,12 @@
 - [x] P14 LangGraph 迁移：编排层全量迁 Python+LangGraph（PARITY 契约下前端零改动、
       interrupt() 确认门、PostgresSaver 重启续办、P10 截断防御等价移植）；Go 后端退役
       （tag `go-final`）；评测 28+8 全绿——ADR-0010 / [P14 任务书](runbooks/P14-langgraph-migration.md)
-- [ ] agent-first 链路稳定化：flash 三分类与 ReAct 确认流的非确定性（已知短板，见 P8-retire-baseline.md §4；triage 已随 P14 退役，条目收窄为 react 链路稳定化）
+- [x] P15 RAG 对齐 WeKnora：入库 CLI+自适应切片策略链/加权 RRF/精排容错/检索层独立评测
+- [x] P17 编排层 agent-first 重构：mode=auto 切换 create_agent+middleware 单循环（guard lenient
+      安检/写确认门迁 HITL/截断防御平移/deep_research 工具化/route 两段式+chitchat）；
+      cascade 降级 mode=classic 实验基线；SummarizationMiddleware 收口上下文压缩（P13 顺延线闭线）；
+      chitchat 新集 8/8 + 双轨对照报告 eval/reports/orchestration-20261001.md——
+      [P17 任务书](runbooks/P17-agent-first-orchestration.md)
+- [ ] agent 轨多轮办理稳定化：tx-002/tx-003 对话式收集的 GLM 非确定（P17 已知 flaky，重放全对）；
+      classic 轨论文完成后按退役模式收口（tag+留档+删码）
 - [ ] 长期记忆消亡与用户侧可见性（当前仅注入不可管理）

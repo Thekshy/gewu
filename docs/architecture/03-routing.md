@@ -1,6 +1,22 @@
-# 03 · 意图路由（cascade 三级级联）
+# 03 · 意图路由（P17：guard 安检 + classic 级联基线）
 
-路由决定一条消息走哪条链路（`gewu/agent/routing.py`）：五分类 factual / research / transaction / hybrid / refusal，输出**路由决策包**（dict），下游据此选择链路、工具集与模型档。本文拆解三级漏斗的每一级、误路由安全网的来历，以及决策包的契约。
+P17 起意图路由分为两层形态：
+
+- **agent-first 主循环（mode=auto/react，默认）**：前置路由取消，意图分流的判断权转移到
+  **guard 安检**（入口，管「范围」）与 **工具轨迹合成**（出口，管「意图」）——判断权从
+  路由器转移到模型与事实（详见 [02](02-orchestration-graph.md) 的两段式 route 事件）。
+- **cascade 级联（mode=classic，实验基线）**：本文件主体描述的形态。五分类
+  factual / research / transaction / hybrid / refusal 输出**路由决策包**（dict），下游据此
+  选择链路、工具集与模型档。它是 P14~P16 的默认链路，P17 起降级保留不删——毕设
+  「前置路由 vs 工具自选」三路线对照实验的基线（对照数据见 eval/reports/orchestration-*.md）。
+
+> **历史病根存档（P17 立项起因）**：classic 的 L1 提示词把「闲聊」写进 refusal 定义
+> （「股市、写代码、闲聊等」）且五分类无兜底类，「你好」被**按设计**路由到 refusal
+> 节点吐硬编码话术。这是前置分类器范式的结构性缺陷（分类清单必须枚举一切输入），
+> 开源两派解法：FastGPT/Dify 加显式闲聊/兜底类（本仓未采用），LangChain 官方线
+> 直接删前置路由（本仓 P17 采用）。
+
+## cascade 三级漏斗（mode=classic）
 
 ## 三级漏斗
 
@@ -106,30 +122,22 @@ return factual                             # ③ 短事实兜底
 | transaction / hybrid | False | small | 8 个业务工具白名单（`TRANSACTION_TOOLSET`） |
 | refusal | False | small | — |
 
-toolset 白名单同时约束 ReAct 与续轮流程——路由判了办理，模型可见的工具就只有这 8 个（最小权限，另见 [05](05-react-agent.md) 的权限矩阵）。route 事件（含 layer/confidence）是评测断言与前端徽章的数据源。
+toolset 白名单同时约束 classic 的续轮流程——路由判了办理，模型可见的工具就只有这 8 个（最小权限）。route 事件（含 layer/confidence）是评测断言与前端徽章的数据源。
 
-## mode=react 的入口拦截
+## mode 分派的现状（P17）
 
-`route_branch` 条件边：请求 `mode=react` 显式进 ReAct 子图；`REACT_MODE=on` 时「目标明确但路径不定」的办理信号词（安排/规划/顺便/一并…，`react_plan_signal`）也自动转 ReAct：
+`mode_dispatch` 条件边：`auto/react` → agent 主循环（react 是历史评测语义的别名，与 auto 同路）；`classic/direct/research` → route 节点（cascade 或在 route 内直接构造 user-specified 决策包，不经过级联）。`REACT_MODE` 信号词转 ReAct 的拦截与 `react_plan_signal` 随旧 react 引擎退役（git 历史留档）。
 
-```python
-def route_branch(state: ChatState) -> str:
-    if state["mode"] == "react":
-        return "react"
-    route = state["route"]["route"]
-    if state["mode"] == "auto" and route == "transaction" and react_plan_signal(state["resolved"]):
-        return "react"
-    return route
-```
-
-**triage/classic 两策略已随 P14 退役**（Q6 拍板：结论留档 [walkthrough/02](../walkthrough/02-routing.md) 与 eval/reports/，agent 链路的显式入口是 mode=react）。`mode=direct/research` 则在 route 节点直接构造决策包（layer=user-specified），不经过级联。
+**triage 策略随 P14 退役、react 引擎随 P17 退役**（结论留档 [walkthrough/02](../walkthrough/02-routing.md) 与 eval/reports/）。
 
 ## 相关文件
 
 | 文件 | 职责 |
 | --- | --- |
-| `gewu/agent/routing.py` | 全部路由逻辑、正则与常量阈值 |
-| `gewu/agent/routing_prompts.py` | L1/L2 提示词（逐字对照 Go 版） |
+| `gewu/agent/guardrails.py` | agent 链路的 guard 安检（lenient/fail-open/快路径/会话感知） |
+| `gewu/agent/mw.py` | effective route 合成（`effective_route` 工具轨迹→route 常量表） |
+| `gewu/agent/routing.py` | cascade 全部路由逻辑、正则与常量阈值（classic 专用） |
+| `gewu/agent/routing_prompts.py` | L1/L2 提示词（逐字对照 Go 版；「闲聊∈refusal」为历史病根存档） |
 | `tests/test_routing.py` | 16 例单测：阈值参数化、安全网升级路径、启发式序 |
 
 ---

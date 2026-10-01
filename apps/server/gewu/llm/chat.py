@@ -18,9 +18,17 @@ if TYPE_CHECKING:
 NOT_GIVEN = type("NotGiven", (), {"__repr__": lambda self: "NOT_GIVEN"})()
 
 
-def make_chat_model(settings: Settings, *, small: bool = False) -> ChatOpenAI:
+def make_chat_model(
+    settings: Settings,
+    *,
+    small: bool = False,
+    temperature: float = 0.0,
+    max_tokens: int = 2048,
+) -> ChatOpenAI:
     """构造 Chat 模型：small=True 走辅助小模型（路由/抽取/改写/精排）。
 
+    temperature/max_tokens 固化在实例上（agent-first 主循环经 create_agent
+    直接调用模型，不走 LLMService 的 bind 链）。
     thinking 是智谱私有参数（OpenAI 等端点不识别会报错），与 Go 版一致按
     LLM_DISABLE_THINKING 开关注入 extra_body，缺省不发。
     """
@@ -29,10 +37,14 @@ def make_chat_model(settings: Settings, *, small: bool = False) -> ChatOpenAI:
         extra["extra_body"] = {"thinking": {"type": "disabled"}}
     return ChatOpenAI(
         model=settings.llm_small_model if small else settings.llm_model,
-        api_key=settings.llm_api_key,
+        # 无 key 环境（单测直建 app）构造也不能炸：占位密钥，真实调用由
+        # main 启动门禁与 has_key 分支拦截，不会发生。
+        api_key=settings.llm_api_key or "not-set",
         base_url=settings.llm_base_url or None,
         timeout=60,
         max_retries=2,
+        temperature=temperature,
+        max_tokens=max_tokens,
         **extra,
     )
 

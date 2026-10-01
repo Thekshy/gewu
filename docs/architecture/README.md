@@ -11,7 +11,7 @@
 | [02](02-orchestration-graph.md) | 编排主图 | LangGraph StateGraph：节点/条件边/共享状态与两类典型请求的完整生命周期（时序图） |
 | [03](03-routing.md) | 意图路由 | cascade 三级级联（规则 → 小模型概率 → 主模型复核）、常量阈值表与误路由安全网 |
 | [04](04-rag-retrieval.md) | 混合检索 | FTS + 向量 + RRF + 精排 + 父子块的完整漏斗，读写收口 PG 存储函数（含 DDL 关键代码） |
-| [05](05-react-agent.md) | ReAct 子图 | 原生 tool-calling 循环、防护四件套、工具表与写操作转确认流 |
+| [05](05-react-agent.md) | agent 主循环 | create_agent 底座、middleware 栈（guard/截断防御/HITL/压缩）、防护语义平移对照 |
 | [06](06-transaction.md) | 知行执行层 | 工具识别、槽位元数据表、interrupt() 确认门、失败恢复与权限矩阵 |
 | [07](07-state-persistence.md) | 状态与持久化 | PG checkpointer / SQLite 双库 / usage.json 四类状态的生命周期与一轮会话的触达图 |
 | [08](08-api-contract.md) | 接口契约 | 六端点、SSE 十类事件字段表、实际事件流样例、interrupt/resume 桥与错误体约定 |

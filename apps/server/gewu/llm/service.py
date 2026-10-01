@@ -49,6 +49,18 @@ class LLMService:
             self._models[small] = make_chat_model(self._s, small=small)
         return self._models[small]
 
+    def agent_model(self, *, small: bool = False, max_tokens: int = 1200):
+        """agent-first 主循环的模型实例（create_agent 直接调用；温度/上限固化在实例）。"""
+        return make_chat_model(self._s, small=small, temperature=0.0, max_tokens=max_tokens)
+
+    def record_usage(self, total_tokens: int) -> None:
+        """主循环 middleware 的记账口（与 chat/chat_stream 同一预算闸）。"""
+        if self._budget is not None and total_tokens > 0:
+            try:
+                self._budget.add(int(total_tokens))
+            except Exception:  # noqa: BLE001 - 记账失败不影响主链路
+                pass
+
     def chat(
         self,
         messages: list[tuple[str, str]],

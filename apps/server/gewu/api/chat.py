@@ -35,8 +35,10 @@ def _parse_chat_body(payload: dict) -> dict:
     if len(question) > 500:
         raise HTTPException(status_code=422, detail="问题过长")
     mode = payload.get("mode") or "auto"
-    if mode not in ("auto", "direct", "research", "react"):
-        raise HTTPException(status_code=422, detail="mode 必须为 auto/direct/research/react")
+    if mode not in ("auto", "direct", "research", "react", "classic"):
+        raise HTTPException(
+            status_code=422, detail="mode 必须为 auto/direct/research/react/classic"
+        )
     role = payload.get("role") or "student"
     if role not in ("student", "counselor"):
         raise HTTPException(status_code=422, detail="role 必须为 student/counselor")
@@ -91,14 +93,26 @@ def chat(request: Request, payload: Annotated[dict, Body(...)]):
         req["question"], req["mode"], req["session_id"], req["role"], f"demo-{req['role']}"
     )
 
-    # interrupt/resume 桥（Q4 原生机制）：thread 停在确认门时以用户消息 resume。
+    # interrupt/resume 桥：thread 停在确认门时以用户消息 resume。
+    # agent 链路的 HITL 中断（payload 含 action_requests）需翻译为 decisions
+    # （approve/reject/respond）；classic tx_gate 维持原文本 resume。
     from langgraph.types import Command
+
+    from gewu.agent.resume import find_hitl_payload, hitl_decisions
 
     run_input = state_input
     try:
         snap = graph.get_state(config)
-        if snap.next:  # 停在 tx_gate interrupt（确认门）
-            run_input = Command(resume=req["question"])
+        if snap.next:  # 停在确认门（agent HITL / classic tx_gate）
+            payload = find_hitl_payload(snap)
+            if payload is not None:
+                run_input = Command(
+                    resume=hitl_decisions(
+                        payload, req["question"], request.app.state.llm, request.app.state.business
+                    )
+                )
+            else:
+                run_input = Command(resume=req["question"])
     except Exception:  # noqa: BLE001 - 状态读取失败按新会话处理
         pass
 
@@ -107,14 +121,18 @@ def chat(request: Request, payload: Annotated[dict, Body(...)]):
         truncated = False
         answer = ""
         try:
-            for stream_mode, chunk in graph.stream(
-                run_input, config, stream_mode=["custom", "values"]
-            ):
-                if stream_mode == "custom":
-                    yield _sse(chunk)
-                else:
-                    truncated = bool(chunk.get("truncated"))
-                    answer = chunk.get("answer") or answer
+            # subgraphs=True：agent 子图（create_agent）内 middleware/工具的 custom
+            # 事件必须显式开启冒泡（P17）；yield 形态为 (namespace, event)。
+            for chunk in graph.stream(run_input, config, stream_mode="custom", subgraphs=True):
+                evt = chunk[-1] if isinstance(chunk, tuple) else chunk
+                yield _sse(evt)
+            # 终态读取（interrupt 悬停时为当前值）：answer/truncated 单点真相。
+            try:
+                vals = graph.get_state(config).values or {}
+                truncated = bool(vals.get("truncated"))
+                answer = vals.get("answer") or ""
+            except Exception:  # noqa: BLE001
+                pass
         except GeneratorExit:
             raise  # 客户端断开：done 已无法送达（语义上记 aborted）
         except Exception as e:  # noqa: BLE001 - 链路错误 → error 事件 + done(error)

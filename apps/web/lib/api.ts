@@ -87,8 +87,8 @@ export interface BusinessOverview {
 
 export type Role = "student" | "counselor";
 
-/** chat 请求 mode：auto/direct/research（PARITY §4）+ react（pipeline.go:147 按请求 ReAct 入口）。 */
-export type ChatMode = "auto" | "direct" | "research" | "react";
+/** chat 请求 mode：auto（agent-first 主循环）/classic（级联路由基线）/direct/research/react（=auto，P17 合并）。 */
+export type ChatMode = "auto" | "direct" | "research" | "react" | "classic";
 
 export const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "http://127.0.0.1:8000";
 
