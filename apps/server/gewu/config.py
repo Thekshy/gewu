@@ -15,6 +15,7 @@ VERSION = "0.1.0"
 
 DEFAULT_PG_DSN = "postgres://gewu:gewu@127.0.0.1:5433/gewu?sslmode=disable"
 DEFAULT_DAILY_TOKEN_BUDGET = 2_000_000
+DEFAULT_DAILY_USER_BUDGET = 200_000  # P23：per-user 限额缺省（users.daily_token_limit NULL 时用）
 
 
 def find_dotenv(start: Path | None = None) -> Path | None:
@@ -66,6 +67,7 @@ class Settings:
     pg_dsn: str = DEFAULT_PG_DSN
     data_dir: Path = Path("data")
     daily_token_budget: int = DEFAULT_DAILY_TOKEN_BUDGET
+    daily_user_budget: int = DEFAULT_DAILY_USER_BUDGET
     retrieval_k: int = 6
     # 检索融合（P15：WeKnora 默认口径；加权 RRF + 精排阈值容错）
     retrieval_pool_n: int = 20  # 双路召回池
@@ -107,6 +109,7 @@ class Settings:
             pg_dsn=env.get("PG_DSN", DEFAULT_PG_DSN),
             data_dir=data_dir,
             daily_token_budget=int(env.get("DAILY_TOKEN_BUDGET", str(DEFAULT_DAILY_TOKEN_BUDGET))),
+            daily_user_budget=int(env.get("DAILY_USER_BUDGET", str(DEFAULT_DAILY_USER_BUDGET))),
             retrieval_k=int(env.get("RETRIEVAL_K", "6")),
             retrieval_pool_n=int(env.get("RETRIEVAL_POOL_N", "20")),
             rrf_k=int(env.get("RRF_K", "60")),

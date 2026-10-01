@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { usePathname } from "next/navigation";
+import { useUser } from "@/lib/auth";
 
 const ITEMS = [
   { href: "/", label: "对话" },
@@ -10,12 +11,14 @@ const ITEMS = [
   { href: "/memory", label: "记忆" },
 ];
 
-/** 全局顶栏导航：三视图 pill 切换，当前项高亮。 */
+/** 全局顶栏导航：视图 pill 切换，当前项高亮；「管理」仅 admin 渲染（P23）。 */
 export default function Nav() {
   const pathname = usePathname();
+  const { user } = useUser();
+  const items = user?.role === "admin" ? [...ITEMS, { href: "/admin", label: "管理" }] : ITEMS;
   return (
     <nav className="flex items-center gap-1" aria-label="页面导航">
-      {ITEMS.map((it) => {
+      {items.map((it) => {
         const active = pathname === it.href;
         return (
           <Link

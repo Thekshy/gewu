@@ -26,8 +26,9 @@
 三层，从外到内：
 
 1. **限流**（`gewu/middleware.py`）：按 IP 固定窗口（缺省 600/分钟；`X-Forwarded-For` 首段为键，反代场景可用），超限 429；健康检查豁免（探活语义）。中间件顺序（外→内）：限流 → trace-id → CORS。
-2. **每日 token 预算**（`gewu/budget.py`）：chat 入口闸（耗尽 429），LLMService 统一入账（见 [07](07-state-persistence.md)）。
-3. **观测**：X-Trace-Id 中间件（uuid v4，入站头有则沿用，响应头透出）——跨实现迁移期间用它对齐三端日志。
+2. **每日 token 预算**（`gewu/budget.py`）：chat 入口全局闸（耗尽 429，usage.json 文件制），LLMService 统一入账（见 [07](07-state-persistence.md)）。
+3. **per-user token 预算**（P23，`gewu/usage.py`）：按用户逐日落 PG（`token_usage` 表）+ chat 入口个人闸（`users.daily_token_limit ?? DAILY_USER_BUDGET(20 万)`，文案与全局闸区分）。记账归属经 `usage.current_user` ContextVar 从 chat 入口传播到 LLMService 三个记账口（双写：全局闸 + 个人账）；装配用 `make_usage_store` 探测式软降级——PG 不可达退 None 禁用个人功能，全局闸仍兜底。
+4. **观测**：X-Trace-Id 中间件（uuid v4，入站头有则沿用，响应头透出）——跨实现迁移期间用它对齐三端日志。
 
 ## 模型分层
 
@@ -76,7 +77,7 @@ apps/server/
   gewu/rag/          # retrieve/store/schema
   gewu/llm/          # chat（工厂与解析）/embed/service（门面）
   gewu/business/     # db.py（mock 业务全量）
-  gewu/              # config/budget/memory/middleware/dates/jsonx
+  gewu/              # config/budget/usage/memory/middleware/auth/session/dates/jsonx
   tests/             # 103 例（单测 + PG 集成 + 契约）
 eval/                # 数据集 + run_eval.py + reports/
 ```

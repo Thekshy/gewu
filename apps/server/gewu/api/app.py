@@ -12,6 +12,7 @@ from fastapi.responses import JSONResponse
 from langgraph.checkpoint.memory import MemorySaver
 
 from gewu.agent.graph import build_graph
+from gewu.api import admin as admin_routes
 from gewu.api import auth as auth_routes
 from gewu.api import chat as chat_routes
 from gewu.api import memory as memory_routes
@@ -27,6 +28,7 @@ from gewu.middleware import RateLimitMiddleware, TraceIDMiddleware
 from gewu.rag.retrieve import LLMReranker, Retriever
 from gewu.rag.store import DocStore, Store
 from gewu.session.store import SessionStore
+from gewu.usage import make_usage_store
 
 
 def _make_checkpointer(settings: Settings):
@@ -66,6 +68,11 @@ def _build_retriever(settings: Settings, store: Store, llm: LLMService) -> Retri
     )
 
 
+# usage 参数哨兵：区分「未传」（探测式软降级建 UsageStore）与「显式 None」
+# （强制禁用 per-user 记账，测试替身用）；注入真 store 则直接采用。
+_UNSET = object()
+
+
 def create_app(
     settings: Settings,
     store: DocStore | None = None,
@@ -75,6 +82,7 @@ def create_app(
     memory: MemoryStore | None = None,
     auth: AuthStore | None = None,
     sessions: SessionStore | None = None,
+    usage=_UNSET,
     checkpointer=None,
 ) -> FastAPI:
     app = FastAPI(title="gewu", version=VERSION)
@@ -100,7 +108,14 @@ def create_app(
     # P21-2：business/memory 自 SQLite 迁 PG；P21-1：auth 域入库
     app.state.business = business if business is not None else Business(settings.pg_dsn)
     app.state.budget = TokenBudget(settings.data_dir / "usage.json", settings.daily_token_budget)
-    app.state.llm = llm if llm is not None else LLMService(settings, budget=app.state.budget)
+    # P23：per-user 用量账——缺省探测式软降级（make_usage_store：PG 不可达退
+    # None 禁用，全局闸兜底）；显式传 store（admin/限额测试）或 None（强制禁用）
+    app.state.usage = make_usage_store(settings.pg_dsn) if usage is _UNSET else usage
+    app.state.llm = (
+        llm
+        if llm is not None
+        else LLMService(settings, budget=app.state.budget, usage=app.state.usage)
+    )
     if retriever is not None:
         app.state.retriever = retriever
     elif isinstance(app.state.store, Store):
@@ -127,4 +142,5 @@ def create_app(
     app.include_router(chat_routes.router)
     app.include_router(session_routes.router)
     app.include_router(memory_routes.router)
+    app.include_router(admin_routes.router)
     return app

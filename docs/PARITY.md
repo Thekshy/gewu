@@ -64,6 +64,30 @@ P22 起会话从「客户端自报的裸 uuid」升格为服务端资源，以�
 - **compare 双轨适配**：两轨首跑前各 `POST /api/sessions {kind:"compare"}`
   取服务端下发 id（不入对话侧栏列表）。
 
+## 0.7 P23 管理后台契约（admin 八端点 + per-user 预算）
+
+P23 起管理面从 CLI（`make invite`/`make admin`）升级为 admin API + `/admin` 页，
+token 记账按用户落 PG 并配 per-user 限额闸。以下条目**修订/新增**本文相应原文：
+
+- **新增 admin 八端点**（全部 `require_admin`，非 admin 403、未登录 401）：
+  `GET /api/admin/stats`（用户/会话/邀请码计数 + 今日全员 token + 全局预算水位）、
+  `GET /api/admin/users`（含 role/status/daily_token_limit/today_tokens）、
+  `PATCH /api/admin/users/{email}`（role/status/daily_token_limit；**不能改自己的
+  role/status**（422 防唯一 admin 锁死，改自己限额允许）；`daily_token_limit: null`
+  = 清除个性化限额恢复全局缺省 `DAILY_USER_BUDGET`（200_000）；停用即删除该
+  用户全部 auth_sessions——cookie 立即失效且重新启用后旧会话不可复活）、
+  `GET/POST /api/admin/invites`（列表 / 发放 `{uses,days,note}`）、
+  `GET /api/admin/sessions?kind=&q=`（全量会话**列表级**巡查，内容不开放）、
+  `DELETE /api/admin/sessions/{id}`（删任意会话，三处连带同 P22）、
+  `GET /api/admin/usage?days=7`（按日聚合 + 今日 top10）。
+- **per-user token 预算**：新表 `token_usage(user_id, day, tokens)`；LLMService
+  三个记账口双写（全局 usage.json 闸 + per-user PG 账，归属经 `gewu.usage`
+  contextvar 从 chat 入口传播）。chat 入口全局闸之后 per-user 闸：
+  超限 429 `{"detail":"今日个人 token 预算已用尽（上限 N），请明天再试"}`
+  （N=个性化限额 ?? 全局缺省）。用量查询失败放行（软防护，全局闸兜底）。
+- `users` 表加列 `daily_token_limit BIGINT NULL`（幂等 ALTER）。
+- 前端 nav 第五项「管理」仅 admin 渲染；`/admin` 页守卫 `useRequireAdmin`。
+
 ## 1. 服务总览
 
 - 监听端口 `:8000`(HTTP)。
@@ -93,6 +117,14 @@ P22 起会话从「客户端自报的裸 uuid」升格为服务端资源，以�
 | GET | `/api/memory/facts` | 长期记忆事实列表（P22） |
 | POST | `/api/memory/facts` | 新增/覆盖事实（P22，upsert） |
 | DELETE | `/api/memory/facts?kind=&key=` | 删除事实（P22） |
+| GET | `/api/admin/stats` | 管理总览（P23，admin） |
+| GET | `/api/admin/users` | 用户列表（P23，admin） |
+| PATCH | `/api/admin/users/{email}` | 改角色/停用/限额（P23，admin） |
+| GET | `/api/admin/invites` | 邀请码列表（P23，admin） |
+| POST | `/api/admin/invites` | 发放邀请码（P23，admin） |
+| GET | `/api/admin/sessions` | 会话巡查（P23，admin，列表级） |
+| DELETE | `/api/admin/sessions/{id}` | 删任一会话（P23，admin，连带） |
+| GET | `/api/admin/usage` | 用量趋势与 top（P23，admin） |
 
 ### 2.1 GET /api/health
 
@@ -136,6 +168,8 @@ k/query 越界返回 422。【差异决定】FastAPI 的 pydantic 校验错误�
 - `session_id` 未传 → 422 指引「请先 POST /api/sessions 创建会话」;未登记/
   他人会话 → 404 `{"detail":"会话不存在"}`(P22,缺省值 `"default"` 废弃)。
 - 预算耗尽 → 429 `{"detail":"今日 token 预算已用尽（上限 2000000），请明天再试"}`。
+- 个人预算耗尽 → 429 `{"detail":"今日个人 token 预算已用尽（上限 N），请明天再试"}`
+  (P23,N=users.daily_token_limit ?? DAILY_USER_BUDGET;全局闸在前个人闸在后)。
 - 正常 → SSE 流,`Content-Type: text/event-stream`,响应头含
   `Cache-Control: no-cache`、`X-Accel-Buffering: no`。
 - 每个事件格式:`data: {JSON}\n\n`(JSON 不转义非 ASCII 字符,即 UTF-8 原文输出)。

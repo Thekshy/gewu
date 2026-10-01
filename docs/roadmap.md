@@ -91,8 +91,10 @@
       [P22 任务书](runbooks/P22-session-and-memory-management.md)（2026-10-01 执行完毕：
       服务端显式创建/历史完整恢复/独立页 /memory 三拍板落地；212 单测、
       删除三处连带 PG 断言、浏览器真跑剧本全过）
-- [ ] P23 管理后台：admin 用户/用量/会话巡查 + 邀请码发放 UI + per-user
-      token 预算
+- [x] P23 管理后台：admin 用户/用量/会话巡查 + 邀请码发放 UI + per-user
+      token 预算——[P23 任务书](runbooks/P23-admin-console.md)（2026-10-01 执行
+      完毕：contextvar 记账贯通（真跑 732 token 落账实证）+ users.daily_token_limit
+      个性化限额 + admin 八端点 + 独立页 /admin、225 单测、浏览器目检亮暗双过）
 - [x] P24 线上观测补盲与检索链路提速：agent 主循环 [llm] per-call 埋点
       （UsageRecordMiddleware，闭 538b9cf 盲区）+ 工具路径免二次改写
       （search expand=False + Rewriter 去重，线上「食堂位置」×2 实证）+

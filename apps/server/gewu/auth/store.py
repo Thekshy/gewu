@@ -53,6 +53,11 @@ CREATE TABLE IF NOT EXISTS invite_codes (
     created_by TEXT NOT NULL DEFAULT ''
 );
 """
+# P23：per-user token 限额（NULL=用 DAILY_USER_BUDGET 全局缺省）；CREATE TABLE
+# IF NOT EXISTS 对已有表不生效，幂等加列单独走 ALTER。
+_MIGRATE = """
+ALTER TABLE users ADD COLUMN IF NOT EXISTS daily_token_limit BIGINT;
+"""
 
 
 class AuthError(Exception):
@@ -116,6 +121,7 @@ class AuthStore:
         self._pool = ConnectionPool(dsn, min_size=1, max_size=4, open=True, name="gewu-auth")
         with self._pool.connection() as conn:
             conn.execute(_SCHEMA)
+            conn.execute(_MIGRATE)
 
     def close(self) -> None:
         self._pool.close()
@@ -243,7 +249,92 @@ class AuthStore:
             ).fetchone()
         return row is not None
 
-    def _stats(self) -> dict[str, int]:  # pragma: no cover - 调试用
+    # ---------- 管理后台（P23：admin 列表/改写/邀请码/限额） ----------
+
+    def list_users(self) -> list[User]:
+        """全量用户（admin 巡查；按 email 排序稳定）。"""
+        with self._pool.connection() as conn:
+            rows = conn.execute(f"SELECT {_USER_COLS} FROM users ORDER BY email").fetchall()
+        return [_user_row(r) for r in rows]
+
+    def update_user(
+        self,
+        email: str,
+        *,
+        role: str | None = None,
+        status: str | None = None,
+        daily_token_limit: int | None = None,
+        clear_limit: bool = False,
+    ) -> User | None:
+        """admin 改写（role/status/限额）；无此邮箱返回 None。
+
+        clear_limit=True 把限额恢复 NULL（走全局缺省）；否则 limit 显式传入。
+        """
+        sets: list[str] = []
+        args: list = []
+        if role is not None:
+            if role not in VALID_ROLES:
+                raise ValueError(f"role 必须为 {'/'.join(VALID_ROLES)}")
+            sets.append("role = %s")
+            args.append(role)
+        if status is not None:
+            if status not in ("active", "disabled"):
+                raise ValueError("status 必须为 active/disabled")
+            sets.append("status = %s")
+            args.append(status)
+        if clear_limit:
+            sets.append("daily_token_limit = NULL")
+        elif daily_token_limit is not None:
+            sets.append("daily_token_limit = %s")
+            args.append(int(daily_token_limit))
+        if not sets:
+            with self._pool.connection() as conn:
+                row = conn.execute(
+                    f"SELECT {_USER_COLS} FROM users WHERE email = %s",
+                    (email.strip().lower(),),
+                ).fetchone()
+            return _user_row(row) if row else None
+        args.append(email.strip().lower())
+        with self._pool.connection() as conn:
+            row = conn.execute(
+                f"UPDATE users SET {', '.join(sets)} WHERE email = %s RETURNING {_USER_COLS}",
+                tuple(args),
+            ).fetchone()
+            if row is not None and status == "disabled":
+                # 停用即踢下线且不可复活（旧 cookie 全部失效；重新启用需重新登录）
+                conn.execute("DELETE FROM auth_sessions WHERE user_id = %s", (row[0],))
+        return _user_row(row) if row else None
+
+    def daily_limit(self, email: str) -> int | None:
+        """该用户的个性化 token 限额（NULL=未设，用全局缺省）。"""
+        with self._pool.connection() as conn:
+            row = conn.execute(
+                "SELECT daily_token_limit FROM users WHERE email = %s",
+                (email.strip().lower(),),
+            ).fetchone()
+        return int(row[0]) if row and row[0] is not None else None
+
+    def list_invites(self) -> list[dict]:
+        """邀请码列表（admin 巡查；创建时间倒序）。"""
+        cols = "code, max_uses, used_count, expires_at, note, created_at, created_by"
+        with self._pool.connection() as conn:
+            rows = conn.execute(
+                f"SELECT {cols} FROM invite_codes ORDER BY created_at DESC"
+            ).fetchall()
+        return [
+            {
+                "code": r[0],
+                "max_uses": int(r[1]),
+                "used_count": int(r[2]),
+                "expires_at": r[3].isoformat() if r[3] else None,
+                "note": r[4],
+                "created_at": r[5].isoformat(),
+                "created_by": r[6],
+            }
+            for r in rows
+        ]
+
+    def stats(self) -> dict[str, int]:
         with self._pool.connection() as conn:
             users, sessions, invites = conn.execute(
                 "SELECT (SELECT COUNT(*) FROM users), (SELECT COUNT(*) FROM auth_sessions),"

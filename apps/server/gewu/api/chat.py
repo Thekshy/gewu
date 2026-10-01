@@ -10,6 +10,8 @@ P21-3：需登录（cookie）；role 改服务端权威（users.role，请求体
 P22：session_id 必填且必须为已登记属本人的会话（POST /api/sessions 下发；
 未传 422 给指引、不属本人/不存在 404 防枚举；"default" 缺省值废弃）；每轮
 刷 updated_at + 首见空 title 回填首问前 20 字（SessionStore.note_turn）。
+P23：per-user token 限额闸（users.daily_token_limit ?? DAILY_USER_BUDGET，
+超限 429 文案区分全局闸）；contextvar set 供 LLMService 记账归属。
 """
 
 from __future__ import annotations
@@ -26,6 +28,7 @@ from fastapi.responses import StreamingResponse
 from gewu.agent import events as ev
 from gewu.agent.state import new_state
 from gewu.api.auth import require_user
+from gewu.usage import current_user
 
 router = APIRouter()
 
@@ -71,6 +74,7 @@ def _consolidate_async(request: Request, req: dict, question: str, answer: str) 
     def work():
         from gewu.memory import consolidate
 
+        user_token = current_user.set(req["user"])  # 异步线程不继承，显式带归属
         try:
             consolidate(
                 memory,
@@ -82,6 +86,8 @@ def _consolidate_async(request: Request, req: dict, question: str, answer: str) 
             )
         except Exception as e:  # noqa: BLE001 - 固化失败不影响主链路
             print(f"[agent] 记忆固化失败（不影响主链路）：{e}")
+        finally:
+            current_user.reset(user_token)
 
     threading.Thread(target=work, daemon=True).start()
 
@@ -100,6 +106,26 @@ def chat(request: Request, payload: Annotated[dict, Body(...)]):
         request.app.state.budget.ensure()
     except Exception as e:  # noqa: BLE001 - 预算耗尽 → 429（PARITY §2.4）
         raise HTTPException(status_code=429, detail=str(e)) from e
+    # P23 per-user 限额闸：个性化限额 ?? 全局缺省；超限 429（与全局闸文案区分）。
+    # 查询失败放行（软防护：公网兜底还有全局闸 usage.json；打印日志留痕）。
+    usage_store = getattr(request.app.state, "usage", None)
+    if usage_store is not None:
+        try:
+            limit = request.app.state.auth.daily_limit(user.email)
+            if limit is None:
+                limit = request.app.state.settings.daily_user_budget
+            if usage_store.today(user.email) >= limit:
+                raise HTTPException(
+                    status_code=429,
+                    detail=f"今日个人 token 预算已用尽（上限 {limit}），请明天再试",
+                )
+        except HTTPException:
+            raise
+        except Exception as e:  # noqa: BLE001 - 用量查询失败不拦主链路
+            print(f"[chat] per-user 用量查询失败（放行，全局闸兜底）：{e}", flush=True)
+    # 记账归属（contextvar）：StreamingResponse 的 sync 迭代由线程池分派（每次
+    # next 可能换线程），不能在端点体 set——在 generate() 迭代体开头 set，保证
+    # 与本轮 LLM 调用/记账同线程；consolidate 异步线程在 work() 首行显式 set。
     graph = request.app.state.graph
     config = {"configurable": {"thread_id": req["session_id"]}}
     state_input = new_state(req["question"], req["mode"], req["session_id"], user.role, user.email)
@@ -158,7 +184,16 @@ def chat(request: Request, payload: Annotated[dict, Body(...)]):
         try:
             # subgraphs=True：agent 子图（create_agent）内 middleware/工具的 custom
             # 事件必须显式开启冒泡（P17）；yield 形态为 (namespace, event)。
-            for chunk in graph.stream(run_input, config, stream_mode="custom", subgraphs=True):
+            # 记账归属：SSE sync 迭代每次 next 可能换 Context（anyio 线程池），
+            # contextvar 须在每次取事件前 re-set——graph 节点的 LLM 调用/记账
+            # 都发生在 next() 的调用栈里，随 Context 副本传播。
+            stream = graph.stream(run_input, config, stream_mode="custom", subgraphs=True)
+            while True:
+                current_user.set(req["user"])
+                try:
+                    chunk = next(stream)
+                except StopIteration:
+                    break
                 evt = chunk[-1] if isinstance(chunk, tuple) else chunk
                 t = evt.get("type")
                 if t == "route":

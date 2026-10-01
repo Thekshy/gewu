@@ -1,7 +1,8 @@
 """LLMService：检索/路由等辅助调用的统一门面（Go llm.Client 最小面的 Python 等价物）。
 
 rag 层只依赖 has_key/chat/embed 三件（internal/rag LLMer 接口同款），agent 编排层
-复用同一工厂（流式/工具调用随 P14-2/4 接入）。用量记账随 P14-7 预算域接入。
+复用同一工厂（流式/工具调用随 P14-2/4 接入）。用量记账随 P14-7 预算域接入；
+P23 起双写：全局 budget（闸）+ per-user usage（账，归属读 usage.current_user）。
 """
 
 from __future__ import annotations
@@ -11,8 +12,11 @@ from typing import TYPE_CHECKING
 
 from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, SystemMessage
 
+# embed 走 module-form：langchain_core 导入后同进程 from-import 子模块偶发被
+# lazy-import 机制劫持成空壳（P23 撞坑，详见任务书 §6.4）——module-form 稳定。
+import gewu.llm.embed as llm_embed
 from gewu.llm.chat import Usage, make_chat_model, parse_finish_reason, parse_usage
-from gewu.llm.embed import GewuEmbeddings
+from gewu.usage import current_user
 
 if TYPE_CHECKING:
     from gewu.config import Settings
@@ -41,18 +45,32 @@ def ctx_profile(messages: list[tuple[str, str]] | list[BaseMessage]) -> str:
 class LLMService:
     """双模型缓存 + 门面方法。线程安全：ChatOpenAI invoke 可并发，模型惰性建一次。"""
 
-    def __init__(self, settings: Settings, budget=None) -> None:
+    def __init__(self, settings: Settings, budget=None, usage=None) -> None:
         self._s = settings
         self._models: dict[bool, object] = {}
-        self._embeddings: GewuEmbeddings | None = None
+        self._embeddings: llm_embed.GewuEmbeddings | None = None
         self._budget = budget  # TokenBudget（None = 不记账，测试替身用）
+        self._usage = usage  # UsageStore（None = 不记 per-user，测试替身用）
 
     def _record(self, usage) -> None:
-        if self._budget is not None and usage is not None:
+        self._record_both(int(getattr(usage, "total", 0) or 0))
+
+    def _record_both(self, total: int) -> None:
+        """双写记账：全局闸 + per-user 账（归属读 contextvar；失败不影响主链路）。"""
+        if total <= 0:
+            return
+        if self._budget is not None:
             try:
-                self._budget.add(int(getattr(usage, "total", 0) or 0))
-            except Exception:  # noqa: BLE001 - 记账失败不影响主链路
+                self._budget.add(total)
+            except Exception:  # noqa: BLE001
                 pass
+        if self._usage is not None:
+            user = current_user.get()
+            if user:
+                try:
+                    self._usage.add(user, total)
+                except Exception:  # noqa: BLE001
+                    pass
 
     # ---------- Chat ----------
 
@@ -66,12 +84,8 @@ class LLMService:
         return make_chat_model(self._s, small=small, temperature=0.0, max_tokens=max_tokens)
 
     def record_usage(self, total_tokens: int) -> None:
-        """主循环 middleware 的记账口（与 chat/chat_stream 同一预算闸）。"""
-        if self._budget is not None and total_tokens > 0:
-            try:
-                self._budget.add(int(total_tokens))
-            except Exception:  # noqa: BLE001 - 记账失败不影响主链路
-                pass
+        """主循环 middleware 的记账口（与 chat/chat_stream 同一预算闸，双写）。"""
+        self._record_both(int(total_tokens))
 
     def chat(
         self,
@@ -115,7 +129,7 @@ class LLMService:
         """流式补全（Go ChatStream 等价）：迭代取文本增量，结束读 finish_reason。"""
         print(f"[llm] 直答上下文 {ctx_profile(messages)}")
         model = self._model(small).bind(temperature=temperature, max_tokens=max_tokens)
-        return ChatStreamResult(model, to_lc_messages(messages), budget=self._budget)
+        return ChatStreamResult(model, to_lc_messages(messages), record=self._record_both)
 
     def chat_with_tools(
         self,
@@ -137,9 +151,9 @@ class LLMService:
 
     # ---------- Embed ----------
 
-    def embeddings(self) -> GewuEmbeddings:
+    def embeddings(self) -> llm_embed.GewuEmbeddings:
         if self._embeddings is None:
-            self._embeddings = GewuEmbeddings(
+            self._embeddings = llm_embed.GewuEmbeddings(
                 api_key=self._s.embed_api_key,
                 base_url=self._s.embed_base_url,
                 model=self._s.embed_model,
@@ -162,9 +176,9 @@ class LLMService:
 class ChatStreamResult:
     """流式补全的可迭代结果：逐块产出文本增量，结束后 finish_reason/usage 就位。"""
 
-    def __init__(self, model, messages: list[BaseMessage], budget=None) -> None:
+    def __init__(self, model, messages: list[BaseMessage], record=None) -> None:
         self._chunks: Iterator = model.stream(messages)
-        self._budget = budget
+        self._record = record  # 记账回调（LLMService._record_both；None=测试替身）
         self.finish_reason = ""
         self.usage = Usage()
 
@@ -183,9 +197,9 @@ class ChatStreamResult:
             text = _content_text(chunk)
             if text:
                 yield text
-        if self._budget is not None and self.usage.total:
+        if self._record is not None and self.usage.total:
             try:
-                self._budget.add(self.usage.total)
+                self._record(self.usage.total)
             except Exception:  # noqa: BLE001 - 记账失败不影响主链路
                 pass
 

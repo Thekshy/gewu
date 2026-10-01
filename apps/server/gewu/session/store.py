@@ -107,6 +107,29 @@ class SessionStore:
             rows = conn.execute(sql, args).fetchall()
         return [_row(r) for r in rows]
 
+    def list_all(self, kind: str | None = None, q: str | None = None) -> list[ChatSession]:
+        """全量会话（admin 巡查，P23）：kind 过滤 + q 按 user/title 模糊。"""
+        sql = f"SELECT {_COLS} FROM chat_sessions WHERE 1=1"
+        args: list = []
+        if kind is not None:
+            if kind not in VALID_KINDS:
+                raise ValueError(f"kind 必须为 {'/'.join(VALID_KINDS)}")
+            sql += " AND kind = %s"
+            args.append(kind)
+        if q:
+            sql += ' AND ("user" ILIKE %s OR title ILIKE %s)'
+            args.extend((f"%{q}%", f"%{q}%"))
+        sql += " ORDER BY updated_at DESC, session_id LIMIT 200"
+        with self._pool.connection() as conn:
+            rows = conn.execute(sql, tuple(args)).fetchall()
+        return [_row(r) for r in rows]
+
+    def count(self) -> int:
+        """会话总数（admin stats）。"""
+        with self._pool.connection() as conn:
+            row = conn.execute("SELECT COUNT(*) FROM chat_sessions").fetchone()
+        return int(row[0])
+
     def rename(self, user: str, session_id: str, title: str) -> ChatSession | None:
         """改名（1~60 字由 API 层校验；本人不存在返回 None）。"""
         with self._pool.connection() as conn:
@@ -124,6 +147,15 @@ class SessionStore:
                 'DELETE FROM chat_sessions WHERE session_id = %s AND "user" = %s'
                 " RETURNING session_id",
                 (session_id, user),
+            ).fetchone()
+        return row is not None
+
+    def delete_any(self, session_id: str) -> bool:
+        """admin 删任意会话行（P23 巡查清障，无属主校验）。"""
+        with self._pool.connection() as conn:
+            row = conn.execute(
+                "DELETE FROM chat_sessions WHERE session_id = %s RETURNING session_id",
+                (session_id,),
             ).fetchone()
         return row is not None
 

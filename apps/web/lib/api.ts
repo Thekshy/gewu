@@ -249,6 +249,114 @@ export async function deleteFact(kind: FactKind, key: string): Promise<void> {
   if (!res.ok) throw new Error(await detailOf(res));
 }
 
+// ---------- 管理后台（P23：均 admin） ----------
+
+export interface AdminStats {
+  users: number;
+  sessions: number;
+  invites: number;
+  chat_sessions: number;
+  today_tokens: number;
+  budget: { used: number; limit: number };
+}
+
+export interface AdminUser {
+  email: string;
+  display_name: string;
+  role: "student" | "counselor" | "admin";
+  status: "active" | "disabled";
+  daily_token_limit: number | null;
+  today_tokens: number;
+}
+
+export interface AdminInvite {
+  code: string;
+  max_uses: number;
+  used_count: number;
+  expires_at: string | null;
+  note: string;
+  created_at: string;
+  created_by: string;
+}
+
+export interface AdminSessionRow {
+  session_id: string;
+  user: string;
+  title: string;
+  kind: "chat" | "compare";
+  updated_at: string;
+}
+
+export interface AdminUsage {
+  daily: { day: string; tokens: number }[];
+  today_top: { user: string; tokens: number }[];
+}
+
+export async function fetchAdminStats(): Promise<AdminStats> {
+  const res = await apiFetch(`${API_BASE}/api/admin/stats`);
+  if (!res.ok) throw new Error(await detailOf(res));
+  return (await res.json()) as AdminStats;
+}
+
+export async function listAdminUsers(): Promise<AdminUser[]> {
+  const res = await apiFetch(`${API_BASE}/api/admin/users`);
+  if (!res.ok) throw new Error(await detailOf(res));
+  return (await res.json()) as AdminUser[];
+}
+
+export async function updateAdminUser(
+  email: string,
+  patch: Partial<Pick<AdminUser, "role" | "status">> & { daily_token_limit?: number | null },
+): Promise<AdminUser> {
+  const res = await apiFetch(`${API_BASE}/api/admin/users/${encodeURIComponent(email)}`, {
+    method: "PATCH",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify(patch),
+  });
+  if (!res.ok) throw new Error(await detailOf(res));
+  return (await res.json()) as AdminUser;
+}
+
+export async function listAdminInvites(): Promise<AdminInvite[]> {
+  const res = await apiFetch(`${API_BASE}/api/admin/invites`);
+  if (!res.ok) throw new Error(await detailOf(res));
+  return (await res.json()) as AdminInvite[];
+}
+
+export async function createAdminInvite(uses: number, days?: number, note = ""): Promise<string> {
+  const res = await apiFetch(`${API_BASE}/api/admin/invites`, {
+    method: "POST",
+    headers: { "Content-Type": "application/json" },
+    body: JSON.stringify({ uses, days, note }),
+  });
+  if (!res.ok) throw new Error(await detailOf(res));
+  return ((await res.json()) as { code: string }).code;
+}
+
+export async function listAdminSessions(
+  kind?: string,
+  q?: string,
+): Promise<AdminSessionRow[]> {
+  const params = new URLSearchParams();
+  if (kind) params.set("kind", kind);
+  if (q) params.set("q", q);
+  const qs = params.toString();
+  const res = await apiFetch(`${API_BASE}/api/admin/sessions${qs ? `?${qs}` : ""}`);
+  if (!res.ok) throw new Error(await detailOf(res));
+  return (await res.json()) as AdminSessionRow[];
+}
+
+export async function deleteAdminSession(id: string): Promise<void> {
+  const res = await apiFetch(`${API_BASE}/api/admin/sessions/${id}`, { method: "DELETE" });
+  if (!res.ok) throw new Error(await detailOf(res));
+}
+
+export async function fetchAdminUsage(days = 7): Promise<AdminUsage> {
+  const res = await apiFetch(`${API_BASE}/api/admin/usage?days=${days}`);
+  if (!res.ok) throw new Error(await detailOf(res));
+  return (await res.json()) as AdminUsage;
+}
+
 // ---------- 业务端点 ----------
 
 export async function fetchHealth(): Promise<HealthInfo | null> {

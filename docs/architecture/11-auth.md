@@ -108,14 +108,20 @@ P22 在「身份是归属锚点」这条线上补了两块（详见 [07](07-stat
 - 内测数据不迁移：SQLite 文件归档 `data/archive/`，建表重建 + `make demo`
   重放种子；评测集是 jsonl 文件制不受影响。
 
-## 管理与发放（内测 CLI）
+## 管理与发放（P23：后台页 + CLI 双轨）
+
+P23 起管理主入口是 `/admin` 页 + `gewu/api/admin.py` 八端点（均 require_admin）：
+用户表（角色/停用/个人限额——停用即删该用户全部 auth_sessions，cookie 立即失效
+且重新启用后旧会话不可复活；PATCH 拒绝改自己的角色/状态防唯一 admin 锁死）、
+邀请码发放与核销巡查、会话**列表级**巡查与连带删除（内容级不开放，隐私保守）、
+token 用量趋势与 top 榜（数据来自 [usage 域](09-cross-cutting.md)）。
+
+CLI 保留为应急通道：
 
 ```
 make invite USES=10 DAYS=14 NOTE=内测一批   # 生成邀请码（打印）
 make admin EMAIL=a@b.com                    # 已注册账号提权 admin
 ```
-
-后台管理页（用户列表/用量/会话巡查/邀请码发放 UI/per-user 预算）属 P23。
 
 ## 相关文件
 

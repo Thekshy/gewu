@@ -21,6 +21,7 @@ from gewu.config import load_dotenv
 from gewu.memory import MemoryStore
 from gewu.rag.store import Store
 from gewu.session.store import SessionStore
+from gewu.usage import UsageStore
 
 LOCK_KEY = 941012  # 与 Go testLockKey 同值（任意常量，全仓库唯一即可）
 DEFAULT_TEST_DSN = "postgres://gewu:gewu@127.0.0.1:5433/gewu_test?sslmode=disable"
@@ -125,6 +126,19 @@ def _sess_store(pg_lock: str, pg_dsn: str) -> SessionStore:
 def sess(_sess_store: SessionStore) -> SessionStore:
     _sess_store.wipe()
     return _sess_store
+
+
+@pytest.fixture(scope="session")
+def _usage_store(pg_lock: str, pg_dsn: str) -> UsageStore:
+    u = UsageStore(pg_dsn)
+    yield u
+    u.close()
+
+
+@pytest.fixture
+def usage(_usage_store: UsageStore) -> UsageStore:
+    _usage_store.wipe()
+    return _usage_store
 
 
 @pytest.fixture(scope="session")

@@ -35,6 +35,18 @@ export function useRequireUser() {
   return { user, loading };
 }
 
+/** 管理页守卫（P23）：未登录跳 /login，非 admin 跳回对话页（后端 403 是真边界）。 */
+export function useRequireAdmin() {
+  const { user, loading } = useUser();
+  const router = useRouter();
+  useEffect(() => {
+    if (loading) return;
+    if (!user) router.replace("/login");
+    else if (user.role !== "admin") router.replace("/");
+  }, [loading, user, router]);
+  return { user, loading };
+}
+
 export async function logoutAndRedirect() {
   await apiLogout();
   window.location.href = "/login";
