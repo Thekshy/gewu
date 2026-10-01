@@ -37,5 +37,17 @@ if grep -E "^from gewu\.|^import gewu" apps/server/main.py | grep -v "gewu.api\|
     fail=1
 fi
 
+# web：apiFetch 调用点不得自带 ${API_BASE}——base 由 apiFetch 内部统一拼接，
+# 双拼会拼出非法主机名（gewu.mrpwn.tophttps://...），fetch 在浏览器 DNS 失败
+# 且请求不出网（服务端日志零痕迹，2026-10-01 线上会话创建失败事故根因）。
+# 覆盖同行与换行两种调用形态；apiFetch 定义体内部的 `${API_BASE}${path}` 合法放行。
+web_hits=$(grep -rn -A1 "apiFetch(" apps/web/lib apps/web/app apps/web/components --include="*.ts" --include="*.tsx" 2>/dev/null \
+    | grep "API_BASE" | grep -v 'function apiFetch\|API_BASE}\${path}' || true)
+if [ -n "$web_hits" ]; then
+    echo "lint-arch 违规：apiFetch 调用点不得自带 \${API_BASE}（path 只传 \"/api/...\"，apiFetch 内部统一拼接）"
+    echo "$web_hits" | head -3
+    fail=1
+fi
+
 if [ "$fail" -ne 0 ]; then exit 1; fi
 echo "lint-arch：依赖规则全部合规"

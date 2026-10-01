@@ -103,7 +103,11 @@ export type ChatMode = "auto" | "direct" | "research" | "react" | "classic";
  */
 export const API_BASE = process.env.NEXT_PUBLIC_API_BASE ?? "";
 
-/** 带错误体解析的 fetch 包装；401 统一跳登录（会话过期/未登录）。 */
+/**
+ * 带错误体解析的 fetch 包装；401 统一跳登录（会话过期/未登录）。
+ * 契约：path 只传路径（"/api/..."），API_BASE 由本函数统一拼接——
+ * 调用方自带 `${API_BASE}` 会双拼出非法主机名（线上 10-01 事故根因）。
+ */
 export async function apiFetch(path: string, init?: RequestInit): Promise<Response> {
   const res = await fetch(`${API_BASE}${path}`, init);
   if (res.status === 401 && typeof window !== "undefined") {
@@ -179,7 +183,7 @@ export interface HistoryMessage {
 }
 
 export async function createSession(kind: SessionKind = "chat"): Promise<SessionInfo> {
-  const res = await apiFetch(`${API_BASE}/api/sessions`, {
+  const res = await apiFetch(`/api/sessions`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ kind }),
@@ -189,13 +193,13 @@ export async function createSession(kind: SessionKind = "chat"): Promise<Session
 }
 
 export async function listSessions(kind?: SessionKind): Promise<SessionInfo[]> {
-  const res = await apiFetch(`${API_BASE}/api/sessions${kind ? `?kind=${kind}` : ""}`);
+  const res = await apiFetch(`/api/sessions${kind ? `?kind=${kind}` : ""}`);
   if (!res.ok) throw new Error(await detailOf(res));
   return (await res.json()) as SessionInfo[];
 }
 
 export async function renameSession(id: string, title: string): Promise<SessionInfo> {
-  const res = await apiFetch(`${API_BASE}/api/sessions/${id}`, {
+  const res = await apiFetch(`/api/sessions/${id}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ title }),
@@ -205,12 +209,12 @@ export async function renameSession(id: string, title: string): Promise<SessionI
 }
 
 export async function deleteSession(id: string): Promise<void> {
-  const res = await apiFetch(`${API_BASE}/api/sessions/${id}`, { method: "DELETE" });
+  const res = await apiFetch(`/api/sessions/${id}`, { method: "DELETE" });
   if (!res.ok) throw new Error(await detailOf(res));
 }
 
 export async function fetchMessages(id: string): Promise<HistoryMessage[]> {
-  const res = await apiFetch(`${API_BASE}/api/sessions/${id}/messages`);
+  const res = await apiFetch(`/api/sessions/${id}/messages`);
   if (!res.ok) throw new Error(await detailOf(res));
   const body = (await res.json()) as { messages: HistoryMessage[] };
   return body.messages ?? [];
@@ -227,13 +231,13 @@ export interface Fact {
 }
 
 export async function listFacts(): Promise<Fact[]> {
-  const res = await apiFetch(`${API_BASE}/api/memory/facts`);
+  const res = await apiFetch(`/api/memory/facts`);
   if (!res.ok) throw new Error(await detailOf(res));
   return (await res.json()) as Fact[];
 }
 
 export async function upsertFact(fact: Fact): Promise<void> {
-  const res = await apiFetch(`${API_BASE}/api/memory/facts`, {
+  const res = await apiFetch(`/api/memory/facts`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(fact),
@@ -243,7 +247,7 @@ export async function upsertFact(fact: Fact): Promise<void> {
 
 export async function deleteFact(kind: FactKind, key: string): Promise<void> {
   const res = await apiFetch(
-    `${API_BASE}/api/memory/facts?kind=${encodeURIComponent(kind)}&key=${encodeURIComponent(key)}`,
+    `/api/memory/facts?kind=${encodeURIComponent(kind)}&key=${encodeURIComponent(key)}`,
     { method: "DELETE" },
   );
   if (!res.ok) throw new Error(await detailOf(res));
@@ -258,7 +262,7 @@ export async function sendFeedback(
   question: string,
   rating: FeedbackRating,
 ): Promise<void> {
-  const res = await apiFetch(`${API_BASE}/api/feedback`, {
+  const res = await apiFetch(`/api/feedback`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ session_id: sessionId, question, rating }),
@@ -310,13 +314,13 @@ export interface AdminUsage {
 }
 
 export async function fetchAdminStats(): Promise<AdminStats> {
-  const res = await apiFetch(`${API_BASE}/api/admin/stats`);
+  const res = await apiFetch(`/api/admin/stats`);
   if (!res.ok) throw new Error(await detailOf(res));
   return (await res.json()) as AdminStats;
 }
 
 export async function listAdminUsers(): Promise<AdminUser[]> {
-  const res = await apiFetch(`${API_BASE}/api/admin/users`);
+  const res = await apiFetch(`/api/admin/users`);
   if (!res.ok) throw new Error(await detailOf(res));
   return (await res.json()) as AdminUser[];
 }
@@ -325,7 +329,7 @@ export async function updateAdminUser(
   email: string,
   patch: Partial<Pick<AdminUser, "role" | "status">> & { daily_token_limit?: number | null },
 ): Promise<AdminUser> {
-  const res = await apiFetch(`${API_BASE}/api/admin/users/${encodeURIComponent(email)}`, {
+  const res = await apiFetch(`/api/admin/users/${encodeURIComponent(email)}`, {
     method: "PATCH",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify(patch),
@@ -335,13 +339,13 @@ export async function updateAdminUser(
 }
 
 export async function listAdminInvites(): Promise<AdminInvite[]> {
-  const res = await apiFetch(`${API_BASE}/api/admin/invites`);
+  const res = await apiFetch(`/api/admin/invites`);
   if (!res.ok) throw new Error(await detailOf(res));
   return (await res.json()) as AdminInvite[];
 }
 
 export async function createAdminInvite(uses: number, days?: number, note = ""): Promise<string> {
-  const res = await apiFetch(`${API_BASE}/api/admin/invites`, {
+  const res = await apiFetch(`/api/admin/invites`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ uses, days, note }),
@@ -358,18 +362,18 @@ export async function listAdminSessions(
   if (kind) params.set("kind", kind);
   if (q) params.set("q", q);
   const qs = params.toString();
-  const res = await apiFetch(`${API_BASE}/api/admin/sessions${qs ? `?${qs}` : ""}`);
+  const res = await apiFetch(`/api/admin/sessions${qs ? `?${qs}` : ""}`);
   if (!res.ok) throw new Error(await detailOf(res));
   return (await res.json()) as AdminSessionRow[];
 }
 
 export async function deleteAdminSession(id: string): Promise<void> {
-  const res = await apiFetch(`${API_BASE}/api/admin/sessions/${id}`, { method: "DELETE" });
+  const res = await apiFetch(`/api/admin/sessions/${id}`, { method: "DELETE" });
   if (!res.ok) throw new Error(await detailOf(res));
 }
 
 export async function fetchAdminUsage(days = 7): Promise<AdminUsage> {
-  const res = await apiFetch(`${API_BASE}/api/admin/usage?days=${days}`);
+  const res = await apiFetch(`/api/admin/usage?days=${days}`);
   if (!res.ok) throw new Error(await detailOf(res));
   return (await res.json()) as AdminUsage;
 }
@@ -387,26 +391,26 @@ export async function fetchHealth(): Promise<HealthInfo | null> {
 }
 
 export async function fetchDocs(): Promise<DocInfo[]> {
-  const res = await apiFetch(`${API_BASE}/api/docs`);
+  const res = await apiFetch(`/api/docs`);
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return (await res.json()) as DocInfo[];
 }
 
 export async function fetchBusinessOverview(all = false): Promise<BusinessOverview> {
   const res = await apiFetch(
-    `${API_BASE}/api/business/overview${all ? "?all=1" : ""}`,
+    `/api/business/overview${all ? "?all=1" : ""}`,
   );
   if (!res.ok) throw new Error(`HTTP ${res.status}`);
   return (await res.json()) as BusinessOverview;
 }
 
 export async function businessReset(): Promise<void> {
-  const res = await apiFetch(`${API_BASE}/api/business/reset`, { method: "POST" });
+  const res = await apiFetch(`/api/business/reset`, { method: "POST" });
   if (!res.ok) throw new Error(await detailOf(res));
 }
 
 export async function search(query: string, k = 5): Promise<SearchHit[]> {
-  const res = await apiFetch(`${API_BASE}/api/search`, {
+  const res = await apiFetch(`/api/search`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({ query, k }),
@@ -427,7 +431,7 @@ export async function streamChat(
   onEvent: (ev: ChatEvent) => void,
   opts: ChatOpts,
 ): Promise<void> {
-  const res = await apiFetch(`${API_BASE}/api/chat`, {
+  const res = await apiFetch(`/api/chat`, {
     method: "POST",
     headers: { "Content-Type": "application/json" },
     body: JSON.stringify({
@@ -460,3 +464,4 @@ export async function streamChat(
     }
   }
 }
+
