@@ -1,4 +1,4 @@
-"""长期记忆（移植自 Go internal/agent/memory.go，SQLite 版）。
+"""长期记忆（移植自 Go internal/agent/memory.go；P21-2 自 SQLite 迁 PG）。
 
 分层：
 - memory_fact     用户级结构化事实（profile|preference|constraint），LLM 异步抽取
@@ -11,9 +11,9 @@
 
 from __future__ import annotations
 
-import threading
 from dataclasses import dataclass
-from pathlib import Path
+
+from psycopg_pool import ConnectionPool
 
 from gewu.llm.service import LLMService
 
@@ -28,24 +28,20 @@ class Fact:
 
 
 class MemoryStore:
-    """SQLite 长期记忆存储（单连接 + 锁）。"""
+    """PG 长期记忆存储（psycopg 连接池；user_id 自 P21 起为真实 email）。"""
 
-    def __init__(self, path: Path) -> None:
-        import sqlite3  # noqa: PLC0415
-
-        self._lock = threading.Lock()
-        self._conn = sqlite3.connect(path, check_same_thread=False)
-        self._conn.row_factory = sqlite3.Row
-        with self._lock:
-            self._conn.executescript(
+    def __init__(self, dsn: str) -> None:
+        self._pool = ConnectionPool(dsn, min_size=1, max_size=4, open=True, name="gewu-mem")
+        with self._pool.connection() as conn:
+            conn.execute(
                 """
                 CREATE TABLE IF NOT EXISTS memory_episodic (
-                    id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                    id         BIGSERIAL PRIMARY KEY,
                     session_id TEXT NOT NULL,
                     user_id    TEXT NOT NULL,
                     kind       TEXT NOT NULL,
                     text       TEXT NOT NULL,
-                    created_at TEXT NOT NULL DEFAULT (datetime('now'))
+                    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
                 );
                 CREATE INDEX IF NOT EXISTS idx_memory_episodic_session
                     ON memory_episodic(session_id, id);
@@ -54,67 +50,73 @@ class MemoryStore:
                     kind       TEXT NOT NULL,
                     key        TEXT NOT NULL,
                     value      TEXT NOT NULL,
-                    updated_at TEXT NOT NULL DEFAULT (datetime('now')),
+                    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
                     PRIMARY KEY (user_id, kind, key)
                 );
                 """
             )
-            self._conn.commit()
 
     def close(self) -> None:
-        with self._lock:
-            self._conn.close()
+        self._pool.close()
+
+    def wipe(self) -> None:
+        """测试专用：清双表 + episodic 序列归零。"""
+        with self._pool.connection() as conn:
+            conn.execute("DELETE FROM memory_episodic")
+            conn.execute("DELETE FROM memory_fact")
+            conn.execute("SELECT setval('memory_episodic_id_seq', 1, false)")
 
     # ---------- fact ----------
 
     def upsert_facts(self, user_id: str, facts: list[Fact]) -> None:
         """事实写入：同 (user_id,kind,key) 新值覆盖旧值。"""
-        with self._lock:
-            for f in facts:
-                if not f.key.strip() or not f.value.strip():
-                    continue
-                self._conn.execute(
-                    "INSERT INTO memory_fact (user_id, kind, key, value, updated_at) "
-                    "VALUES (?, ?, ?, ?, datetime('now')) "
-                    "ON CONFLICT(user_id, kind, key) "
-                    "DO UPDATE SET value = excluded.value, updated_at = datetime('now')",
-                    (user_id, f.kind, f.key, f.value),
-                )
-            self._conn.commit()
+        rows = [
+            (user_id, f.kind, f.key, f.value) for f in facts if f.key.strip() and f.value.strip()
+        ]
+        if not rows:
+            return
+        with self._pool.connection() as conn, conn.cursor() as cur:
+            cur.executemany(
+                "INSERT INTO memory_fact (user_id, kind, key, value, updated_at)"
+                " VALUES (%s, %s, %s, %s, now())"
+                " ON CONFLICT (user_id, kind, key)"
+                " DO UPDATE SET value = excluded.value, updated_at = now()",
+                rows,
+            )
 
     def recent_facts(self, user_id: str, n: int = MAX_FACTS_IN_CONTEXT) -> list[Fact]:
         """按固化时间倒序取最近 n 条（平局按 kind,key 稳定排序）。"""
-        with self._lock:
-            rows = self._conn.execute(
-                "SELECT kind, key, value FROM memory_fact WHERE user_id = ? "
-                "ORDER BY updated_at DESC, kind, key LIMIT ?",
+        with self._pool.connection() as conn:
+            rows = conn.execute(
+                "SELECT kind, key, value FROM memory_fact WHERE user_id = %s"
+                " ORDER BY updated_at DESC, kind, key LIMIT %s",
                 (user_id, n),
             ).fetchall()
-        return [Fact(r["kind"], r["key"], r["value"]) for r in rows]
+        return [Fact(r[0], r[1], r[2]) for r in rows]
 
     # ---------- episodic ----------
 
     def append_episode(self, session_id: str, user_id: str, kind: str, text: str) -> None:
         if not text.strip():
             return
-        with self._lock:
-            self._conn.execute(
-                "INSERT INTO memory_episodic (session_id, user_id, kind, text) VALUES (?, ?, ?, ?)",
+        with self._pool.connection() as conn:
+            conn.execute(
+                "INSERT INTO memory_episodic (session_id, user_id, kind, text)"
+                " VALUES (%s, %s, %s, %s)",
                 (session_id, user_id, kind, text),
             )
-            self._conn.commit()
 
     def recent_episodes(self, session_id: str, n: int) -> list[str]:
         """取本会话最近 n 条对话文本（时间正序：旧 → 新），带「用户/助手」前缀。"""
-        with self._lock:
-            rows = self._conn.execute(
+        with self._pool.connection() as conn:
+            rows = conn.execute(
                 "SELECT kind, text FROM ("
                 "  SELECT kind, text, id FROM memory_episodic"
-                "  WHERE session_id = ? ORDER BY id DESC LIMIT ?"
-                ") ORDER BY id ASC",
+                "  WHERE session_id = %s ORDER BY id DESC LIMIT %s"
+                ") t ORDER BY id ASC",
                 (session_id, n),
             ).fetchall()
-        return [("助手" if r["kind"] == "assistant" else "用户") + "：" + r["text"] for r in rows]
+        return [("助手" if r[0] == "assistant" else "用户") + "：" + r[1] for r in rows]
 
 
 # ---------- 记忆块装配与固化（Go memory.go 的 Deps 方法等价物） ----------

@@ -1,18 +1,24 @@
-"""端点契约测试（PARITY §2）：存储以 Fake 协议替身脱 PG，业务库用临时 SQLite 真跑。"""
+"""端点契约测试（PARITY §2）：存储以 Fake 协议替身脱 PG，业务/认证用测试 PG 真跑。
+
+P21 起 business/auth/memory 均 PG 化：make_client 注入 conftest 的 biz/auth/mem
+夹具（函数级 wipe 隔离）；受保护端点用 make_logged_client 拿 cookie 会话。
+"""
 
 from __future__ import annotations
 
 import json
-import sqlite3
 from datetime import date, timedelta
 from pathlib import Path
 
 from fastapi.testclient import TestClient
 
 from gewu.api.app import create_app
+from gewu.auth.store import AuthStore
 from gewu.business.db import Business
 from gewu.config import Settings
+from gewu.memory import MemoryStore
 from gewu.rag.store import DocInfo, Stats
+from tests.conftest import make_logged_client
 
 
 class FakeStore:
@@ -43,7 +49,12 @@ class FakeRetriever:
 
 
 def make_client(
-    tmp_path: Path, usage: dict | None = None, retriever: FakeRetriever | None = None
+    tmp_path: Path,
+    biz: Business,
+    mem: MemoryStore,
+    auth: AuthStore,
+    usage: dict | None = None,
+    retriever: FakeRetriever | None = None,
 ) -> TestClient:
     (tmp_path / "usage.json").write_text(json.dumps(usage or {}), encoding="utf-8")
     settings = Settings(
@@ -61,15 +72,17 @@ def make_client(
     app = create_app(
         settings,
         store=store,
-        business=Business(tmp_path / "business.db"),
+        business=biz,
+        memory=mem,
+        auth=auth,
         retriever=retriever or FakeRetriever(),
     )
     return TestClient(app)
 
 
-def test_health_contract(tmp_path: Path):
+def test_health_contract(tmp_path: Path, biz, mem, auth):
     today = date.today().isoformat()
-    c = make_client(tmp_path, usage={"date": today, "tokens": 123})
+    c = make_client(tmp_path, biz, mem, auth, usage={"date": today, "tokens": 123})
     r = c.get("/api/health")
     assert r.status_code == 200
     body = r.json()
@@ -82,20 +95,22 @@ def test_health_contract(tmp_path: Path):
     assert body["budget"] == {"used": 123, "limit": 2_000_000}
 
 
-def test_health_budget_resets_cross_day(tmp_path: Path):
+def test_health_budget_resets_cross_day(tmp_path: Path, biz, mem, auth):
     yesterday = (date.today() - timedelta(days=1)).isoformat()
-    c = make_client(tmp_path, usage={"date": yesterday, "tokens": 999})
+    c = make_client(tmp_path, biz, mem, auth, usage={"date": yesterday, "tokens": 999})
     assert c.get("/api/health").json()["budget"]["used"] == 0
 
 
-def test_health_llm_false_without_key(tmp_path: Path):
+def test_health_llm_false_without_key(tmp_path: Path, biz, mem, auth):
     (tmp_path / "usage.json").write_text("{}", encoding="utf-8")
     settings = Settings(llm_api_key="", embed_api_key="", data_dir=tmp_path)
     store = FakeStore(Stats(docs=0, chunks=0, embedded=False), [])
     app = create_app(
         settings,
         store=store,
-        business=Business(tmp_path / "business.db"),
+        business=biz,
+        memory=mem,
+        auth=auth,
         retriever=FakeRetriever(),
     )
     body = TestClient(app).get("/api/health").json()
@@ -103,8 +118,8 @@ def test_health_llm_false_without_key(tmp_path: Path):
     assert body["embeddings"] is False
 
 
-def test_docs_contract(tmp_path: Path):
-    c = make_client(tmp_path)
+def test_docs_contract(tmp_path: Path, biz, mem, auth):
+    c = make_client(tmp_path, biz, mem, auth)
     r = c.get("/api/docs")
     assert r.status_code == 200
     docs = r.json()
@@ -118,56 +133,55 @@ def test_docs_contract(tmp_path: Path):
     }
 
 
-def test_business_overview_empty(tmp_path: Path):
-    c = make_client(tmp_path)
-    r = c.get("/api/business/overview")
-    assert r.status_code == 200
-    body = r.json()
-    assert body == {"bookings": [], "tickets": []}
+def test_business_overview_requires_login(tmp_path: Path, biz, mem, auth):
+    c = make_client(tmp_path, biz, mem, auth)
+    assert c.get("/api/business/overview").status_code == 401
 
 
-def test_business_overview_with_data(tmp_path: Path):
-    c = make_client(tmp_path)
-    # 直插运行数据（写路径 P14-6 才移植）：一条有效预约、一条已取消（应被过滤）、一张请假单
-    conn = sqlite3.connect(tmp_path / "business.db")
-    conn.execute(
-        "INSERT INTO bookings (venue_id, date, slot, purpose, user, status, created_at) "
-        "VALUES ('venue-badminton', '2026-10-01', '18:00-19:00', '院队训练', "
-        "'demo-student', '有效', '2026-09-30 10:00:00')"
-    )
-    conn.execute(
-        "INSERT INTO bookings (venue_id, date, slot, purpose, user, status, created_at) "
-        "VALUES ('venue-room301', '2026-10-02', '10:00-11:00', '', "
-        "'demo-student', '已取消', '2026-09-30 11:00:00')"
-    )
-    conn.execute(
-        "INSERT INTO leave_tickets (user, leave_type, start_date, end_date, days, "
-        "reason, approver_level, status, created_at) "
-        "VALUES ('demo-student', '事假', '2026-10-08', '2026-10-09', 2, "
-        "'家中事务', 'counselor', '待审批', '2026-09-30 12:00:00')"
-    )
-    conn.commit()
-    conn.close()
+def test_business_overview_mine_view_filters_by_email(tmp_path: Path, biz, mem, auth):
+    app = make_client(tmp_path, biz, mem, auth).app
+    c = make_logged_client(app, auth, email="u1@example.com")
+    # 本人一条有效预约；陌生人一条预约 + 一张请假单（本人视图不可见）
+    assert biz.book_venue(
+        "venue-basketball", "2099-10-01", "10:00-12:00", "训练", "u1@example.com"
+    ).ok
+    assert biz.book_venue(
+        "venue-room301", "2099-10-02", "14:00-16:00", "自习", "stranger@example.com"
+    ).ok
+    assert biz.submit_leave("stranger@example.com", "事假", "2099-11-01", "2099-11-02", "私事").ok
 
     body = c.get("/api/business/overview").json()
-    assert body["bookings"] == [
-        {
-            "booking_id": "VE-0001",
-            "venue": "羽毛球馆",
-            "date": "2026-10-01",
-            "slot": "18:00-19:00",
-            "user": "demo-student",
-        }
-    ]
-    assert body["tickets"] == [
-        {
-            "ticket": "LV-0001",
-            "user": "demo-student",
-            "leave_type": "事假",
-            "start": "2026-10-08",
-            "end": "2026-10-09",
-            "days": 2,
-            "approver": "counselor",
-            "status": "待审批",
-        }
-    ]
+    assert body["scope"] == "mine"
+    assert [b["booking_id"] for b in body["bookings"]] == ["VE-0001"]
+    assert body["bookings"][0]["user"] == "u1@example.com"
+    assert body["tickets"] == []
+
+
+def test_business_overview_admin_all(tmp_path: Path, biz, mem, auth):
+    app = make_client(tmp_path, biz, mem, auth).app
+    admin = make_logged_client(app, auth, email="boss@example.com", admin=True)
+    student = make_logged_client(app, auth, email="s1@example.com")
+    assert biz.book_venue("venue-basketball", "2099-10-01", "10:00-12:00", "", "s1@example.com").ok
+
+    # 普通用户 ?all=1 不生效（仍本人视图）
+    assert student.get("/api/business/overview?all=1").json()["scope"] == "mine"
+    body = admin.get("/api/business/overview?all=1").json()
+    assert body["scope"] == "all"
+    assert len(body["bookings"]) == 1
+
+
+def test_business_reset_admin_only(tmp_path: Path, biz, mem, auth):
+    app = make_client(tmp_path, biz, mem, auth).app
+    student = make_logged_client(app, auth, email="s1@example.com")
+    admin = make_logged_client(app, auth, email="boss@example.com", admin=True)
+    assert biz.book_venue("venue-basketball", "2099-10-01", "10:00-12:00", "", "s1@example.com").ok
+
+    assert student.post("/api/business/reset").status_code == 403
+    assert len(biz.all_bookings()) == 1  # 未被清掉
+    assert admin.post("/api/business/reset").status_code == 200
+    assert biz.all_bookings() == []
+
+
+def test_search_requires_login(tmp_path: Path, biz, mem, auth):
+    c = make_client(tmp_path, biz, mem, auth)
+    assert c.post("/api/search", json={"query": "图书馆", "k": 3}).status_code == 401

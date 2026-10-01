@@ -1,7 +1,7 @@
 SERVER_DIR := apps/server
 WEB_DIR := apps/web
 
-.PHONY: install-web run test lint eval ingest retrieval-eval variants demo clean lint-arch design-lint pg-up pg-down
+.PHONY: install-web run test lint eval ingest retrieval-eval variants demo clean lint-arch design-lint pg-up pg-down invite admin
 
 # ---------- 检索存储（P12：PostgreSQL + pgvector） ----------
 
@@ -38,6 +38,14 @@ run:
 
 install-web:
 	cd $(WEB_DIR) && npm install
+
+# P21 用户体系：邀请码发放（内测封闭注册）/ 管理员提权（先注册再提权）
+invite: pg-up
+	cd $(SERVER_DIR) && uv run python scripts/auth_tool.py invite \
+		$(if $(USES),--uses $(USES)) $(if $(DAYS),--days $(DAYS)) $(if $(NOTE),--note $(NOTE))
+
+admin: pg-up
+	cd $(SERVER_DIR) && uv run python scripts/auth_tool.py admin --email $(EMAIL)
 
 # 全绿门禁口径：前置 pg-up，PG 依赖用例真跑；
 # 裸跑 pytest 时无 PG 的用例会 Skip（醒目日志）。
@@ -88,3 +96,9 @@ lint-arch:
 # 剩余白名单项记录在仓库根 DESIGN.md「门禁白名单」区
 design-lint:
 	bash scripts/design-lint.sh
+
+# 线上日志体检：拉服务器 journalctl 四层埋点 → 优化向报告（HOURS=48 可调窗口）
+SERVER ?= root@117.72.163.14
+DEPLOY_KEY ?= $(HOME)/Downloads/JD.pem
+log-report:
+	ssh -p 22 -i $(DEPLOY_KEY) $(SERVER) 'bash /root/gewu/scripts/log-report.sh $${HOURS:-24}'

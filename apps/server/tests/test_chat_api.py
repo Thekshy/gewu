@@ -1,4 +1,7 @@
-"""POST /api/chat 契约测试：校验序列、SSE 分帧、事件序、done.reason 单点语义。"""
+"""POST /api/chat 契约测试：校验序列、SSE 分帧、事件序、done.reason 单点语义。
+
+P21 起：需登录（cookie）；role 服务端权威（请求体 role 废弃忽略）。
+"""
 
 from __future__ import annotations
 
@@ -9,9 +12,12 @@ from fastapi.testclient import TestClient
 
 from gewu.agent.state import new_state
 from gewu.api.app import create_app
+from gewu.auth.store import AuthStore
 from gewu.business.db import Business
 from gewu.config import Settings
+from gewu.memory import MemoryStore
 from gewu.rag.store import DocInfo, Stats
+from tests.conftest import make_logged_client
 from tests.test_api import FakeRetriever, FakeStore
 
 
@@ -64,19 +70,31 @@ def _hit() -> dict:
     }
 
 
-def make_client(tmp_path: Path, llm: FakeChatLLM | None = None, graph=None) -> TestClient:
+def make_client(
+    tmp_path: Path,
+    biz: Business,
+    mem: MemoryStore,
+    auth: AuthStore,
+    llm: FakeChatLLM | None = None,
+    graph=None,
+    logged: bool = True,
+) -> TestClient:
     (tmp_path / "usage.json").write_text("{}", encoding="utf-8")
     settings = Settings(llm_api_key="lk", embed_api_key="ek", data_dir=tmp_path)
     app = create_app(
         settings,
         store=FakeStore(Stats(1, 1, False), [DocInfo("d1", "t", "s", "u", 1)]),
-        business=Business(tmp_path / "business.db"),
+        business=biz,
+        memory=mem,
+        auth=auth,
         retriever=FakeRetriever([_hit()]),
         llm=llm or FakeChatLLM(["开放时间", "是 7:30。"]),
     )
     if graph is not None:
         app.state.graph = graph
-    return TestClient(app)
+    if not logged:
+        return TestClient(app)
+    return make_logged_client(app, auth)
 
 
 def _parse_sse(text: str) -> list[dict]:
@@ -88,13 +106,19 @@ def _parse_sse(text: str) -> list[dict]:
     return out
 
 
-def test_chat_validation(tmp_path: Path):
-    c = make_client(tmp_path)
+def test_chat_requires_login(tmp_path: Path, biz, mem, auth):
+    c = make_client(tmp_path, biz, mem, auth, logged=False)
+    r = c.post("/api/chat", json={"question": "图书馆几点开门", "mode": "direct"})
+    assert r.status_code == 401
+    assert r.json()["detail"] == "未登录或会话已过期"
+
+
+def test_chat_validation(tmp_path: Path, biz, mem, auth):
+    c = make_client(tmp_path, biz, mem, auth)
     cases = [
         ({"question": ""}, "问题不能为空"),
         ({"question": "字" * 501}, "问题过长"),
         ({"question": "q", "mode": "bogus"}, "mode 必须为 auto/direct/research/react/classic"),
-        ({"question": "q", "role": "admin"}, "role 必须为 student/counselor"),
         ({"question": "q", "session_id": "s" * 65}, "session_id 过长（上限 64 字符）"),
         ({"question": 123}, "请求体不是合法 JSON"),
     ]
@@ -104,8 +128,18 @@ def test_chat_validation(tmp_path: Path):
         assert r.json()["detail"] == detail, body
 
 
-def test_chat_sse_headers_and_frame(tmp_path: Path):
-    c = make_client(tmp_path)
+def test_chat_role_param_ignored_server_side_authority(tmp_path: Path, biz, mem, auth):
+    """role 废弃：自称 counselor 不再改变身份（服务端 users.role 权威）。"""
+    c = make_client(tmp_path, biz, mem, auth)  # 注册用户 role=student
+    r = c.post(
+        "/api/chat",
+        json={"question": "图书馆几点开门", "mode": "direct", "role": "counselor"},
+    )
+    assert r.status_code == 200  # 字段被忽略，不 422 不越权
+
+
+def test_chat_sse_headers_and_frame(tmp_path: Path, biz, mem, auth):
+    c = make_client(tmp_path, biz, mem, auth)
     r = c.post(
         "/api/chat", json={"question": "图书馆几点开门", "mode": "direct", "session_id": "s1"}
     )
@@ -125,9 +159,9 @@ def test_chat_sse_headers_and_frame(tmp_path: Path):
     assert types.index("citations") == len(types) - 2
 
 
-def test_chat_done_reason_completed_and_citations(tmp_path: Path):
+def test_chat_done_reason_completed_and_citations(tmp_path: Path, biz, mem, auth):
     llm = FakeChatLLM(["开放时间", "是 7:30。"])
-    c = make_client(tmp_path, llm=llm)
+    c = make_client(tmp_path, biz, mem, auth, llm=llm)
     r = c.post(
         "/api/chat",
         json={"question": "图书馆几点开门", "mode": "direct", "session_id": "t"},
@@ -144,30 +178,30 @@ def test_chat_done_reason_completed_and_citations(tmp_path: Path):
     assert cites["items"][0]["n"] == 1
 
 
-def test_chat_truncated_marks_max_tokens(tmp_path: Path):
+def test_chat_truncated_marks_max_tokens(tmp_path: Path, biz, mem, auth):
     llm = FakeChatLLM(["很长".replace("长", "文") * 50], finish_reason="length")
-    c = make_client(tmp_path, llm=llm)
+    c = make_client(tmp_path, biz, mem, auth, llm=llm)
     r = c.post("/api/chat", json={"question": "讲讲校历", "mode": "direct", "session_id": "t"})
     events = _parse_sse(r.text)
     assert events[-1]["reason"] == "max_tokens"
     assert any(e["type"] == "status" and "长度上限" in e["text"] for e in events)
 
 
-def test_chat_utf8_raw_not_escaped(tmp_path: Path):
-    c = make_client(tmp_path)
+def test_chat_utf8_raw_not_escaped(tmp_path: Path, biz, mem, auth):
+    c = make_client(tmp_path, biz, mem, auth)
     r = c.post(
         "/api/chat", json={"question": "图书馆几点开门", "mode": "direct", "session_id": "u"}
     )
     assert "图书馆" in r.text  # UTF-8 原文（不转义为 \uXXXX）
 
 
-def test_chat_error_path_emits_error_and_done(tmp_path: Path):
+def test_chat_error_path_emits_error_and_done(tmp_path: Path, biz, mem, auth):
     class BoomGraph:
         def stream(self, *_a, **_k):
             raise RuntimeError("链路炸了")
             yield  # pragma: no cover
 
-    c = make_client(tmp_path, graph=BoomGraph())
+    c = make_client(tmp_path, biz, mem, auth, graph=BoomGraph())
     r = c.post("/api/chat", json={"question": "q", "mode": "direct", "session_id": "e"})
     events = _parse_sse(r.text)
     assert events[-2]["type"] == "error"
@@ -176,7 +210,7 @@ def test_chat_error_path_emits_error_and_done(tmp_path: Path):
 
 
 def test_new_state_defaults():
-    s = new_state("q", "auto", "sid", "student", "demo-student")
+    s = new_state("q", "auto", "sid", "student", "u1@example.com")
     assert s["resolved"] == "q"
     assert s["truncated"] is False
     assert s["answer"] == ""

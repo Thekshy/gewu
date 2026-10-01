@@ -82,6 +82,10 @@ class Settings:
     chunk_parent_limit: int = 800
     chunk_child_limit: int = 200
     chunk_overlap: int = 40
+    # P21 认证：cookie Secure（M4 https 部署后开）+ CORS 白名单（空=仅同源，
+    # 前端经 next rewrite 同源代理访问，无跨域 cookie 依赖）
+    cookie_secure: bool = False
+    cors_origins: tuple[str, ...] = ()
 
     @classmethod
     def load(cls, env: Mapping[str, str] | None = None) -> Settings:
@@ -117,4 +121,8 @@ class Settings:
             chunk_parent_limit=int(env.get("CHUNK_PARENT_LIMIT", "800")),
             chunk_child_limit=int(env.get("CHUNK_CHILD_LIMIT", "200")),
             chunk_overlap=int(env.get("CHUNK_OVERLAP", "40")),
+            cookie_secure=env.get("COOKIE_SECURE", "").lower() in ("1", "true", "yes", "on"),
+            cors_origins=tuple(
+                x.strip() for x in env.get("CORS_ORIGINS", "").split(",") if x.strip()
+            ),
         )

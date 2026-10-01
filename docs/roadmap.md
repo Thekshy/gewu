@@ -46,6 +46,8 @@
 
 ## M4 · 部署与展示
 
+- [ ] 用户体系（P21~P23）：邀请码封闭注册 / 会话管理 / 记忆可见化 / 管理后台——
+      公网部署前置（防配额滥用、role 权限坐实、台账归属）
 - [x] 可演示前端（P11）：对话 / 对比实验台 / 控制台三视图——同题 A/B 双流
       （cascade workflow ↔ ReAct agent）、业务台账、检索调试；验收记录见
       [runbooks/P11-web-demo.md §5](runbooks/P11-web-demo.md)
@@ -76,4 +78,12 @@
       [P17 任务书](runbooks/P17-agent-first-orchestration.md)
 - [ ] agent 轨多轮办理稳定化：tx-002/tx-003 对话式收集的 GLM 非确定（P17 已知 flaky，重放全对）；
       classic 轨论文完成后按退役模式收口（tag+留档+删码）
-- [ ] 长期记忆消亡与用户侧可见性（当前仅注入不可管理）
+- [ ] 长期记忆消亡与用户侧可见性（当前仅注入不可管理）——P22 承接
+- [ ] P21 用户体系·认证地基：邀请码封闭注册（内测）+ argon2 密码 + httpOnly
+      cookie + role 服务端化（tools_for 权限矩阵坐实）+ business/memory 迁 PG
+      （P13 遗留闭线）+ CORS 收紧/前端同源代理——
+      [P21 任务书](runbooks/P21-user-auth-foundation.md)
+- [ ] P22 会话与记忆管理：会话归属表/列表/改名/删除 + 前端多会话侧边栏 +
+      memory_fact 用户可见可管理
+- [ ] P23 管理后台：admin 用户/用量/会话巡查 + 邀请码发放 UI + per-user
+      token 预算

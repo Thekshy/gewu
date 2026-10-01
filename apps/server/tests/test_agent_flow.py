@@ -36,10 +36,10 @@ def _tomorrow() -> str:
     return (date.today() + timedelta(days=1)).isoformat()
 
 
-def make_flow(tmp_path, script, *, business: Business | None = None):
+def make_flow(tmp_path, biz, script, *, business: Business | None = None):
     settings = Settings(llm_api_key="k", embed_api_key="e", data_dir=tmp_path)
     retriever = FakeRetriever([make_hit()])
-    business = business or Business(tmp_path / "b.db")
+    business = business or biz
     llm = FakeAgentLLM(script=script)
     agent = build_agent(settings, llm, retriever, business, tools_for())
     graph = build_graph(
@@ -68,9 +68,9 @@ def _routes(events: list[dict]) -> set:
     return {e["route"] for e in events if e["type"] == "route"}
 
 
-def test_chitchat_zero_tool_direct_answer(tmp_path):
+def test_chitchat_zero_tool_direct_answer(tmp_path, biz):
     graph, _, _ = make_flow(
-        tmp_path, [_ai_text("你好！我是格物，可以帮你查政策、约场馆、办请假。")]
+        tmp_path, biz, [_ai_text("你好！我是格物，可以帮你查政策、约场馆、办请假。")]
     )
     events = run_turn(graph, "c1", question="你好")
     assert "你好" in _answer(events)
@@ -79,12 +79,12 @@ def test_chitchat_zero_tool_direct_answer(tmp_path):
     assert not any(e["type"] == "error" for e in events)
 
 
-def test_search_emits_citations_and_factual_route(tmp_path):
+def test_search_emits_citations_and_factual_route(tmp_path, biz):
     script = [
         _ai_call("search_knowledge", {"query": "转专业条件"}),
         _ai_text("根据[1]，转专业需要在校期间无未通过课程。"),
     ]
-    graph, _, _ = make_flow(tmp_path, script)
+    graph, _, _ = make_flow(tmp_path, biz, script)
     events = run_turn(graph, "c2", question="转专业要什么条件")
     assert "factual" in _routes(events)
     cites = [e for e in events if e["type"] == "citations" and e["items"]]
@@ -94,12 +94,12 @@ def test_search_emits_citations_and_factual_route(tmp_path):
     assert not any(e["type"] == "error" for e in events)
 
 
-def test_write_full_args_interrupts_then_approve_executes(tmp_path):
+def test_write_full_args_interrupts_then_approve_executes(tmp_path, biz):
     script = [
         _ai_call("book_venue", {"venue": "羽毛球馆", "date": _tomorrow(), "slot": "19:00-21:00"}),
         _ai_text("已为你预约成功，记得准时到哦。"),
     ]
-    graph, llm, business = make_flow(tmp_path, script)
+    graph, llm, business = make_flow(tmp_path, biz, script)
     cfg = {"configurable": {"thread_id": "c3"}}
 
     events = run_turn(graph, "c3", question="帮我预约明天晚上的羽毛球馆")
@@ -121,12 +121,12 @@ def test_write_full_args_interrupts_then_approve_executes(tmp_path):
     assert any(b["venue"] == "羽毛球馆" and b["slot"] == "19:00-21:00" for b in bookings)
 
 
-def test_write_missing_args_slot_gate_collects(tmp_path):
+def test_write_missing_args_slot_gate_collects(tmp_path, biz):
     script = [
         _ai_call("book_venue", {"date": _tomorrow(), "slot": "19:00-21:00"}),  # 缺 venue
         _ai_text("想预约哪个场馆？可选：羽毛球馆、篮球场、研讨间301。"),
     ]
-    graph, _, business = make_flow(tmp_path, script)
+    graph, _, business = make_flow(tmp_path, biz, script)
     events = run_turn(graph, "c4", question="帮我约个明晚七点的场地")
     slots = [e for e in events if e["type"] == "slot_question"]
     assert slots and slots[0]["slot"] == "venue"
@@ -137,22 +137,22 @@ def test_write_missing_args_slot_gate_collects(tmp_path):
     assert not snap.next  # 未中断
 
 
-def test_permission_denied_returns_receipt(tmp_path):
+def test_permission_denied_returns_receipt(tmp_path, biz):
     script = [
         _ai_call("pending_leaves", {}),
         _ai_text("抱歉，学生身份暂时无权查看待审批列表。"),
     ]
-    graph, _, _ = make_flow(tmp_path, script)
+    graph, _, _ = make_flow(tmp_path, biz, script)
     events = run_turn(graph, "c5", question="帮我看看有哪些待审批的请假")
     results = [e for e in events if e["type"] == "action_result"]
     assert results and not results[0]["success"] and "无权" in results[0]["message"]
     assert "无权" in _answer(events)
 
 
-def test_classic_mode_still_routes_via_cascade(tmp_path):
+def test_classic_mode_still_routes_via_cascade(tmp_path, biz):
     settings = Settings(llm_api_key="k", embed_api_key="e", data_dir=tmp_path)
     retriever = FakeRetriever([make_hit()])
-    business = Business(tmp_path / "b.db")
+    business = biz
     llm = FakeAgentLLM()  # 无 key：cascade 退化启发式
     graph = build_graph(settings, retriever, llm, business=business, checkpointer=MemorySaver())
     cfg = {"configurable": {"thread_id": "c6"}}
@@ -166,7 +166,7 @@ def test_classic_mode_still_routes_via_cascade(tmp_path):
     assert not any(e["type"] == "error" for e in events)
 
 
-def test_guard_block_short_circuits_in_graph(tmp_path):
+def test_guard_block_short_circuits_in_graph(tmp_path, biz):
     """guard 在图内生效：block 时模型零调用，直接吐 REFUSAL_ANSWER。"""
     from gewu.agent.prompts import REFUSAL_ANSWER
 
@@ -176,7 +176,7 @@ def test_guard_block_short_circuits_in_graph(tmp_path):
     )
     settings = Settings(llm_api_key="k", embed_api_key="e", data_dir=tmp_path)
     retriever = FakeRetriever([make_hit()])
-    business = Business(tmp_path / "b.db")
+    business = biz
     settings_llm._script = script
     agent = build_agent(settings, settings_llm, retriever, business, tools_for())
     graph = build_graph(
@@ -192,7 +192,7 @@ def test_guard_block_short_circuits_in_graph(tmp_path):
     assert "refusal" in _routes(events)
 
 
-def test_guard_meta_answers_directly_in_graph(tmp_path):
+def test_guard_meta_answers_directly_in_graph(tmp_path, biz):
     llm = FakeAgentLLM(
         chat_replies=[
             '{"decision":"meta","intent":"chitchat","reply":"嗨！我可以帮你查政策、约场馆。"}'
@@ -201,7 +201,7 @@ def test_guard_meta_answers_directly_in_graph(tmp_path):
     )
     settings = Settings(llm_api_key="k", embed_api_key="e", data_dir=tmp_path)
     retriever = FakeRetriever([make_hit()])
-    business = Business(tmp_path / "b.db")
+    business = biz
     agent = build_agent(settings, llm, retriever, business, tools_for())
     graph = build_graph(
         settings, retriever, llm, business=business, checkpointer=MemorySaver(), agent=agent
@@ -211,7 +211,7 @@ def test_guard_meta_answers_directly_in_graph(tmp_path):
     assert "chitchat" in _routes(events)
 
 
-def test_multiturn_slot_collection_not_eaten_by_guard(tmp_path):
+def test_multiturn_slot_collection_not_eaten_by_guard(tmp_path, biz):
     """回归（agent-first 轨 tx-002 失败根因）：短回复轮不能被 guard 当寒暄吃掉。"""
     script = [
         _ai_call("book_venue", {"date": _tomorrow(), "slot": "14:00-16:00"}),  # 缺 venue
@@ -219,7 +219,7 @@ def test_multiturn_slot_collection_not_eaten_by_guard(tmp_path):
         _ai_call("book_venue", {"venue": "研讨间301", "date": _tomorrow(), "slot": "14:00-16:00"}),
         _ai_text("预约成功，明天见。"),
     ]
-    graph, llm, business = make_flow(tmp_path, script)
+    graph, llm, business = make_flow(tmp_path, biz, script)
     cfg = {"configurable": {"thread_id": "m1"}}
     run_turn(graph, "m1", question="帮我约明天下午两点的研讨间")
     run_turn(graph, "m1", question="研讨间301")  # 短回复：guard 必须放行

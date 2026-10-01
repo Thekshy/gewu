@@ -4,6 +4,9 @@
 在流末单点发射（reason: completed/max_tokens/error/aborted——RunChat 单点语义）。
 interrupt/resume 桥：thread 停在确认门（tx_gate interrupt）时，用户本轮消息作为
 resume 值续跑——前端照常发 /api/chat，零改动。流结束后异步固化长期记忆。
+
+P21-3：需登录（cookie）；role 改服务端权威（users.role，请求体 role 字段废弃
+忽略——权限矩阵从君子协定变强制）；user_id=登录 email（记忆/台账真实归属）。
 """
 
 from __future__ import annotations
@@ -19,12 +22,13 @@ from fastapi.responses import StreamingResponse
 
 from gewu.agent import events as ev
 from gewu.agent.state import new_state
+from gewu.api.auth import require_user
 
 router = APIRouter()
 
 
 def _parse_chat_body(payload: dict) -> dict:
-    """请求校验（顺序对照 Go chat.go）。"""
+    """请求校验（顺序对照 Go chat.go；role 自 P21 起服务端权威，不再解析）。"""
     question = payload.get("question")
     if question is None:
         question = ""
@@ -39,15 +43,12 @@ def _parse_chat_body(payload: dict) -> dict:
         raise HTTPException(
             status_code=422, detail="mode 必须为 auto/direct/research/react/classic"
         )
-    role = payload.get("role") or "student"
-    if role not in ("student", "counselor"):
-        raise HTTPException(status_code=422, detail="role 必须为 student/counselor")
     session_id = payload.get("session_id") or "default"
     if not isinstance(session_id, str):
         raise HTTPException(status_code=422, detail="请求体不是合法 JSON")
     if len(session_id) > 64:
         raise HTTPException(status_code=422, detail="session_id 过长（上限 64 字符）")
-    return {"question": question, "mode": mode, "role": role, "session_id": session_id}
+    return {"question": question, "mode": mode, "session_id": session_id}
 
 
 def _sse(ev_: dict) -> str:
@@ -67,7 +68,7 @@ def _consolidate_async(request: Request, req: dict, question: str, answer: str) 
             consolidate(
                 memory,
                 request.app.state.llm,
-                f"demo-{req['role']}",
+                req["user"],
                 req["session_id"],
                 question,
                 answer,
@@ -80,7 +81,10 @@ def _consolidate_async(request: Request, req: dict, question: str, answer: str) 
 
 @router.post("/api/chat")
 def chat(request: Request, payload: Annotated[dict, Body(...)]):
+    user = require_user(request)  # 401 未登录；role 服务端权威、user=email
     req = _parse_chat_body(payload)
+    req["role"] = user.role
+    req["user"] = user.email
     try:
         request.app.state.budget.ensure()
     except Exception as e:  # noqa: BLE001 - 预算耗尽 → 429（PARITY §2.4）
@@ -89,9 +93,7 @@ def chat(request: Request, payload: Annotated[dict, Body(...)]):
         raise HTTPException(status_code=429, detail=str(e)) from e
     graph = request.app.state.graph
     config = {"configurable": {"thread_id": req["session_id"]}}
-    state_input = new_state(
-        req["question"], req["mode"], req["session_id"], req["role"], f"demo-{req['role']}"
-    )
+    state_input = new_state(req["question"], req["mode"], req["session_id"], user.role, user.email)
 
     # interrupt/resume 桥：thread 停在确认门时以用户消息 resume。
     # agent 链路的 HITL 中断（payload 含 action_requests）需翻译为 decisions
@@ -129,6 +131,7 @@ def chat(request: Request, payload: Annotated[dict, Body(...)]):
                 + json.dumps(
                     {
                         "session": req["session_id"],
+                        "user": req["user"],
                         "role": req["role"],
                         "mode": req["mode"],
                         "q": req["question"][:60],

@@ -28,7 +28,7 @@ check "llm ↛ agent（反向）" "apps/server/gewu/llm" "from gewu.agent\|impor
 check "business ↛ agent（反向）" "apps/server/gewu/business" "from gewu.agent\|import gewu.agent"
 check "business ↛ rag（经编排层解耦）" "apps/server/gewu/business" "from gewu.rag\|import gewu.rag"
 check "llm ↛ rag（横向禁止）" "apps/server/gewu/llm" "from gewu.rag\|import gewu.rag"
-check "memory/budget/middleware ↛ 业务域" "apps/server/gewu/memory.py apps/server/gewu/budget.py apps/server/gewu/middleware.py" "from gewu.\(agent\|rag\|business\)"
+check "memory/budget/middleware/auth ↛ 业务域" "apps/server/gewu/memory.py apps/server/gewu/budget.py apps/server/gewu/middleware.py apps/server/gewu/auth" "from gewu.\(agent\|rag\|business\)"
 
 # main.py 只做装配：import 面只允许 gewu.api / gewu.config
 if grep -E "^from gewu\.|^import gewu" apps/server/main.py | grep -v "gewu.api\|gewu.config" | grep -q .; then

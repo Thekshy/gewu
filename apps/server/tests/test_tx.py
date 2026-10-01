@@ -10,13 +10,12 @@ from gewu.agent.tx import (
     phrase_days,
     slot_meta,
 )
-from gewu.business.db import Business
 from gewu.config import Settings
 from gewu.llm.service import LLMService
 
 
-def _meta(tmp_path) -> dict:
-    return slot_meta(Business(tmp_path / "b.db"))
+def _meta(biz) -> dict:
+    return slot_meta(biz)
 
 
 def test_detect_tool_order_and_negative_guard():
@@ -46,8 +45,8 @@ def test_phrase_days():
     assert phrase_days("请假") is None
 
 
-def test_normalize_slot_venue_and_date(tmp_path):
-    meta = _meta(tmp_path)
+def test_normalize_slot_venue_and_date(biz):
+    meta = _meta(biz)
     norm, ok = normalize_slot(meta, "venue", "羽毛球馆")
     assert ok and norm == "venue-badminton"
     norm, ok = normalize_slot(meta, "date", "明天")
@@ -56,10 +55,10 @@ def test_normalize_slot_venue_and_date(tmp_path):
     assert ok and norm == "院队训练"
 
 
-def test_build_confirm_leave(tmp_path):
+def test_build_confirm_leave(biz):
     from gewu.agent.tx import build_confirm
 
-    b = Business(tmp_path / "b.db")
+    b = biz
     state = {
         "tx_tool": "submit_leave",
         "tx_slots": {
@@ -78,8 +77,8 @@ def test_build_confirm_leave(tmp_path):
     assert "请确认请假申请信息" in text
 
 
-def test_classify_reply_heuristic(tmp_path):
-    b = Business(tmp_path / "b.db")
+def test_classify_reply_heuristic(biz):
+    b = biz
     meta = slot_meta(b)
     state = {
         "tx_phase": "confirm",

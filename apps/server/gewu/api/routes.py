@@ -3,6 +3,9 @@
 错误体统一 {"detail": "<原因>"}：绑定/类型错→「请求体不是合法 JSON」（全局
 exception handler 收口），语义越界→各端点中文 detail。不用 pydantic 默认校验
 错误体（PARITY §2.3 差异决定）。
+
+P21-3 认证范围：search 需登录；business/overview 登录者本人视图（admin 可
+?all=1）；business/reset 仅 admin。health/docs 保持公开（无敏感信息）。
 """
 
 from __future__ import annotations
@@ -12,6 +15,8 @@ from datetime import date
 from typing import Annotated
 
 from fastapi import APIRouter, Body, HTTPException, Request
+
+from gewu.api.auth import require_admin, require_user
 
 router = APIRouter()
 
@@ -79,6 +84,7 @@ def list_docs(request: Request):
 
 @router.post("/api/search")
 def search(request: Request, payload: Annotated[dict, Body(...)]):
+    require_user(request)  # console 检索调试：登录即可
     query = _body_param(payload, "query", str)
     if query is None:
         query = ""
@@ -108,6 +114,7 @@ def search(request: Request, payload: Annotated[dict, Body(...)]):
 
 @router.post("/api/business/reset")
 def business_reset(request: Request):
+    require_admin(request)
     try:
         request.app.state.business.reset()
     except Exception as e:
@@ -116,14 +123,20 @@ def business_reset(request: Request):
 
 
 @router.get("/api/business/overview")
-def business_overview(request: Request):
+def business_overview(request: Request, all: str | None = None):
+    user = require_user(request)
+    admin_all = all == "1" and user.role == "admin"
     biz = request.app.state.business
     try:
         bookings = biz.all_bookings()
         tickets = biz.all_tickets()
     except Exception as e:
         raise HTTPException(status_code=500, detail=str(e)) from e
+    if not admin_all:  # 本人视图：台账按登录 email 过滤（admin ?all=1 看全量）
+        bookings = [b for b in bookings if b.user == user.email]
+        tickets = [t for t in tickets if t.user == user.email]
     return {
+        "scope": "all" if admin_all else "mine",
         "bookings": [
             {
                 "booking_id": b.booking_id,

@@ -2,6 +2,7 @@
 
 PG 不可达时 Skip（门禁口径：make pg-up / CI service；裸跑 pytest 允许跳过）。
 咨询锁进程持有到退出（连接断开 PG 自动释放），跨用例文件串行化共享测试库。
+P21 起 business/memory/auth 三域入库（SQLite 退役），夹具统一 wipe 隔离。
 """
 
 from __future__ import annotations
@@ -11,8 +12,12 @@ import urllib.parse
 
 import psycopg
 import pytest
+from fastapi.testclient import TestClient
 
+from gewu.auth.store import AuthStore
+from gewu.business.db import Business
 from gewu.config import load_dotenv
+from gewu.memory import MemoryStore
 from gewu.rag.store import Store
 
 LOCK_KEY = 941012  # 与 Go testLockKey 同值（任意常量，全仓库唯一即可）
@@ -49,14 +54,83 @@ def pg_dsn() -> str:
 
 
 @pytest.fixture(scope="session")
-def pg_store(pg_dsn: str) -> Store:
+def pg_lock(pg_dsn: str) -> str:
+    """进程级咨询锁（首个使用者取，断开自动释放）——共享测试库跨文件串行化。"""
     global _lock_conn
     if _lock_conn is None:
         _lock_conn = psycopg.connect(pg_dsn)
         _lock_conn.autocommit = True
         _lock_conn.execute("SELECT pg_advisory_lock(%s)", (LOCK_KEY,))
+    return pg_dsn
+
+
+@pytest.fixture(scope="session")
+def pg_store(pg_lock: str, pg_dsn: str) -> Store:
     store = Store(pg_dsn, ensure=True)
     store.wipe()
     yield store
     store.close()
     # _lock_conn 故意不关：进程退出 = 锁释放
+
+
+@pytest.fixture(scope="session")
+def _auth_store(pg_lock: str, pg_dsn: str) -> AuthStore:
+    store = AuthStore(pg_dsn)
+    yield store
+    store.close()
+
+
+@pytest.fixture
+def auth(_auth_store: AuthStore) -> AuthStore:
+    _auth_store.wipe()
+    return _auth_store
+
+
+@pytest.fixture(scope="session")
+def _biz_store(pg_lock: str, pg_dsn: str) -> Business:
+    biz = Business(pg_dsn)
+    yield biz
+    biz.close()
+
+
+@pytest.fixture
+def biz(_biz_store: Business) -> Business:
+    _biz_store.wipe()
+    return _biz_store
+
+
+@pytest.fixture(scope="session")
+def _mem_store(pg_lock: str, pg_dsn: str) -> MemoryStore:
+    mem = MemoryStore(pg_dsn)
+    yield mem
+    mem.close()
+
+
+@pytest.fixture
+def mem(_mem_store: MemoryStore) -> MemoryStore:
+    _mem_store.wipe()
+    return _mem_store
+
+
+def make_logged_client(
+    app,
+    auth: AuthStore,
+    *,
+    email: str = "u1@example.com",
+    password: str = "password123",
+    admin: bool = False,
+) -> TestClient:
+    """注册即登录的 TestClient（cookie 会话随 client 持有）；admin=True 注册后提权。
+
+    role 权威在 users 表：promote 后已发 cookie 立即生效（user_for_token 实时 join）。
+    """
+    client = TestClient(app)
+    code = auth.create_invite(uses=9, note="test")
+    r = client.post(
+        "/api/auth/register",
+        json={"email": email, "password": password, "invite_code": code},
+    )
+    assert r.status_code == 200, r.text
+    if admin:
+        assert auth.promote_admin(email)
+    return client

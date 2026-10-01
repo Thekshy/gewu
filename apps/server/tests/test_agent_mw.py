@@ -17,7 +17,6 @@ from gewu.agent.mw import (
     write_call_ready,
 )
 from gewu.agent.resume import hitl_decisions
-from gewu.business.db import Business
 from tests.agent_fakes import FakeAgentLLM
 
 
@@ -117,8 +116,8 @@ def test_effective_route_matrix():
 # ---------- 写调用就绪与槽位门 ----------
 
 
-def test_write_call_ready(tmp_path):
-    b = Business(tmp_path / "b.db")
+def test_write_call_ready(biz):
+    b = biz
     assert write_call_ready(
         b,
         _tool_call(
@@ -139,8 +138,8 @@ def test_write_call_ready(tmp_path):
     assert write_call_ready(b, _tool_call("search_knowledge", {}))
 
 
-def test_slot_gate_returns_guidance_without_execution(tmp_path):
-    b = Business(tmp_path / "b.db")
+def test_slot_gate_returns_guidance_without_execution(biz):
+    b = biz
     mw = WriteSlotGateMiddleware(b)
     req = ToolCallRequest(
         tool_call=_tool_call("book_venue", {"date": "2026-10-02", "slot": "19:00-21:00"}),
@@ -175,35 +174,31 @@ def _payload(args: dict) -> dict:
 _FULL = {"venue": "羽毛球馆", "date": "2026-10-02", "slot": "14:00-16:00"}
 
 
-def test_resume_confirm_maps_approve(tmp_path):
-    dec = hitl_decisions(_payload(_FULL), "确认", FakeAgentLLM(), Business(tmp_path / "b.db"))
+def test_resume_confirm_maps_approve(biz):
+    dec = hitl_decisions(_payload(_FULL), "确认", FakeAgentLLM(), biz)
     assert dec["decisions"] == [{"type": "approve"}]
 
 
-def test_resume_cancel_maps_reject(tmp_path):
-    dec = hitl_decisions(_payload(_FULL), "算了不约了", FakeAgentLLM(), Business(tmp_path / "b.db"))
+def test_resume_cancel_maps_reject(biz):
+    dec = hitl_decisions(_payload(_FULL), "算了不约了", FakeAgentLLM(), biz)
     assert dec["decisions"][0]["type"] == "reject"
     assert "取消" in dec["decisions"][0]["message"]
 
 
-def test_resume_modify_maps_respond(tmp_path):
-    dec = hitl_decisions(
-        _payload(_FULL), "改成晚上七点吧", FakeAgentLLM(), Business(tmp_path / "b.db")
-    )
+def test_resume_modify_maps_respond(biz):
+    dec = hitl_decisions(_payload(_FULL), "改成晚上七点吧", FakeAgentLLM(), biz)
     d = dec["decisions"][0]
     assert d["type"] == "respond" and "重新发起调用" in d["message"]
 
 
-def test_resume_new_topic_maps_respond(tmp_path):
-    dec = hitl_decisions(
-        _payload(_FULL), "图书馆几点开门", FakeAgentLLM(), Business(tmp_path / "b.db")
-    )
+def test_resume_new_topic_maps_respond(biz):
+    dec = hitl_decisions(_payload(_FULL), "图书馆几点开门", FakeAgentLLM(), biz)
     d = dec["decisions"][0]
     assert d["type"] == "respond" and "别的事" in d["message"]
 
 
-def test_resume_ambiguous_asks_restate(tmp_path):
-    dec = hitl_decisions(_payload(_FULL), "嗯嗯", FakeAgentLLM(), Business(tmp_path / "b.db"))
+def test_resume_ambiguous_asks_restate(biz):
+    dec = hitl_decisions(_payload(_FULL), "嗯嗯", FakeAgentLLM(), biz)
     d = dec["decisions"][0]
     assert d["type"] == "respond" and "确认" in d["message"]
 
@@ -222,7 +217,7 @@ def test_merge_citations_dedupes_and_renumbers():
     assert _merge_citations(None, None) == []
 
 
-def test_resume_reason_supplement_maps_respond(tmp_path):
+def test_resume_reason_supplement_maps_respond(biz):
     """回归（tx-005 失败根因）：确认轮补充事由 = 修改，不是「不明确」。"""
     payload = {
         "action_requests": [
@@ -239,12 +234,12 @@ def test_resume_reason_supplement_maps_respond(tmp_path):
         ],
         "review_configs": [],
     }
-    dec = hitl_decisions(payload, "发烧需要休息", FakeAgentLLM(), Business(tmp_path / "b.db"))
+    dec = hitl_decisions(payload, "发烧需要休息", FakeAgentLLM(), biz)
     d = dec["decisions"][0]
     assert d["type"] == "respond" and "reason" in d["message"]
 
 
-def test_resume_confirm_word_beats_soft_supplement(tmp_path):
+def test_resume_confirm_word_beats_soft_supplement(biz):
     """「确认」不能被自由文本 parse 吞掉（短且含确认词 → approve）。"""
     payload = {
         "action_requests": [
@@ -261,5 +256,5 @@ def test_resume_confirm_word_beats_soft_supplement(tmp_path):
         ],
         "review_configs": [],
     }
-    dec = hitl_decisions(payload, "确认", FakeAgentLLM(), Business(tmp_path / "b.db"))
+    dec = hitl_decisions(payload, "确认", FakeAgentLLM(), biz)
     assert dec["decisions"] == [{"type": "approve"}]

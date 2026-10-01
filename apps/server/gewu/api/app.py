@@ -12,8 +12,10 @@ from fastapi.responses import JSONResponse
 from langgraph.checkpoint.memory import MemorySaver
 
 from gewu.agent.graph import build_graph
+from gewu.api import auth as auth_routes
 from gewu.api import chat as chat_routes
 from gewu.api import routes
+from gewu.auth.store import AuthStore
 from gewu.budget import TokenBudget
 from gewu.business.db import Business
 from gewu.config import VERSION, Settings
@@ -67,11 +69,18 @@ def create_app(
     business: Business | None = None,
     llm: LLMService | None = None,
     retriever: Retriever | None = None,
+    memory: MemoryStore | None = None,
+    auth: AuthStore | None = None,
 ) -> FastAPI:
     app = FastAPI(title="gewu", version=VERSION)
-    # 中间件顺序（外→内）：限流 → trace-id → CORS（对齐 Go：TraceID → 限流 → CORS）
+    # 中间件顺序（外→内）：限流 → trace-id → CORS（对齐 Go：TraceID → 限流 → CORS）。
+    # P21 起 CORS 收白名单（空=仅同源；前端经 next rewrite 同源代理）+ credentials。
     app.add_middleware(
-        CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"]
+        CORSMiddleware,
+        allow_origins=list(settings.cors_origins),
+        allow_methods=["*"],
+        allow_headers=["*"],
+        allow_credentials=True,
     )
     app.add_middleware(TraceIDMiddleware)
     app.add_middleware(RateLimitMiddleware, per_minute=settings.rate_limit_per_minute)
@@ -83,9 +92,8 @@ def create_app(
 
     app.state.settings = settings
     app.state.store = store if store is not None else Store(settings.pg_dsn)
-    app.state.business = (
-        business if business is not None else Business(settings.data_dir / "business.db")
-    )
+    # P21-2：business/memory 自 SQLite 迁 PG；P21-1：auth 域入库
+    app.state.business = business if business is not None else Business(settings.pg_dsn)
     app.state.budget = TokenBudget(settings.data_dir / "usage.json", settings.daily_token_budget)
     app.state.llm = llm if llm is not None else LLMService(settings, budget=app.state.budget)
     if retriever is not None:
@@ -94,7 +102,8 @@ def create_app(
         app.state.retriever = _build_retriever(settings, app.state.store, app.state.llm)
     else:
         raise TypeError("store 非 Store 实例时必须显式提供 retriever")
-    app.state.memory = MemoryStore(settings.data_dir / "memory.db")
+    app.state.memory = memory if memory is not None else MemoryStore(settings.pg_dsn)
+    app.state.auth = auth if auth is not None else AuthStore(settings.pg_dsn)
     app.state.checkpointer = _make_checkpointer(settings)
     app.state.graph = build_graph(
         settings,
@@ -104,6 +113,7 @@ def create_app(
         checkpointer=app.state.checkpointer,
         memory=app.state.memory,
     )
+    app.include_router(auth_routes.router)
     app.include_router(routes.router)
     app.include_router(chat_routes.router)
     return app
