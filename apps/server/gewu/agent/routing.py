@@ -158,6 +158,14 @@ class CascadeRouter:
         self._llm = llm
 
     def route(self, question: str) -> dict:
+        dec = self._decide(question)
+        print(
+            f"[routing] q={question[:40]!r} → {dec['route']}"
+            f"（{dec.get('layer')}：{dec.get('reason')}）"
+        )
+        return dec
+
+    def _decide(self, question: str) -> dict:
         llm = self._llm
         # L0：规则快路径（毫秒、零成本、高置信）
         if _EXACT_TX_RE.search(question):

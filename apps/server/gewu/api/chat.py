@@ -120,11 +120,42 @@ def chat(request: Request, payload: Annotated[dict, Body(...)]):
         t0 = time.monotonic()
         truncated = False
         answer = ""
+        trace = {"route": "", "route_layer": "", "steps": 0, "tool": 0}
+
+        def turn_log(reason: str) -> None:
+            """整轮汇总一行 JSON（线上排障回溯：问题/路由/步数/耗时/结局单点可见）。"""
+            print(
+                "[chat] "
+                + json.dumps(
+                    {
+                        "session": req["session_id"],
+                        "role": req["role"],
+                        "mode": req["mode"],
+                        "q": req["question"][:60],
+                        **trace,
+                        "answer_chars": len(answer),
+                        "answer_head": answer[:80],
+                        "ms": int((time.monotonic() - t0) * 1000),
+                        "reason": reason,
+                    },
+                    ensure_ascii=False,
+                ),
+                flush=True,
+            )
+
         try:
             # subgraphs=True：agent 子图（create_agent）内 middleware/工具的 custom
             # 事件必须显式开启冒泡（P17）；yield 形态为 (namespace, event)。
             for chunk in graph.stream(run_input, config, stream_mode="custom", subgraphs=True):
                 evt = chunk[-1] if isinstance(chunk, tuple) else chunk
+                t = evt.get("type")
+                if t == "route":
+                    trace["route"] = evt.get("route", "")
+                    trace["route_layer"] = evt.get("layer", "")
+                elif t in ("status", "step"):
+                    trace["steps"] += 1
+                elif t in ("pending_action", "action_result"):
+                    trace["tool"] += 1
                 yield _sse(evt)
             # 终态读取（interrupt 悬停时为当前值）：answer/truncated 单点真相。
             try:
@@ -134,12 +165,15 @@ def chat(request: Request, payload: Annotated[dict, Body(...)]):
             except Exception:  # noqa: BLE001
                 pass
         except GeneratorExit:
+            turn_log("aborted")
             raise  # 客户端断开：done 已无法送达（语义上记 aborted）
         except Exception as e:  # noqa: BLE001 - 链路错误 → error 事件 + done(error)
+            turn_log("error")
             yield _sse(ev.error_evt(str(e)))
             yield _sse(ev.done_evt(int((time.monotonic() - t0) * 1000), "error"))
             return
         reason = "max_tokens" if truncated else "completed"
+        turn_log(reason)
         yield _sse(ev.done_evt(int((time.monotonic() - t0) * 1000), reason))
         if os.environ.get("MEMORY_CONSOLIDATE", "on") == "on":
             _consolidate_async(request, req, req["question"], answer)

@@ -26,6 +26,18 @@ def to_lc_messages(messages: list[tuple[str, str]]) -> list[BaseMessage]:
     ]
 
 
+def ctx_profile(messages: list[tuple[str, str]] | list[BaseMessage]) -> str:
+    """送入模型的上下文概况（线上排障：条数/字符量/角色分布一行可见）。"""
+    counts: dict[str, int] = {}
+    chars = 0
+    for m in messages:
+        role, content = (m[0], m[1]) if isinstance(m, tuple) else (type(m).__name__, m.content)
+        counts[role] = counts.get(role, 0) + 1
+        chars += len(str(content))
+    dist = ",".join(f"{r}×{n}" for r, n in counts.items())
+    return f"msgs={len(messages)} chars={chars}（{dist}）"
+
+
 class LLMService:
     """双模型缓存 + 门面方法。线程安全：ChatOpenAI invoke 可并发，模型惰性建一次。"""
 
@@ -101,6 +113,7 @@ class LLMService:
         max_tokens: int = 2048,
     ) -> ChatStreamResult:
         """流式补全（Go ChatStream 等价）：迭代取文本增量，结束读 finish_reason。"""
+        print(f"[llm] 直答上下文 {ctx_profile(messages)}")
         model = self._model(small).bind(temperature=temperature, max_tokens=max_tokens)
         return ChatStreamResult(model, to_lc_messages(messages), budget=self._budget)
 
@@ -114,6 +127,7 @@ class LLMService:
         max_tokens: int = 2048,
     ) -> AIMessage:
         """原生 tool-calling（Go ChatWithTools 等价）：返回含 tool_calls 的 AIMessage。"""
+        print(f"[llm] agent 上下文 {ctx_profile(messages)}")
         model = (
             self._model(small)
             .bind(temperature=temperature, max_tokens=max_tokens)

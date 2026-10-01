@@ -116,7 +116,10 @@ class Retriever:
             fused = _normalize_by_max(bm_scored)
 
         ranked = self._rerank_or_keep(query, fused, k)
-        return self._expand_to_parents([s.id for s in ranked], k)
+        hits = self._expand_to_parents([s.id for s in ranked], k)
+        brief = " ".join(f"{h.doc_id}#{h.seq}" for h in hits) or "（空命中，走拒答路径）"
+        print(f"[rag] q={query[:40]!r} 命中 {len(hits)}：{brief}")
+        return hits
 
     def _vector_scored(self, query: str, k: int) -> list[Scored]:
         """向量召回路：查询向量化失败（瞬时错误）时退化为纯 BM25（单次查询容错）。"""
