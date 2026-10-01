@@ -1,7 +1,7 @@
 SERVER_DIR := apps/server
 WEB_DIR := apps/web
 
-.PHONY: install-web run test lint eval ingest retrieval-eval variants demo clean lint-arch pg-up pg-down
+.PHONY: install-web run test lint eval ingest retrieval-eval variants demo clean lint-arch design-lint pg-up pg-down
 
 # ---------- 检索存储（P12：PostgreSQL + pgvector） ----------
 
@@ -83,3 +83,8 @@ clean:
 # 架构依赖规则守护（P14-8 Python 版，零依赖：grep 断言）
 lint-arch:
 	bash scripts/lint-arch.sh
+
+# 前端设计门禁（P20）：impeccable detect 三页 + 衬线域/h-screen/冷色 grep 规则，
+# 剩余白名单项记录在仓库根 DESIGN.md「门禁白名单」区
+design-lint:
+	bash scripts/design-lint.sh

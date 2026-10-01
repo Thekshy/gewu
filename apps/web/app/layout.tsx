@@ -8,8 +8,8 @@ import { TooltipProvider } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import "./globals.css";
 
-// 字体双轨（DESIGN.md）：衬线 display 走 Noto Serif SC（标题/品牌/空态标语/回答内标题），
-// 正文 Geist + 系统 CJK 黑体栈（--font-sans 在 globals.css @theme 里拼接），mono 用于单号/延迟。
+// 字体契约（DESIGN.md 衬线域）：Noto Serif SC 只服务三个内容时刻（空态标语/引用块/
+// 回答内文档标题）+ 品牌方印与字标；UI chrome（导航/按钮/标签/页面 h1/CardTitle）全 sans。
 const geist = Geist({ subsets: ["latin"], variable: "--font-geist" });
 const geistMono = Geist_Mono({ subsets: ["latin"], variable: "--font-geist-mono" });
 const notoSerif = Noto_Serif_SC({
@@ -54,8 +54,6 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
               </div>
             </header>
             <div className="min-h-0 flex-1">{children}</div>
-            {/* 全页胶片颗粒：3% 噪点叠加，质感层（globals.css .grain-overlay） */}
-            <div aria-hidden className="grain-overlay" />
           </TooltipProvider>
         </ThemeProvider>
       </body>

@@ -130,33 +130,32 @@ export function ConfirmCard({
   disabled?: boolean;
 }) {
   return (
-    // 渐变描边（p-px + 内层圆角）让「待确认」卡成为消息流里最亮的一块
-    <div className="rounded-xl bg-gradient-to-br from-primary/50 via-primary/15 to-transparent p-px shadow-sm">
-      <Card className="gap-3 rounded-[11px] border-0 bg-card py-4 shadow-none ring-0">
-        <CardHeader>
-          <CardTitle className="text-sm">
-            待确认 · {pending.label}
-            <span className="ml-2 font-mono text-xs font-normal text-muted-foreground">{pending.tool}</span>
-          </CardTitle>
-        </CardHeader>
-        <CardContent>
-          <dl className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-1 text-sm">
-            {Object.entries(pending.args).map(([k, v]) => (
-              <div key={k} className="col-span-2 grid grid-cols-subgrid">
-                <dt className="text-muted-foreground">{k}</dt>
-                <dd className="break-words font-medium">{v}</dd>
-              </div>
-            ))}
-          </dl>
-        </CardContent>
-        <CardFooter className="gap-2">
-          <Button onClick={onConfirm} disabled={disabled}>{confirmLabel}</Button>
-          <Button variant="outline" onClick={onCancel} disabled={disabled}>
-            取消
-          </Button>
-        </CardFooter>
-      </Card>
-    </div>
+    // 消息流里唯一的高亮块：单层 Card + primary 调 ring（P20 拍平渐变描边套卡，
+    // nested-cards 基线清零）；层级靠 ring/阴影，不靠双容器
+    <Card className="gap-3 rounded-xl py-4 shadow-sm ring-primary/30">
+      <CardHeader>
+        <CardTitle className="text-sm">
+          待确认 · {pending.label}
+          <span className="ml-2 font-mono text-xs font-normal text-muted-foreground">{pending.tool}</span>
+        </CardTitle>
+      </CardHeader>
+      <CardContent>
+        <dl className="grid grid-cols-[auto_1fr] gap-x-6 gap-y-1 text-sm">
+          {Object.entries(pending.args).map(([k, v]) => (
+            <div key={k} className="col-span-2 grid grid-cols-subgrid">
+              <dt className="text-muted-foreground">{k}</dt>
+              <dd className="break-words font-medium">{v}</dd>
+            </div>
+          ))}
+        </dl>
+      </CardContent>
+      <CardFooter className="gap-2">
+        <Button onClick={onConfirm} disabled={disabled}>{confirmLabel}</Button>
+        <Button variant="outline" onClick={onCancel} disabled={disabled}>
+          取消
+        </Button>
+      </CardFooter>
+    </Card>
   );
 }
 

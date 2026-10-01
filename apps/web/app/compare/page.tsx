@@ -178,7 +178,7 @@ export default function Compare() {
       <div className="mx-auto w-full max-w-6xl space-y-5 px-4 py-6">
         <header className="flex flex-wrap items-center gap-3">
           <div className="min-w-0 flex-1">
-            <h1 className="font-display text-xl font-semibold">对比实验台</h1>
+            <h1 className="text-xl font-semibold">对比实验台</h1>
             <p className="text-sm text-muted-foreground">
               同一问题并发两条链路：agent-first 单循环 ↔ 级联路由固定 workflow（论文双底座对照）
             </p>
@@ -279,18 +279,18 @@ export default function Compare() {
                   </TableRow>
                   <TableRow>
                     <TableCell className="font-medium">事件数</TableCell>
-                    <TableCell>{ra.eventCount}</TableCell>
-                    <TableCell>{rb.eventCount}</TableCell>
+                    <TableCell className="tabular-nums">{ra.eventCount}</TableCell>
+                    <TableCell className="tabular-nums">{rb.eventCount}</TableCell>
                   </TableRow>
                   <TableRow>
                     <TableCell className="font-medium">耗时</TableCell>
-                    <TableCell>{ra.latency ?? 0} ms</TableCell>
-                    <TableCell>{rb.latency ?? 0} ms</TableCell>
+                    <TableCell className="tabular-nums">{ra.latency ?? 0} ms</TableCell>
+                    <TableCell className="tabular-nums">{rb.latency ?? 0} ms</TableCell>
                   </TableRow>
                   <TableRow>
                     <TableCell className="font-medium">引用来源</TableCell>
-                    <TableCell>{ra.citations.length} 条</TableCell>
-                    <TableCell>{rb.citations.length} 条</TableCell>
+                    <TableCell className="tabular-nums">{ra.citations.length} 条</TableCell>
+                    <TableCell className="tabular-nums">{rb.citations.length} 条</TableCell>
                   </TableRow>
                 </TableBody>
               </Table>

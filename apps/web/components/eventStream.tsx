@@ -116,7 +116,11 @@ export default function TrackPanel({
         {!round && !busy && <p className="text-sm text-muted-foreground">等待提问…</p>}
         {round && (
           <>
-            <p className="rounded-lg bg-muted px-3 py-2 text-sm font-medium">{round.question}</p>
+            {/* 用户问题平铺：600 字重 + 「问：」前缀，不用 bg-muted 小块容器（嵌套卡基线清零） */}
+            <p className="text-sm leading-relaxed">
+              <span className="text-muted-foreground">问：</span>
+              <span className="font-semibold">{round.question}</span>
+            </p>
             {round.timeline.length > 0 && (
               <ol className="space-y-1.5">
                 {round.timeline.map((item, i) => (

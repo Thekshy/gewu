@@ -3,7 +3,6 @@
 import { useCallback, useEffect, useState } from "react";
 import { CircleAlert, RefreshCw, RotateCcw, Search } from "lucide-react";
 import CountUp from "@/components/CountUp";
-import SpotlightCard from "@/components/SpotlightCard";
 import {
   API_BASE,
   businessReset,
@@ -29,7 +28,7 @@ import {
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card";
 import { Input } from "@/components/ui/input";
 import { Progress } from "@/components/ui/progress";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
@@ -47,14 +46,15 @@ function Panel({
   note?: string;
   children: React.ReactNode;
 }) {
+  // P20：SpotlightCard 退役（radial-spotlight-glow + 裁剪定位子元素两项基线），面板回归素 Card
   return (
-    <SpotlightCard>
+    <Card>
       <CardHeader>
         <CardTitle className="text-sm">{title}</CardTitle>
         {note && <CardDescription>{note}</CardDescription>}
       </CardHeader>
       <CardContent>{children}</CardContent>
-    </SpotlightCard>
+    </Card>
   );
 }
 
@@ -166,7 +166,7 @@ function Ledger() {
       {data && (
         <div className="space-y-4">
           <div className="space-y-1.5">
-            <h3 className="text-xs font-medium text-muted-foreground">场馆预约（{data.bookings.length}）</h3>
+            <p className="text-xs font-medium text-muted-foreground">场馆预约（{data.bookings.length}）</p>
             {data.bookings.length === 0 ? (
               <p className="text-sm text-muted-foreground">暂无预约</p>
             ) : (
@@ -195,7 +195,7 @@ function Ledger() {
             )}
           </div>
           <div className="space-y-1.5">
-            <h3 className="text-xs font-medium text-muted-foreground">请假单（{data.tickets.length}）</h3>
+            <p className="text-xs font-medium text-muted-foreground">请假单（{data.tickets.length}）</p>
             {data.tickets.length === 0 ? (
               <p className="text-sm text-muted-foreground">暂无请假单</p>
             ) : (
@@ -218,7 +218,7 @@ function Ledger() {
                       <TableCell>
                         {t.start} ~ {t.end}
                       </TableCell>
-                      <TableCell>{t.days}</TableCell>
+                      <TableCell className="tabular-nums">{t.days}</TableCell>
                       <TableCell>{t.approver}</TableCell>
                       <TableCell>{t.status}</TableCell>
                     </TableRow>
@@ -291,9 +291,10 @@ function SearchBench() {
         </Alert>
       )}
       {hits && (
-        <ol className="space-y-2.5">
+        // 面板内列表用 divide-y 发丝线分行（operate.md：卡内不套卡）
+        <ol className="divide-y divide-border">
           {hits.map((h, i) => (
-            <li key={`${h.doc_id}-${h.seq}`} className="rounded-xl border bg-card px-3 py-2.5">
+            <li key={`${h.doc_id}-${h.seq}`} className="py-2.5 first:pt-0 last:pb-0">
               <div className="flex flex-wrap items-baseline gap-x-2 text-sm">
                 <span className="font-mono text-xs text-muted-foreground">#{i + 1}</span>
                 <span className="font-medium">{h.title}</span>
@@ -356,7 +357,7 @@ export default function Console() {
     <main className="h-full overflow-y-auto">
       <div className="mx-auto w-full max-w-6xl space-y-5 px-4 py-6">
         <header>
-          <h1 className="font-display text-xl font-semibold">演示控制台</h1>
+          <h1 className="text-xl font-semibold">演示控制台</h1>
           <p className="text-sm text-muted-foreground">
             业务台账 · 检索调试 · 语料 · 服务健康——对话页之外的全部调试入口
           </p>

@@ -226,14 +226,11 @@ export default function Home() {
                 stepDuration={0.3}
                 className="justify-center font-display text-2xl font-semibold leading-snug sm:text-3xl"
               />
-              <motion.p
-                initial={{ opacity: 0 }}
-                animate={{ opacity: 1 }}
-                transition={{ delay: 1.2, duration: 0.5 }}
-                className="max-w-md text-sm text-muted-foreground"
-              >
+              {/* 说明行不做延迟入场（operate.md：产品页不排加载序列，
+                  1.2s delay 会被检测器采样成低对比）；入场时刻只留 BlurText */}
+              <p className="max-w-md text-sm text-muted-foreground">
                 办理类请求会经过：槽位收集 → 确认摘要 → 执行 → 回执；写操作必须确认后才会执行。
-              </motion.p>
+              </p>
             </div>
           )}
 
@@ -316,7 +313,9 @@ export default function Home() {
         </div>
       </section>
 
-      <div className="shrink-0 border-t bg-background">
+      {/* 底部操作带：hairline 分隔即可。bg-background 是画布同色的冗余，
+          且 border-t + bg 组合会被 impeccable 判成 card-like 嵌套（P20 基线） */}
+      <div className="shrink-0 border-t">
         <div className="mx-auto w-full max-w-3xl space-y-2 px-4 py-3">
           <div className="flex flex-wrap gap-2">
             {SUGGESTIONS.map((s) => (

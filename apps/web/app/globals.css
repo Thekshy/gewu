@@ -8,7 +8,9 @@
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
-    --font-heading: var(--font-display);
+    /* P20 Operate 化：font-heading（CardTitle/AlertDialogTitle 等 UI chrome）回归 sans；
+       衬线只留三个内容时刻 + 品牌资产（见 DESIGN.md 衬线域），直接用 font-display 工具类 */
+    --font-heading: var(--font-sans);
     --font-display: var(--font-noto-serif);
     --font-sans: var(--font-geist), "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", ui-sans-serif, system-ui, sans-serif;
     --font-mono: var(--font-geist-mono), ui-monospace, SFMono-Regular, Menlo, monospace;
@@ -52,58 +54,59 @@
     --radius-4xl: calc(var(--radius) * 2.6);
 }
 
-/* P18 暖编辑风色板（契约见仓库根 DESIGN.md）：米白纸感画布 + 暖墨 + 陶土珊瑚主色。
-   纯白/冷青即回退「默认脸」，勿改回。 */
+/* P20 Operate 色板（契约见仓库根 DESIGN.md）：中性纸感画布 + 暖墨 + 陶土珊瑚主色。
+   米白 cream 系已退役（impeccable detect 判 cream-palette = AI 默认高级感），
+   全家族同步降暖保恒温；primary #b5532f 保证白字对比 ≥4.5:1（4.95），勿改浅。 */
 :root {
-    --background: #faf8f3;
+    --background: #f7f7f5;
     --foreground: #1c1a17;
-    --card: #f3efe6;
+    --card: #f1f1ee;
     --card-foreground: #1c1a17;
-    --popover: #fffefa;
+    --popover: #fcfcfa;
     --popover-foreground: #1c1a17;
-    --primary: #bc5b3c;
+    --primary: #b5532f;
     --primary-foreground: #ffffff;
-    --secondary: #f0e9dc;
+    --secondary: #edece8;
     --secondary-foreground: #3d3933;
-    --muted: #f0e9dc;
-    --muted-foreground: #6e675c;
-    --accent: #ece5d6;
+    --muted: #edece8;
+    --muted-foreground: #6b6862;
+    --accent: #e8e7e2;
     --accent-foreground: #1c1a17;
     --destructive: #bf4545;
-    --border: #e6dfd2;
-    --input: #e6dfd2;
-    --ring: #cf9a80;
-    --chart-1: #bc5b3c;
+    --border: #e3e2dd;
+    --input: #e3e2dd;
+    --ring: #c78f74;
+    --chart-1: #b5532f;
     --chart-2: #d9a441;
     --chart-3: #4e8a5a;
-    --chart-4: #8a7a5c;
+    --chart-4: #857a66;
     --chart-5: #5e6b52;
     --radius: 0.75rem;
-    --sidebar: #f3efe6;
+    --sidebar: #f1f1ee;
     --sidebar-foreground: #1c1a17;
-    --sidebar-primary: #bc5b3c;
+    --sidebar-primary: #b5532f;
     --sidebar-primary-foreground: #ffffff;
-    --sidebar-accent: #ece5d6;
+    --sidebar-accent: #e8e7e2;
     --sidebar-accent-foreground: #1c1a17;
-    --sidebar-border: #e6dfd2;
-    --sidebar-ring: #cf9a80;
+    --sidebar-border: #e3e2dd;
+    --sidebar-ring: #c78f74;
 }
 
 .dark {
-    --background: #191713;
-    --foreground: #f2eee3;
-    --card: #221f19;
-    --card-foreground: #f2eee3;
-    --popover: #262219;
-    --popover-foreground: #f2eee3;
+    --background: #181816;
+    --foreground: #f2f0e9;
+    --card: #21201d;
+    --card-foreground: #f2f0e9;
+    --popover: #252421;
+    --popover-foreground: #f2f0e9;
     --primary: #d98a63;
     --primary-foreground: #2b1a10;
-    --secondary: #2a251d;
+    --secondary: #292720;
     --secondary-foreground: #e8e2d4;
-    --muted: #2a251d;
-    --muted-foreground: #a49d8f;
-    --accent: #2e2921;
-    --accent-foreground: #f2eee3;
+    --muted: #292720;
+    --muted-foreground: #a3a096;
+    --accent: #2e2c26;
+    --accent-foreground: #f2f0e9;
     --destructive: #d06b6b;
     --border: oklch(1 0 0 / 9%);
     --input: oklch(1 0 0 / 14%);
@@ -111,14 +114,14 @@
     --chart-1: #d98a63;
     --chart-2: #d9a441;
     --chart-3: #7fae88;
-    --chart-4: #a89a7c;
+    --chart-4: #a39c8a;
     --chart-5: #8a9a7e;
-    --sidebar: #221f19;
-    --sidebar-foreground: #f2eee3;
+    --sidebar: #21201d;
+    --sidebar-foreground: #f2f0e9;
     --sidebar-primary: #d98a63;
     --sidebar-primary-foreground: #2b1a10;
-    --sidebar-accent: #2e2921;
-    --sidebar-accent-foreground: #f2eee3;
+    --sidebar-accent: #2e2c26;
+    --sidebar-accent-foreground: #f2f0e9;
     --sidebar-border: oklch(1 0 0 / 9%);
     --sidebar-ring: #b07a55;
 }
@@ -175,14 +178,4 @@
   );
   background-size: 200% 100%;
   animation: shimmer-sweep 1.5s linear infinite;
-}
-
-/* 全页噪点纹理（胶片颗粒感，叠加在一切之上但不可交互） */
-.grain-overlay {
-  position: fixed;
-  inset: 0;
-  z-index: 60;
-  pointer-events: none;
-  opacity: 0.032;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='160' height='160'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.8' numOctaves='2'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
 }

@@ -1,0 +1,14 @@
+{
+  "detector": {
+    "ignoreRules": [],
+    "ignoreFiles": [],
+    "ignoreValues": [
+      {
+        "rule": "overused-font",
+        "value": "geist",
+        "createdAt": "2026-10-01T05:26:37.289Z",
+        "reason": "Operate 权限：产品 UI 可用熟悉的 sans 默认（DESIGN.md 门禁白名单）；中文正文落系统黑体"
+      }
+    ]
+  }
+}
