@@ -178,7 +178,7 @@ export default function Compare() {
       <div className="mx-auto w-full max-w-6xl space-y-5 px-4 py-6">
         <header className="flex flex-wrap items-center gap-3">
           <div className="min-w-0 flex-1">
-            <h1 className="text-lg font-semibold">对比实验台</h1>
+            <h1 className="font-display text-xl font-semibold">对比实验台</h1>
             <p className="text-sm text-muted-foreground">
               同一问题并发两条链路：级联路由 + 固定 workflow ↔ ReAct 自主组合工具
             </p>
@@ -198,7 +198,7 @@ export default function Compare() {
         </header>
 
         <div className="space-y-2">
-          <div className="flex items-end gap-2 rounded-2xl border bg-card p-2 shadow-xs focus-within:border-ring focus-within:ring-3 focus-within:ring-ring/20">
+          <div className="flex items-end gap-2 rounded-2xl border bg-card p-2 shadow-sm transition-colors focus-within:border-primary/50 focus-within:ring-4 focus-within:ring-primary/10">
             <textarea
               value={input}
               placeholder="输入问题，Enter 同题双发，Shift+Enter 换行"

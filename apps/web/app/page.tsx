@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { useTheme } from "next-themes";
 import { motion } from "motion/react";
 import { Info, Loader2, Send, Sparkles, TriangleAlert } from "lucide-react";
 import {
@@ -19,9 +18,7 @@ import {
   type Step,
 } from "@/lib/api";
 import Answer from "@/components/answer";
-import Aurora from "@/components/Aurora";
 import BlurText from "@/components/BlurText";
-import ClickSpark from "@/components/ClickSpark";
 import {
   CitationsRow,
   ConfirmCard,
@@ -34,7 +31,6 @@ import {
   TypingDots,
 } from "@/components/message-parts";
 import { Alert, AlertDescription } from "@/components/ui/alert";
-import { BorderBeam } from "@/components/ui/border-beam";
 import { Button } from "@/components/ui/button";
 import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
@@ -79,7 +75,6 @@ export default function Home() {
   const [role, setRole] = useState<Role>("student");
   const [sending, setSending] = useState(false);
   const [health, setHealth] = useState<HealthInfo | null>(null);
-  const { resolvedTheme } = useTheme();
   const bottomRef = useRef<HTMLDivElement>(null);
   const sessionId = useRef<string>(
     typeof crypto !== "undefined" && crypto.randomUUID ? crypto.randomUUID() : `s-${Date.now()}`,
@@ -185,10 +180,10 @@ export default function Home() {
 
   return (
     <main className="relative flex h-full flex-col">
-      {/* 环境光：全程存在的顶部氛围（渐变光斑 + 微点阵），不只空态才有 */}
+      {/* 环境光：画布顶部的暖色氛围（陶土/琥珀光斑 + 微点阵），编辑式纸感的呼吸（DESIGN.md empty-state） */}
       <div aria-hidden className="pointer-events-none absolute inset-x-0 top-0 -z-10 h-96 overflow-hidden">
-        <div className="absolute -top-24 left-1/4 size-96 rounded-full bg-primary/10 blur-3xl dark:bg-primary/15" />
-        <div className="absolute -top-10 right-1/4 size-72 rounded-full bg-indigo-400/10 blur-3xl dark:bg-indigo-400/15" />
+        <div className="absolute -top-24 left-1/4 size-96 rounded-full bg-primary/[0.07] blur-3xl dark:bg-primary/10" />
+        <div className="absolute -top-10 right-1/4 size-72 rounded-full bg-amber-400/[0.07] blur-3xl dark:bg-amber-400/10" />
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_1px_1px,var(--color-foreground)_1px,transparent_0)] bg-[size:22px_22px] opacity-[0.05] [mask-image:radial-gradient(70%_60%_at_50%_0%,black,transparent)] dark:opacity-[0.07]" />
       </div>
       {health && !health.llm && (
@@ -213,21 +208,13 @@ export default function Home() {
       <section aria-label="对话区" aria-live="polite" aria-atomic="false" className="min-h-0 flex-1 overflow-y-auto">
         <div className="mx-auto w-full max-w-3xl space-y-4 px-4 py-6">
           {messages.length === 0 && (
-            <div className="relative flex min-h-[65vh] flex-col items-center justify-center gap-3 text-center">
-              <div className="absolute inset-0 -z-10 opacity-70 [mask-image:radial-gradient(ellipse_65%_55%_at_50%_45%,black_25%,transparent_78%)]">
-                <Aurora
-                  colorStops={["#22d3ee", "#0e7490", "#818cf8"]}
-                  amplitude={0.8}
-                  blend={0.6}
-                  speed={0.45}
-                  lightMode={resolvedTheme !== "dark"}
-                />
-              </div>
+            <div className="relative flex min-h-[65vh] flex-col items-center justify-center gap-4 text-center">
+              {/* 空态：编辑式排版——衬线大标语直接铺在画布上，无卡片（DESIGN.md empty-state） */}
               <motion.div
                 initial={{ opacity: 0, scale: 0.85 }}
                 animate={{ opacity: 1, scale: 1 }}
                 transition={{ duration: 0.45, ease: "easeOut" }}
-                className="flex size-14 items-center justify-center rounded-2xl bg-gradient-to-br from-cyan-600 to-teal-700 text-2xl font-semibold text-white shadow-md"
+                className="flex size-16 items-center justify-center rounded-xl bg-primary font-display text-3xl font-semibold text-primary-foreground shadow-md"
                 aria-hidden
               >
                 格
@@ -237,7 +224,7 @@ export default function Home() {
                 animateBy="letters"
                 delay={55}
                 stepDuration={0.3}
-                className="justify-center text-lg font-medium leading-relaxed"
+                className="justify-center font-display text-2xl font-semibold leading-snug sm:text-3xl"
               />
               <motion.p
                 initial={{ opacity: 0 }}
@@ -259,7 +246,8 @@ export default function Home() {
                 transition={{ duration: 0.25, ease: "easeOut" }}
                 className="flex justify-end"
               >
-                <div className="max-w-[85%] rounded-2xl rounded-br-sm bg-[image:linear-gradient(140deg,var(--color-cyan-600),var(--color-teal-700))] px-4 py-2.5 text-sm leading-relaxed text-white shadow-sm shadow-cyan-700/20">
+                {/* 用户消息：安静色块，无渐变无描边（DESIGN.md user-message） */}
+                <div className="max-w-[85%] rounded-2xl rounded-br-sm bg-secondary px-4 py-2.5 text-sm leading-relaxed text-secondary-foreground">
                   {msg.text}
                 </div>
               </motion.div>
@@ -272,16 +260,14 @@ export default function Home() {
                 className="flex items-start gap-2.5"
               >
                 <div
-                  className="mt-0.5 flex size-7 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary"
+                  className="mt-1 flex size-7 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary"
                   aria-hidden
                 >
                   <Sparkles className="size-4" />
                 </div>
-                <div className="relative min-w-0 flex-1 space-y-2.5 rounded-2xl rounded-tl-sm bg-card/85 px-4 py-3 shadow-sm shadow-foreground/5 ring-1 ring-foreground/10 backdrop-blur-sm">
-                  {/* 生成中：边框流光（Magic UI BorderBeam），完成即卸载 */}
-                  {!msg.done && (
-                    <BorderBeam size={60} duration={5} colorFrom="#22d3ee" colorTo="#6366f1" />
-                  )}
+                {/* assistant 回答无气泡无卡片，直接铺在画布上（DESIGN.md assistant-message）；
+                    层级交给 RouteBadge/trace/引用行与 ConfirmCard 唯一高亮块 */}
+                <div className="min-w-0 flex-1 space-y-2.5 py-0.5">
                   <div className="flex flex-wrap items-center gap-2">
                     {msg.route && <RouteBadge route={msg.route} reason={msg.reason} />}
                   </div>
@@ -344,7 +330,8 @@ export default function Home() {
               </button>
             ))}
           </div>
-          <div className="flex items-end gap-2 rounded-2xl border bg-card/80 p-2 shadow-lg shadow-foreground/5 backdrop-blur-md transition-colors focus-within:border-primary/40 focus-within:ring-4 focus-within:ring-primary/10">
+          {/* composer：hairline 卡 + 主色 focus 环，实心主色发送钮（DESIGN.md composer） */}
+          <div className="flex items-end gap-2 rounded-2xl border bg-card p-2 shadow-sm transition-colors focus-within:border-primary/50 focus-within:ring-4 focus-within:ring-primary/10">
             <Select value={role} onValueChange={(v) => setRole(v as Role)}>
               <SelectTrigger className="h-9 w-27 shrink-0" aria-label="演示身份（权限不同）">
                 <SelectValue>{ROLE_OPTIONS.find((o) => o.value === role)?.label}</SelectValue>
@@ -383,16 +370,10 @@ export default function Home() {
               }}
             />
             <div className="shrink-0">
-              <ClickSpark sparkColor="#ffffff" sparkCount={8} duration={500}>
-                <Button
-                  onClick={() => send()}
-                  disabled={sending || !input.trim()}
-                  className="h-9 bg-[image:linear-gradient(140deg,var(--color-cyan-500),var(--color-teal-600))] text-white shadow-md shadow-cyan-600/25 transition-all hover:bg-[image:linear-gradient(140deg,var(--color-cyan-400),var(--color-teal-500))] hover:shadow-lg hover:shadow-cyan-600/30"
-                >
-                  {sending ? <Loader2 className="animate-spin" aria-hidden /> : <Send aria-hidden />}
-                  {sending ? "处理中…" : "发送"}
-                </Button>
-              </ClickSpark>
+              <Button onClick={() => send()} disabled={sending || !input.trim()} className="h-9">
+                {sending ? <Loader2 className="animate-spin" aria-hidden /> : <Send aria-hidden />}
+                {sending ? "处理中…" : "发送"}
+              </Button>
             </div>
           </div>
         </div>

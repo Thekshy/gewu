@@ -99,10 +99,7 @@ function Health({ health }: { health: HealthInfo | null }) {
           {health.budget.limit.toLocaleString()}
           <span className="ml-2 tabular-nums">{pct.toFixed(1)}%</span>
         </p>
-        <Progress
-          value={pct}
-          className="max-w-sm [&_[data-slot=progress-indicator]]:bg-gradient-to-r [&_[data-slot=progress-indicator]]:from-cyan-500 [&_[data-slot=progress-indicator]]:to-teal-500"
-        />
+        <Progress value={pct} className="max-w-sm [&_[data-slot=progress-indicator]]:bg-primary" />
       </div>
     </div>
   );
@@ -359,7 +356,7 @@ export default function Console() {
     <main className="h-full overflow-y-auto">
       <div className="mx-auto w-full max-w-6xl space-y-5 px-4 py-6">
         <header>
-          <h1 className="text-lg font-semibold">演示控制台</h1>
+          <h1 className="font-display text-xl font-semibold">演示控制台</h1>
           <p className="text-sm text-muted-foreground">
             业务台账 · 检索调试 · 语料 · 服务健康——对话页之外的全部调试入口
           </p>
