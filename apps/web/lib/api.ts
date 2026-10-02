@@ -126,14 +126,19 @@ async function detailOf(res: Response): Promise<string> {
 
 // ---------- 认证（P21） ----------
 
+/** 登录态变更广播（login/register 成功后 dispatch）：各 useUser 实例监听重拉。
+ *  Nav 在 layout 不随客户端导航 remount，没有它右上角会停留在旧的未登录态。 */
+export const AUTH_CHANGED_EVENT = "gewu:auth";
+
+function broadcastAuthChanged() {
+  if (typeof window !== "undefined") window.dispatchEvent(new Event(AUTH_CHANGED_EVENT));
+}
+
 export async function fetchMe(): Promise<User | null> {
-  try {
-    const res = await fetch(`${API_BASE}/api/auth/me`);
-    if (!res.ok) return null;
-    return (await res.json()) as User;
-  } catch {
-    return null;
-  }
+  const res = await fetch(`${API_BASE}/api/auth/me`);
+  if (res.status === 401) return null; // 确认未登录
+  if (!res.ok) throw new Error(`HTTP ${res.status}`); // 429/5xx 是临时失败，不能当未登录
+  return (await res.json()) as User;
 }
 
 export async function login(email: string, password: string): Promise<User> {
@@ -143,6 +148,7 @@ export async function login(email: string, password: string): Promise<User> {
     body: JSON.stringify({ email, password }),
   });
   if (!res.ok) throw new Error(await detailOf(res));
+  broadcastAuthChanged();
   return (await res.json()) as User;
 }
 
@@ -157,6 +163,7 @@ export async function register(
     body: JSON.stringify({ email, password, invite_code: inviteCode }),
   });
   if (!res.ok) throw new Error(await detailOf(res));
+  broadcastAuthChanged();
   return (await res.json()) as User;
 }
 
