@@ -167,17 +167,14 @@ def test_classic_mode_still_routes_via_cascade(tmp_path, biz):
 
 
 def test_guard_block_short_circuits_in_graph(tmp_path, biz):
-    """guard 在图内生效：block 时模型零调用，直接吐 GUARD_BLOCK_ANSWER（P28 新话术）。"""
+    """guard 在图内生效：危险词命中即 block，模型零调用（P31-1 关键词闸）。"""
     from gewu.agent.prompts import GUARD_BLOCK_ANSWER
 
     script = []  # 模型不应被调用（脚本为空，一旦调用会返回空 content 导致断言失败）
-    settings_llm = FakeAgentLLM(
-        chat_replies=['{"decision":"block","intent":"refusal","reply":""}'], has_key=True
-    )
+    settings_llm = FakeAgentLLM(script=script, has_key=True)
     settings = Settings(llm_api_key="k", embed_api_key="e", data_dir=tmp_path)
     retriever = FakeRetriever([make_hit()])
     business = biz
-    settings_llm._script = script
     agent = build_agent(settings, settings_llm, retriever, business, tools_for())
     graph = build_graph(
         settings,
@@ -192,13 +189,10 @@ def test_guard_block_short_circuits_in_graph(tmp_path, biz):
     assert "refusal" in _routes(events)
 
 
-def test_guard_meta_answers_directly_in_graph(tmp_path, biz):
-    llm = FakeAgentLLM(
-        chat_replies=[
-            '{"decision":"meta","intent":"chitchat","reply":"嗨！我可以帮你查政策、约场馆。"}'
-        ],
-        has_key=True,
-    )
+def test_soft_chitchat_goes_to_main_loop(tmp_path, biz):
+    """P31-1：GREETING_RE 未覆盖的软寒暄不再有 meta 出口，放行交主循环自然回答
+    （chitchat 徽章由 effective route 事后合成补发）。"""
+    llm = FakeAgentLLM(script=[_ai_text("嗨！我是校园助手格物，可以帮你查政策、约场馆、办请假。")])
     settings = Settings(llm_api_key="k", embed_api_key="e", data_dir=tmp_path)
     retriever = FakeRetriever([make_hit()])
     business = biz
@@ -207,7 +201,7 @@ def test_guard_meta_answers_directly_in_graph(tmp_path, biz):
         settings, retriever, llm, business=business, checkpointer=MemorySaver(), agent=agent
     )
     events = run_turn(graph, "g2", question="早安呀同学")
-    assert "约场馆" in _answer(events)
+    assert "格物" in _answer(events)
     assert "chitchat" in _routes(events)
 
 

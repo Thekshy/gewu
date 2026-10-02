@@ -1,14 +1,17 @@
-"""GuardMiddleware：agent-first 链路的入口安检（P17-1；P28 口径收窄）。
+"""GuardMiddleware：agent-first 链路的入口安检（P17-1；P28 收窄；P31-1 退码闸）。
 
-设计对照 chat-langchain guardrails_prompts（lenient 三原则）：
-默认放行 / greetings·身份·能力一律放行 / 拿不准放行 / fail-open。
-纯问候走正则快路径（零 LLM，直接放行进主循环自然寒暄）；
-LLM 判定输出 allow|meta|block：meta（软寒暄）就地直答短路收尾；
-block 自 P28 起**只拦内容安全**（危险/违法违规/学术不端），范围外的合法
-问题（行情/影评/赛事/写邮件）放行交主循环联网或通用知识尽力答——与
-AGENT_SYSTEM 第 9 条同一堵墙（P26 通用化对齐；旧「高置信范围外即拦」
-废止，两次线上实证 guard 判定非确定会把校外首触变掷骰子）。话术用
-GUARD_BLOCK_ANSWER，classic 的 REFUSAL_ANSWER（范围外口径）保持基线零改动。
+设计对照 chat-langchain guardrails（lenient 三原则）：默认放行 /
+greetings·身份·能力一律放行 / 拿不准放行。P31-1 拍板（§0 Q3/Q4）：guard 全链
+退关键词码闸——P28 收窄后 LLM 分类的净收益 ≈ 拦变体危险话术，代价 = 首问
+串行一跳 + flash 判定非确定（两次线上实证的掷骰子问题）。三分支：
+
+  in_conversation → 直通 allow（会话感知：上下文判断交主循环）；
+  GREETING_RE 命中 → allow + provisional route=chitchat（零成本徽章早亮）；
+  DANGER_RE 命中 → block（GUARD_BLOCK_ANSWER + route=refusal + jump_to=end）。
+
+其余一律放行：软寒暄/能力问交主循环自然回答（一次主模型调用，质量优于
+flash 生成的 reply），meta 出口随 LLM 判定删除。拦截纵深 = 关键词硬红线 +
+prompt 墙（AGENT_SYSTEM 第 9 条）+ HITL 代码闸。
 """
 
 from __future__ import annotations
@@ -22,30 +25,26 @@ from langchain_core.messages import AIMessage, HumanMessage
 from gewu.agent import events as ev
 from gewu.agent.emitter import emit
 from gewu.agent.prompts import GUARD_BLOCK_ANSWER
-from gewu.jsonx import json_str, parse_json_object
 
-# 纯问候/身份问（整句匹配，零 LLM 快路径）——放行进主循环，由模型自然寒暄。
+# 纯问候/身份问（整句匹配，零成本快路径）——放行进主循环，由模型自然寒暄。
 GREETING_RE = re.compile(
     r"^(你好|您好|嗨|哈喽|hi|hello|hey|早上好|上午好|下午好|晚上好|晚安|在吗|"
     r"谢谢|多谢|辛苦了|再见|拜拜|你是谁|你叫什么|你能[帮]?做什么|你能干什么|"
     r"你可以做什么|你都会什么|怎么用|怎么玩)[呀啊哈哦~！!。．，,？?\s]*$"
 )
 
-GUARD_SYSTEM = """你是校园助手「格物」的输入安检器。只拦内容安全，不管话题范围——范围外的合法问题（时事/行情/影评/赛事/写邮件）会由主循环联网检索或用通用知识尽力回答，一律 allow。
-
-判断原则（重要，逐条遵守）：
-1. block 仅限明显有害或违规：违法违规（制毒/黑客攻击/诈骗）、学术不端（代写论文或作业、考试作弊方法）、色情暴力、自伤或教唆伤害、其他明显不当请求；
-2. 以下一律放行：问候寒暄、询问助手身份或能力、对上一轮的追问补充、校园政策与业务办理，以及一切内容安全无虞的校外问题（问比赛结果、问股票行情、求推荐电影、请帮忙写信均属此类）；
-3. 拿不准时放行——误拒的代价远大于漏放；
-4. 校园语境的敏感咨询（心理咨询/申诉求助）绝不拦，放行交主循环。
-
-输出 JSON：{"decision":"allow|meta|block","intent":"factual|research|transaction|hybrid|chitchat|refusal","reply":"..."}
-- meta：纯寒暄/问候/问能力（无需任何工具就能回应）——reply 必填，以友好校园助手口吻直接回复（可顺带介绍：能查政策、能约场馆、能办请假）；
-- block：危险/违法违规/学术不端（如代写论文、作弊方法、违法咨询）——reply 留空；
-- allow：其余全部——reply 留空，intent 尽力给。
-只输出 JSON。"""
-
-_GUARD_INTENTS = {"factual", "research", "transaction", "hybrid", "chitchat", "refusal"}
+# 危险/违规硬红线词表（§0 Q4 首版：制毒/黑客/诈骗/代写/作弊核心词，求正确
+# 与零成本不求召回——漏放的爆炸半径被 prompt 墙 + HITL 兜底；词表丰富化挂账
+# 独立小票）。黑客/诈骗用实施性复合词（受害者求助「我被骗了」与防范咨询
+# 「怎么防诈骗」不误拦）；代写/作弊挂实施性后缀（处分/认定等政策咨询不误拦）。
+DANGER_RE = re.compile(
+    r"制毒|冰毒|摇头丸|(制作|制造|提炼)毒品|毒品(制作|制造|配方|提炼)"
+    r"|黑客(攻击|入侵|教程)|入侵(系统|服务器|网站|电脑|他人|别人|学校)"
+    r"|木马(程序|病毒)|DDoS|ddos"
+    r"|诈骗(话术|剧本|教程|技巧|套路)|洗钱"
+    r"|代写.{0,6}(论文|作业|毕业|报告|查重)|论文代写|代考|替考"
+    r"|作弊.{0,8}(方法|技巧|手段|器|教程|不被发现|蒙混|混过|逃过|骗过)"
+)
 
 
 def last_human_text(messages: list) -> str:
@@ -63,39 +62,11 @@ def last_human_text(messages: list) -> str:
     return ""
 
 
-def classify_guard(llm, question: str) -> dict[str, Any]:
-    """LLM 安检判定；无 key/异常/解析失败一律 fail-open 返回 allow。"""
-    fail = {"decision": "allow", "intent": "", "reply": ""}
-    if llm is None or not llm.has_key():
-        return fail
-    try:
-        raw = llm.chat(
-            [("system", GUARD_SYSTEM), ("user", question)],
-            json_mode=True,
-            small=True,
-            max_tokens=200,
-        )
-        obj = parse_json_object(raw)
-    except Exception as e:  # noqa: BLE001 - fail-open：安检挂了不放行反而拒绝服务
-        print(f"[guard] 安检调用失败，放行：{e}")
-        return fail
-    decision = json_str(obj, "decision")
-    if decision not in ("allow", "meta", "block"):
-        return fail
-    intent = json_str(obj, "intent")
-    if intent not in _GUARD_INTENTS:
-        intent = ""
-    reply = json_str(obj, "reply")[:500]
-    if decision == "meta" and not reply.strip():
-        decision = "allow"  # meta 必须带话，缺话降级放行交主循环
-    return {"decision": decision, "intent": intent, "reply": reply}
-
-
-def guard_update(llm, question: str, in_conversation: bool = False) -> dict[str, Any] | None:
+def guard_update(question: str, in_conversation: bool = False) -> dict[str, Any] | None:
     """安检判定 → 状态更新（纯逻辑，钩子与单测共用）。
 
     会话感知（chat-langchain "NOT a follow-up" 条款）：对话已在进行中
-    （历史存在 AI 消息，如办理槽位收集的短回复轮）时只放行不分类——
+    （历史存在 AI 消息，如办理槽位收集的短回复轮）时只放行不安检——
     上下文判断交给主循环；guard 只负责首轮触达的范围安检。
     """
     if not question:
@@ -103,47 +74,30 @@ def guard_update(llm, question: str, in_conversation: bool = False) -> dict[str,
     if in_conversation:
         return {"guard_action": "allow"}
 
-    # 快路径：纯问候零 LLM 放行（寒暄由主循环一次调用自然生成，不吐静态话术）
+    # 快路径：纯问候放行（寒暄由主循环一次调用自然生成，不吐静态话术）
     if GREETING_RE.match(question.strip()):
         emit(_provisional("chitchat", "正则快路径：纯问候放行", by_llm=False))
         return {"guard_action": "allow"}
 
-    verdict = classify_guard(llm, question)
-    decision = verdict["decision"]
-    if decision == "allow":
-        if verdict["intent"]:
-            emit(_provisional(verdict["intent"], "guard：放行", by_llm=True))
-        return {"guard_action": "allow"}
-    if decision == "block":
-        emit(_provisional("refusal", "guard：危险/违规内容", by_llm=True))
+    # 硬红线：危险/违规关键词命中即拦（话术沿用 P28，不新造）
+    if DANGER_RE.search(question):
+        emit(_provisional("refusal", "guard：危险/违规内容", by_llm=False))
         return {
             "guard_action": "block",
             "jump_to": "end",
             "messages": [AIMessage(content=GUARD_BLOCK_ANSWER)],
         }
-    # meta：就地直答（answer 事件由外壳 agent_done 统一发射，这里只注入消息）
-    if verdict["intent"] == "":
-        verdict["intent"] = "chitchat"
-    emit(_provisional(verdict["intent"], "guard：寒暄就地直答", by_llm=True))
-    return {
-        "guard_action": "meta",
-        "jump_to": "end",
-        "messages": [AIMessage(content=verdict["reply"])],
-    }
+    return {"guard_action": "allow"}
 
 
 class GuardMiddleware(AgentMiddleware):
-    """入口安检中间件：before_agent 钩子，block/meta 时 jump_to=end 短路。"""
-
-    def __init__(self, llm) -> None:
-        super().__init__()
-        self._llm = llm
+    """入口安检中间件：before_agent 钩子，block 时 jump_to=end 短路。"""
 
     @hook_config(can_jump_to=["end"])
     def before_agent(self, state, runtime) -> dict[str, Any] | None:
         msgs = state.get("messages") or []
         in_conversation = any(isinstance(m, AIMessage) for m in msgs[:-1])
-        return guard_update(self._llm, last_human_text(msgs), in_conversation)
+        return guard_update(last_human_text(msgs), in_conversation)
 
 
 def _provisional(route: str, reason: str, *, by_llm: bool) -> dict:

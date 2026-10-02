@@ -6,7 +6,7 @@ classic 分支保持手写图不动（对照组双底座叙事）。中间件栈
 
     ToolTraceMiddleware        wrap_tool_call：工具观测接缝（P27，栈最外层——
                                所有工具含被拦截调用自动落 span，新工具零观测成本）
-    GuardMiddleware            before_agent：lenient 安检，block/meta jump_to=end
+    GuardMiddleware            before_agent：lenient 安检（P31-1 关键词闸），block jump_to=end
     ModelCallLimitMiddleware   wrap_model_call：轮次上限（REACT_MAX_TURNS 等价）
     TruncationDefenseMiddleware wrap_model_call：P10 截断防御（Pi 式回填重调）
     UsageRecordMiddleware      wrap_model_call：token 记账（预算闸口径统一；P27 兼任 llm span）
@@ -86,7 +86,7 @@ def build_agent(settings, llm, retriever, business, tools: dict, web=None):
     query_guard = SearchQueryGuardMiddleware()
     stack = [
         ToolTraceMiddleware(),  # 列表首位=wrap 最外层：拦截短路的调用也留痕
-        GuardMiddleware(llm),
+        GuardMiddleware(),
         ModelCallLimitMiddleware(run_limit=AGENT_MAX_TURNS),
         TruncationDefenseMiddleware(),
         UsageRecordMiddleware(llm),

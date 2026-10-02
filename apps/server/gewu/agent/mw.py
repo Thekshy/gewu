@@ -72,7 +72,7 @@ class GewuAgentState(AgentState):
     user: NotRequired[str]
     mem_block: NotRequired[str]
     citations: NotRequired[Annotated[list, _merge_citations]]
-    guard_action: NotRequired[Annotated[str, PrivateStateAttr]]  # allow|meta|block（本轮）
+    guard_action: NotRequired[Annotated[str, PrivateStateAttr]]  # allow|block（本轮）
     # P30：最终轮流式已发文本（外壳 ChatState 同名字段接住，agent_done 防重读）
     answer_streamed: NotRequired[str]
 
@@ -435,10 +435,10 @@ class PendingActionMiddleware(AgentMiddleware):
 
 
 class RouteEventMiddleware(AgentMiddleware):
-    """after_agent 合成 effective route 事件（两段式第二段；guard block/meta 已发过）。"""
+    """after_agent 合成 effective route 事件（两段式第二段；guard block 已发过）。"""
 
     def after_agent(self, state, runtime) -> dict[str, Any] | None:
-        if state.get("guard_action") in ("block", "meta"):
+        if state.get("guard_action") == "block":
             return None
         route, reason = effective_route(state.get("messages") or [])
         emit(
