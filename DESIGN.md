@@ -25,10 +25,11 @@ colors:
   body: "#2e3746"               # 正文
   muted: "#5a6572"              # 次级文本
   muted-soft: "#7c8590"         # 说明/脚注
-  hairline: "#d8dde8"           # 1px 冷调边线
-  canvas: "#fafbfd"             # 画布（冷调近白，非纯白非暖纸）
-  surface-card: "#f2f4f8"       # 卡片（比画布深一档）
-  surface-strong: "#e8ebf1"     # 更强一档（选中 tab / 强调带）
+  hairline: "#e4e7ec"           # 1px 边线（P35 提浅一档适配纯白画布）
+  canvas: "#ffffff"             # 画布（P35 america.gov 式纯白——原冷调近白 #fafbfd
+                               # 显闷退役；暗色不动）
+  surface-card: "#f6f7f9"       # 卡片（比画布深一档）
+  surface-strong: "#edeff3"     # 更强一档（选中 tab / 强调带）
   surface-user: "#1a3a5c"       # 用户消息 = primary 实底（P25 起，america.gov 同款）
   accent-amber: "#c08a2d"       # 警示/高亮小面积（冷化琥珀）
   success: "#2e7d4f"            # 回执成功（冷调绿）
@@ -88,12 +89,20 @@ kit-规则:
   不用小卡容器（craft-floor：cards are the lazy container）。
 
 components:
+  app-shell:
+    **P35 拍板（10-03，用户反馈「整体还是差不多」后的骨架重构）**：
+    chat 页 chrome-less——无全站顶栏，品牌/视图导航（NavColumn 竖列）/登录态/
+    主题切换全部并入左侧 app 侧栏（w-65、bg-sidebar 色差分层、无 border-r——
+    Linear/ChatGPT 式「无边框靠色差」）；移动端=sticky 细顶条（品牌+菜单钮）
+    +抽屉（品牌+导航+会话）。工具页（console/memory/admin/login）=44px 细顶栏
+    （AppHeader 条件渲染：pathname==="/" 返回 null）——拨盘分层：品牌时刻
+    极简、工具页保工具导航。对话区顶部留白 pt-10（顶栏退役后消息流呼吸）。
   top-nav:
-    高 52px，canvas 底 + hairline 下边线；左侧品牌（衬线「格」方印 + 衬线「格物」字标），
-    中部三视图 pill 导航（active = surface-strong 底 + ink 字），右侧主题切换。
-    导航项带 hover 与 aria-current，focus 走全局 outline-ring。
+    （P35 退役，留档）原 52px 全站厚顶栏——品牌+横排 pill 导航+右侧登录态。
   brand-mark:
-    衬线「格」字方印：primary 底 + on-primary 字 + rounded-md + 微阴影。
+    衬线「格」字方印：primary 底 + on-primary 字 + rounded-md + 微阴影；
+    出现位=chat 侧栏顶（size-7）/工具页细顶栏（size-6）/移动顶条与抽屉
+    （size-6/7）/空态（size-20）。
   empty-state:
     65vh 居中：方印 logo（P34 放大 size-20 / text-4xl，scale 0.85→1 入场）→
     衬线大标语（display-lg 48px / tracking -0.01em，BlurText 逐字入场）→

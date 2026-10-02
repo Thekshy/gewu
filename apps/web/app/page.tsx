@@ -1,5 +1,6 @@
 "use client";
 
+import Link from "next/link";
 import { useEffect, useRef, useState } from "react";
 import { motion } from "motion/react";
 import {
@@ -38,6 +39,9 @@ import {
 } from "@/lib/api";
 import { useRequireUser } from "@/lib/auth";
 import { ROLE_LABEL } from "@/lib/labels";
+import { NavColumn } from "@/components/nav";
+import ThemeToggle from "@/components/theme-toggle";
+import UserMenu from "@/components/user-menu";
 import Answer from "@/components/answer";
 import BlurText from "@/components/BlurText";
 import SessionList from "@/components/session-list";
@@ -410,9 +414,31 @@ export default function Home() {
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_1px_1px,var(--color-foreground)_1px,transparent_0)] bg-[size:22px_22px] opacity-[0.05] [mask-image:radial-gradient(70%_60%_at_50%_0%,black,transparent)] dark:opacity-[0.07]" />
       </div>
 
-      {/* P22 双栏：桌面左栏 260px 常驻侧栏（导航 chrome，hairline 分隔） */}
+      {/* P35 app-shell：chat 页 chrome-less——品牌/视图导航/登录态全部并入左侧栏
+          （Claude.ai/ChatGPT 形态），内容区顶天立地；工具页顶栏由 AppHeader 条件渲染 */}
       <div className="flex min-h-0 flex-1">
-        <aside className="hidden w-65 shrink-0 flex-col border-r md:flex">{sessionList}</aside>
+        <aside className="hidden w-65 shrink-0 flex-col bg-sidebar md:flex">
+          <div className="flex h-13 shrink-0 items-center gap-2.5 px-4">
+            <Link href="/" className="flex items-center gap-2.5">
+              <span
+                className="flex size-7 items-center justify-center rounded-md bg-primary font-display text-sm font-semibold text-primary-foreground shadow-sm"
+                aria-hidden
+              >
+                格
+              </span>
+              <span className="font-display text-[15px] font-semibold">格物</span>
+              <span className="hidden text-xs text-muted-foreground lg:inline">校园智能问答</span>
+            </Link>
+          </div>
+          <div className="px-2 pt-1">
+            <NavColumn />
+          </div>
+          <div className="min-h-0 flex-1">{sessionList}</div>
+          <div className="flex shrink-0 items-center justify-between gap-2 border-t px-3 py-2">
+            <UserMenu />
+            <ThemeToggle />
+          </div>
+        </aside>
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
           {health && !health.llm && (
             <div className="mx-auto w-full max-w-3xl space-y-2 px-4 pt-3">
@@ -452,19 +478,27 @@ export default function Home() {
             aria-atomic="false"
             className="min-h-0 flex-1 overflow-y-auto"
           >
-            {/* 移动端会话入口：sticky 窄条（桌面侧栏隐藏时才出现） */}
-            <div className="sticky top-0 z-10 bg-background/80 px-4 py-2 backdrop-blur md:hidden">
+            {/* 移动端顶条（P35 app-shell）：品牌 + 菜单入口，桌面侧栏隐藏时才出现 */}
+            <div className="sticky top-0 z-10 flex items-center justify-between bg-background/80 px-4 py-2 backdrop-blur md:hidden">
+              <Link href="/" className="flex items-center gap-2">
+                <span
+                  className="flex size-6 items-center justify-center rounded-md bg-primary font-display text-xs font-semibold text-primary-foreground"
+                  aria-hidden
+                >
+                  格
+                </span>
+                <span className="font-display text-sm font-semibold">格物</span>
+              </Link>
               <Button
-                variant="outline"
-                size="sm"
+                variant="ghost"
+                size="icon-sm"
+                aria-label="打开菜单"
                 onClick={() => setDrawerOpen(true)}
-                className="gap-1.5"
               >
                 <PanelLeft className="size-4" aria-hidden />
-                会话
               </Button>
             </div>
-            <div className="mx-auto w-full max-w-3xl space-y-5 px-4 py-6">
+            <div className="mx-auto w-full max-w-3xl space-y-5 px-4 pb-6 pt-10">
               {messages.length === 0 && (
                 <div className="relative flex min-h-[65vh] flex-col items-center justify-center gap-5 text-center">
                   {/* 空态：编辑式排版——衬线大标语直接铺在画布上，无卡片（DESIGN.md empty-state） */}
@@ -640,14 +674,14 @@ export default function Home() {
           {/* 底部操作带：hairline 分隔即可。bg-background 是画布同色的冗余，
               且 border-t + bg 组合会被 impeccable 判成 card-like 嵌套（P20 基线） */}
           <div className="shrink-0 border-t">
-            <div className="mx-auto w-full max-w-3xl space-y-3 px-4 py-4">
+            <div className="mx-auto w-full max-w-3xl space-y-4 px-4 py-4">
               <div className="flex flex-wrap gap-2">
                 {TASK_CARDS.map((t) => (
                   <button
                     key={t.title}
                     onClick={() => send(t.q)}
                     disabled={sending || !currentSession}
-                    className="flex items-center gap-2.5 rounded-xl border bg-card px-3.5 py-2.5 text-left transition-[border-color,box-shadow] duration-150 ease-out-expo hover:border-primary/40 hover:shadow-sm disabled:pointer-events-none disabled:opacity-50"
+                    className="flex items-center gap-2.5 rounded-xl border border-input bg-card px-3.5 py-2.5 text-left transition-[border-color,box-shadow] duration-150 ease-out-expo hover:border-primary/40 hover:shadow-sm disabled:pointer-events-none disabled:opacity-50"
                   >
                     <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
                       <t.icon className="size-4" aria-hidden />
@@ -716,22 +750,39 @@ export default function Home() {
             aria-hidden
           />
           <aside
-            className="fixed inset-y-0 left-0 z-50 flex w-72 flex-col border-r bg-background md:hidden"
+            className="fixed inset-y-0 left-0 z-50 flex w-72 flex-col bg-sidebar md:hidden"
             role="dialog"
-            aria-label="会话列表"
+            aria-label="导航与会话列表"
           >
-            <div className="flex h-13 shrink-0 items-center justify-between border-b px-3">
-              <span className="text-sm font-semibold">历史会话</span>
+            <div className="flex h-13 shrink-0 items-center justify-between px-3">
+              <span className="flex items-center gap-2">
+                <span
+                  className="flex size-7 items-center justify-center rounded-md bg-primary font-display text-sm font-semibold text-primary-foreground"
+                  aria-hidden
+                >
+                  格
+                </span>
+                <span className="font-display text-[15px] font-semibold">格物</span>
+              </span>
               <Button
                 variant="ghost"
                 size="icon"
                 onClick={() => setDrawerOpen(false)}
-                aria-label="关闭会话列表"
+                aria-label="关闭菜单"
               >
                 <X className="size-4" aria-hidden />
               </Button>
             </div>
-            {sessionList}
+            <div className="px-2 pt-1">
+              <NavColumn />
+            </div>
+            <div className="flex items-center justify-between gap-2 px-3 pt-2 md:hidden">
+              <UserMenu />
+              <ThemeToggle />
+            </div>
+            <div className="mt-2 min-h-0 flex-1 overflow-y-auto border-t pt-2">
+              {sessionList}
+            </div>
           </aside>
         </>
       )}

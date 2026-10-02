@@ -65,9 +65,9 @@ done
 echo "[design-lint] grep 规则：衬线域 / h-screen / 冷色"
 
 serif_bad=$(grep -rl "font-display" "$WEB/app" "$WEB/components" --include="*.tsx" --include="*.ts" 2>/dev/null \
-  | grep -vE "app/layout\.tsx$|app/page\.tsx$|components/answer\.tsx$")
+  | grep -vE "app/layout\.tsx$|app/page\.tsx$|components/answer\.tsx$|components/app-header\.tsx$")
 if [ -n "$serif_bad" ]; then
-  echo "FAIL 衬线域泄漏：font-display 只允许 layout.tsx(品牌)/page.tsx(空态)/answer.tsx(内容时刻)"
+  echo "FAIL 衬线域泄漏：font-display 只允许 layout.tsx(品牌)/page.tsx(空态+侧栏品牌)/answer.tsx(内容时刻)/app-header.tsx(工具页顶栏品牌,P35 载体搬家)"
   echo "$serif_bad"
   fail=1
 fi

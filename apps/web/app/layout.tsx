@@ -1,9 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono, Noto_Serif_SC } from "next/font/google";
-import Link from "next/link";
-import Nav from "@/components/nav";
-import ThemeToggle from "@/components/theme-toggle";
-import UserMenu from "@/components/user-menu";
+import AppHeader from "@/components/app-header";
 import { ThemeProvider } from "@/components/theme-provider";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
@@ -37,24 +34,9 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
       <body className="flex h-dvh flex-col bg-background text-foreground">
         <ThemeProvider attribute="class" defaultTheme="light" enableSystem={false} disableTransitionOnChange>
           <TooltipProvider delay={200}>
-            <header className="flex h-13 shrink-0 items-center gap-3 border-b px-4">
-              <Link href="/" className="flex items-center gap-2.5">
-                {/* 品牌方印：全站唯一固定用 primary 实底的识别位（DESIGN.md brand-mark） */}
-                <span
-                  className="flex size-7 items-center justify-center rounded-md bg-primary font-display text-sm font-semibold text-primary-foreground shadow-sm"
-                  aria-hidden
-                >
-                  格
-                </span>
-                <span className="font-display text-[15px] font-semibold">格物</span>
-                <span className="hidden text-xs text-muted-foreground sm:inline">校园智能问答</span>
-              </Link>
-              <Nav />
-              <div className="ml-auto flex items-center gap-2">
-                <UserMenu />
-                <ThemeToggle />
-              </div>
-            </header>
+            {/* P35 app-shell：顶栏条件渲染——chat 页 chrome-less（导航在 page 侧栏），
+                工具页 44px 细顶栏。旧 52px 全站厚顶栏退役（DESIGN.md app-shell）。 */}
+            <AppHeader />
             <div className="min-h-0 flex-1">{children}</div>
           </TooltipProvider>
         </ThemeProvider>

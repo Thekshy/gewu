@@ -63,24 +63,26 @@
 /* P25 机构蓝色板（契约见仓库根 DESIGN.md，对标 america.gov/chat）：冷调近白画布 +
    冷墨 + navy 主色 #1a3a5c（白字对比 11.6 ≥ AAA）+ link 蓝行内链接 #1157d0（6.2 AA）。
    P18/P20 暖陶土/米白两轮已退役不回走；P20 craft 地板条款照旧。 */
+/* 亮色 = america.gov 式纯白（P35 用户拍板：原冷调近白 #fafbfd 显闷，改纯白；
+   表面层次整体提浅一档适配纯白画布）。暗色不动。 */
 :root {
-    --background: #fafbfd;
+    --background: #ffffff;
     --foreground: #1c2430;
-    --card: #f2f4f8;
+    --card: #f6f7f9;
     --card-foreground: #1c2430;
     --popover: #ffffff;
     --popover-foreground: #1c2430;
     --primary: #1a3a5c;
     --primary-foreground: #ffffff;
-    --secondary: #eef0f4;
+    --secondary: #f2f3f5;
     --secondary-foreground: #2e3746;
-    --muted: #eef0f4;
+    --muted: #f2f3f5;
     --muted-foreground: #5a6572;
-    --accent: #e8ebf1;
+    --accent: #edeff3;
     --accent-foreground: #1c2430;
     --destructive: #c03434;
-    --border: #d8dde8;
-    --input: #d8dde8;
+    --border: #e4e7ec;
+    --input: #d8dde6;
     --ring: #3d6b9e;
     --link: #1157d0;
     --chart-1: #1a3a5c;
@@ -89,13 +91,13 @@
     --chart-4: #5a6572;
     --chart-5: #7c8590;
     --radius: 0.75rem;
-    --sidebar: #f2f4f8;
+    --sidebar: #f4f5f7;
     --sidebar-foreground: #1c2430;
     --sidebar-primary: #1a3a5c;
     --sidebar-primary-foreground: #ffffff;
-    --sidebar-accent: #e8ebf1;
+    --sidebar-accent: #edeff3;
     --sidebar-accent-foreground: #1c2430;
-    --sidebar-border: #d8dde8;
+    --sidebar-border: #e4e7ec;
     --sidebar-ring: #3d6b9e;
 }
 
