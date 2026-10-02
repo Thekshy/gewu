@@ -265,6 +265,38 @@ def write_tools() -> set[str]:
     return {t.name for t in tools_for().values() if not t.read_only and t.slots_required}
 
 
+def resolve_flow(tool_call: dict) -> ToolSpec | None:
+    """闸动态解析（Q4）：tool_call → 流程型 ToolSpec；非流程/未知 → None。
+
+    run_flow 入口解开 args.flow_id 查注册表，专属工具按 name 直查——两形态
+    经同一判定收敛，闸从「工具名静态判定」升级为「解开参数动态判定」。
+    None = 闸放行（读流程直执行 / 未知 flow_id 由执行层返回 unknown_tool
+    回执，执行层仍是单一出口）。
+    """
+    name = str(tool_call.get("name", "") or "")
+    key = name
+    if name == "run_flow":
+        args = tool_call.get("args") or {}
+        key = str(args.get("flow_id", "") or "").strip()
+    t = tools_for().get(key) if key else None
+    return t if t is not None and t.slots_required else None
+
+
+def flow_args(tool_call: dict) -> dict:
+    """tool_call → 平铺槽位参数（专属工具=args 原样；run_flow=解出内层 slots）。
+
+    与 resolve_flow 配对使用：spec 定流程、本函数定槽位。run_flow 形态的
+    槽位键主名 slots（注：@tool 参数不可名 args——pydantic schema 会改写
+    为 v__args），兼容模型偶发的 args 键；内层非 dict（畸形参数）返回 {}，
+    交给槽位门/missing_arg 回执兜底。
+    """
+    args = tool_call.get("args") or {}
+    if tool_call.get("name") == "run_flow":
+        inner = args.get("slots", args.get("args"))
+        return inner if isinstance(inner, dict) else {}
+    return args if isinstance(args, dict) else {}
+
+
 def role_label(role: str) -> str:
     """角色中文名（越权提示文案用）。"""
     return "学生" if role == "student" else "辅导员"

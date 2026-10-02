@@ -14,7 +14,7 @@
 | [03](03-routing.md) | 意图路由 | agent 链路的 guard 安检 + effective route 两段式；cascade 三级级联（classic 基线）与误路由安全网 |
 | [04](04-rag-retrieval.md) | 混合检索 | FTS + 向量 + 加权 RRF + 复合精排 + 父子块的完整漏斗，入库策略链与 DDL 关键代码 |
 | [05](05-react-agent.md) | agent 主循环 | create_agent 底座、middleware 栈（guard/截断防御/HITL/压缩/检索词硬防线）、防护语义平移对照 |
-| [06](06-transaction.md) | 知行执行层 | classic 工具识别、槽位元数据表、interrupt() 确认门、失败恢复与权限矩阵（与 agent HITL 对齐） |
+| [06](06-transaction.md) | 知行执行层 | 办理流程注册表（P33 单一真相源）、run_flow/query_flows 统一入口与同构收编判据、闸动态解析、槽位元数据表、HITL 确认门与 resume 桥、回执驱动恢复与权限矩阵 |
 | [07](07-state-persistence.md) | 状态与持久化 | PG checkpoints、会话资源化（P22）、业务/记忆/反馈/用量各表的生命周期与一轮会话触达图 |
 | [08](08-api-contract.md) | 接口契约 | 27 端点全景（7 路由文件）、十一类 SSE 事件、follow_ups、resume 桥与错误体约定 |
 | [09](09-cross-cutting.md) | 支撑域 | 配置键表、四层成本防线、模型分层、四层排障日志、lint-arch 依赖守护与 CI 门禁 |

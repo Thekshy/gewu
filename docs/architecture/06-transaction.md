@@ -1,48 +1,31 @@
 # 06 · 知行执行层（transaction）
 
-「格物」负责让学生知道（信息问答），「知行」负责让学生办成（业务执行）。核心原则（PARITY §9）：**读操作直接执行；写操作必须经过「确认摘要 → 用户确认 → 执行 → 回执」；执行失败不是终点，恢复也是流程的一部分**。本文拆解工具识别、槽位系统、interrupt 确认门与失败恢复的完整机制。
+「格物」负责让学生知道（信息问答），「知行」负责让学生办成（业务执行）。核心原则（PARITY §9）不变：**读操作直接执行；写操作必须经过「确认摘要 → 用户确认 → 执行 → 回执」**。P31-2 起 classic 手写办理图（entry_gate/advance/tx_confirm/tx_gate/tx_resume 节点族）已全量退役——办理不再是独立图，而是 **agent 主循环内的工具调用**：槽位收集=WriteSlotGate 拦截追问、确认=PendingAction 摘要 + HITL 中断（[05](05-react-agent.md)）、执行=call_tool 单一出口。P33 起办理流程进一步收编为**注册表（单一真相源）+ run_flow / query_flows 统一入口**。
 
-## 流程全景
+## 办理流程注册表（P33 单一真相源）
 
-```mermaid
-flowchart TB
-    U[用户消息] --> EG{entry_gate<br/>办理收集中?}
-    EG -->|是| TXR[tx_resume<br/>意图分类 continue/cancel/new_topic]
-    EG -->|否| RT[正常路由] -->|transaction| IDENT{工具识别<br/>启发式优先·LLM 兜底}
-    RT -->|hybrid| HYB[政策先答 → 办理]
-    IDENT -->|读操作| RD[直接执行<br/>查场馆/我的预约/请假状态]
-    IDENT -->|写操作| ADV[advance 槽位收集]
-    IDENT -->|未识别| KB[转知识库检索]
-    ADV -->|缺槽位| ASK[slot_question 追问] --> EG
-    ADV -->|槽位齐| CFM[tx_confirm<br/>pending_action 摘要]
-    CFM --> GATE[tx_gate<br/>interrupt 暂停]
-    GATE -->|用户：确认| EX[执行] -->|成功| OK[action_result + 回执]
-    EX -->|冲突/字段非法| ADV2[只回退该槽位<br/>重新追问]
-    GATE -->|用户：修改| CFM
-    GATE -->|用户：取消| CCL[已取消 · 清状态]
-    GATE -->|切话题| RT2[清状态 · 重走路由]
-```
+注册表即工具表本体：`tools.py` 的 `ToolSpec` 一行内嵌该流程的全部元数据——
 
-## 工具识别（启发式优先，LLM 兜底）
-
-`_TOOL_PATTERNS` 是按序判定的正则序列（`gewu/agent/tx.py`），**顺序是契约**——前面的模式优先级高，调换会改变行为：
-
-| 序 | 工具 | 正则要点 |
+| 字段 | 承载 | 消费方 |
 | --- | --- | --- |
-| 1 | `cancel_booking` | 取消预约/退订 |
-| 2 | `approve_leave` | 批准/通过…请假 |
-| 3 | `pending_leaves` | 待审批/谁请了假 |
-| 4 | `leave_status` | 请假单号/进度/LV-\d+ |
-| 5 | `my_bookings` | 我的预约/我订了 |
-| 6 | `query_venues` | 有/哪些…场馆 |
-| 7 | `submit_leave` | 请假/事假/病假/销假 |
-| 8 | `book_venue` | 办理动词 + 场馆类宾语**共现**（馆/场/间/羽毛球…） |
+| `roles` / `read_only` | 权限矩阵、读写属性 | `call_tool` 单一出口、路由合成 |
+| `slots_required` / `slots_optional` | 流程定义（label 取自 `label` 字段） | 槽位门、确认摘要、resume 桥 |
+| `triggers` / `domain` | 触发词与业务域（检索台阶数据，Q6 只就位） | `query_flows` q 匹配；将来 FTS/向量不动 schema |
 
-两个从真实 bug 学出的守卫：`book_venue` 要求「预约」与场馆类宾语共现——裸「预约」会把「预约心理咨询」也误选成场馆工具（P7 修复）；`_NON_VENUE_RE`（心理咨询/挂号/校医…）作**负向双保险**，且对 LLM 兜底路径同样生效（P7-1）。LLM 只兜底口语化表述，且提示词明令「没有语义匹配的工具时必须返回空，禁止挑最相近的强行办理」；识别不出转知识库检索（`Command(goto="retrieve")`）。
+`slots_required` 非空即「流程工具」。历史上写性判定存在**三个真相源**（mw.py `WRITE_TOOLS` 静态集合、txmeta.py `FLOW_DEFS`、tools.py `read_only`），加新写流程漏登任何一处 = 静默失去确认门——P33 结构性消灭：后两者退役为**派生视图** `flow_defs()` / `write_tools()`，全部实时读注册表，一致性测试闸（`test_registry.py`）保证「写工具必有流程定义」「triggers/roles 非空」等约定。**新增一个办理流程 = 注册表一行 + business 函数，agenttools/mw/agent 零改动**（O(1) 主张已真跑验证：临时流程仅加注册表行，query_flows 可见、run_flow 可办、写确认门自动生效，验证后移除）。
 
-## 槽位系统
+## 两个入口：专属工具与 run_flow（同构收编判据）
 
-每个槽位有 label/ask 文案与**确定性解析器**（`slot_meta`，文案逐字保留 PARITY §9.3 表格）：
+「同构收编、异构检索」：办理流程是**同构**的（槽位收集→确认→执行→回执），最优扩展形态不是更多工具，而是收编为 `run_flow(flow_id, slots)` + `query_flows(q)` 两个入口 + 注册表数据行；知识/联网检索是**异构**域（返回证据不产生回执），不上 run_flow，将来工具总数逼近 ~20~30 才立项 tool retrieval（与流程检索正交）。
+
+- **高频保留专属 @tool**（Q1 hybrid）：query_venues/my_bookings/pending_leaves + 写四件 book_venue/cancel_booking/submit_leave/approve_leave——专属 schema 的参数精确度与 docstring 引导在高频路径值回票价；
+- **leave_status 样板迁移**（Q7）：专属 @tool 移除、注册表行保留——请假单查询只能走 query_flows→run_flow，事件 `tool` 字段不变（`leave_status`），eval 无感；
+- **query_flows**：全量清单（flow_id｜名称｜说明｜必填槽位｜所需角色），按当前角色过滤不可见项；可选 `q` 做包含匹配（id/名称/说明/触发词，零 FTS/向量依赖）。检索台阶三级：查表 → PG FTS（流程 >50 或误选可观测）→ pgvector（语义难分），本票只就位数据；
+- 事件契约 **PARITY 零改动**（Q3）：`pending_action`/`action_result` 的 `tool` 字段=实际 flow_id，确认卡片 label、回执、前端徽章、eval 断言与专属路径完全同形。
+
+## 槽位系统（解析器库 txmeta.py）
+
+每个槽位有 label/ask 文案与**确定性解析器**（`txmeta.slot_meta`，文案逐字保留 PARITY §9.3 表格）：
 
 | 槽位 | label | 追问文案（节选） | 确定性解析 |
 | --- | --- | --- | --- |
@@ -54,68 +37,44 @@ flowchart TB
 | `start_date` / `end_date` | 起止日期 | 如：明天、下周一（含当天） | 同 `date` |
 | `booking_id` / `ticket_id` | 单号 | 形如 VE-0001 / LV-0001 | 正则抽取 |
 
-流程定义（`FLOW_DEFS`）：`book_venue` 必填 venue/date/slot（可选 purpose）；`submit_leave` 必填 leave_type/start_date/end_date/reason；`cancel_booking`/`approve_leave`/`leave_status` 只需单号。
+**LLM 给的原始参数一律过解析器归一**（`normalize_tool_args` → `normalize_slot`，call_tool 之前）——日期换算、场馆名→ID、时段口语→标准段都在确定性代码里完成。分工即：**LLM 找表述，代码算日期**——「下周三到底是哪天」LLM 极易算错，工具描述强制日期参数传**中文原文**、禁止自行换算。原 `FLOW_DEFS` 常量已退役：流程必填/可选定义改由 `flow_defs()` 派生视图供给，txmeta 收缩为纯解析器库（slot_meta/parse_*/build_confirm/SLOT_ORDER）。
 
-**LLM 抽出的原始值一律过解析器归一**（`normalize_slot`）——日期换算、场馆名→ID、时段口语→标准段都在确定性代码里完成；LLM 的抽取提示词明令「拿不准就不要抽，留给系统追问」「日期原样保留表述，不要自己换算」。分工即：**LLM 找表述，代码算日期**——「下周三到底是哪天」LLM 极易算错，`gewu/dates.py` 确定性换算（周几/下周一/中文数字天数/已过去的 N月N日顺延明年），独立单测、基准日与 Go 版同源。
+## 闸动态解析（resolve_flow，Q4 机制变更）
 
-**advance**（transaction 首轮与 tx_resume 续轮共用）的推进逻辑：有 key 走 LLM 抽槽 → 归一合并（已收集的不覆盖）；无 key 退「上一问的解析器直接解析本轮回答」（`tx_last_asked`）或离线首轮机会抽取（`opportunistic_fill`，自由文本字段不猜测）。「请三天假」短语在给了开始日期时直接换算结束日期（`apply_days_phrase`：start + N−1 天）。缺槽位按流程必填顺序取第一个追问（`slot_question` + answer 同文案）；齐了只置 `tx_phase=confirm`——确认摘要由 tx_confirm 节点统一发（transaction/tx_resume/react 三链共用，避免重复 emit）。
+写性判定从「工具名静态集合」升级为「解开参数动态判定」，共享 helper `tools.resolve_flow(tool_call) -> ToolSpec | None`：
 
-## interrupt() 确认门（P14 原生机制）
+- `name=="run_flow"` → 解开 `args.flow_id` 查注册表；专属工具名 → 按 name 直查——两形态经同一判定收敛；
+- 配对 helper `flow_args(tool_call)` 归一槽位参数形态（专属=args 原样；run_flow=解出内层 slots，兼容 args 键——@tool 参数不可名 `args`，pydantic schema 会改写为 `v__args`）；
+- `write_call_ready` 单谓词承载三处：HITL `when`、PendingAction 摘要发射、（语义反向的）WriteSlotGate——就绪 = 有流程 spec ∧ 写流程 ∧ 必填参数齐。读流程/非流程/未知或缺失 flow_id → False：HITL 跳过中断（读流程经 run_flow 直执行），槽位门收集缺参；
+- **缺 flow_id/未知 id → 闸放行**，执行层 run_flow 返回 unknown 语义回执（「未知流程：…请先用 query_flows 查询」）——执行层仍是单一出口；模型幻觉调用已退役专属名（leave_status）由工具节点兜底错误 observation，图不崩、业务层零执行。
 
-写操作确认流从 Go 时代的自研跨轮状态机，变为 LangGraph 原生暂停/恢复：
+## 确认门与 resume 桥
 
-- **tx_confirm**（副作用节点）：`build_confirm` 产 pending_action 事件 + 确认文案——有序参数表（`场馆：羽毛球馆；日期：…；时段：…`），请假自动补「共 N 天 / X 审批」（按天数映射：≤3 辅导员、≤7 学院、>7 教务处）与病假超 3 天附证明提示；
-- **tx_gate**：**首个动作即 `interrupt(payload)`**——图在此暂停，checkpointer 落盘；interrupt 之前零副作用，resume 重放不会重复 emit（纪律）：
+写流程调用（无论专属工具还是 run_flow 进入，确认门语义不变——Q5 两形态并存无冲突）：
 
-```python
-def tx_gate(state: ChatState) -> dict:
-    payload = {"tool": tool, "label": flow["label"], "args": state.get("tx_slots") or {}}
-    user_text = interrupt(payload)      # ← 图在此暂停；resume 值为用户新消息
-    st = {**state, "question": user_text}
-    intent = classify_reply(llm, meta, user_text, st)   # continue/cancel/new_topic
-    ...
-```
+1. 参数不齐 → WriteSlotGate 拦截：emit slot_question + 引导模型向用户收集；
+2. 参数齐 → PendingActionMiddleware 发确认摘要（`build_confirm` 产 pending_action + 文案；请假自动补「共 N 天 / X 审批」与病假附证明提示；预约回显场馆名）→ HITL `interrupt(HITLRequest)` 暂停（checkpointer 落盘，中断前零副作用）；
+3. 用户回复经 `resume.py` 翻译为 decisions：approve=确认 / reject=取消 / respond=修改重发或切话题（`classify_reply` LLM 优先启发式兜底）；run_flow 中断载荷在桥内**解包**（tool 还原 flow_id、slots 取内层）后走同一套槽位修改检测；
+4. 放行执行 → action_result 回执（`tool` 字段=flow_id）→ effective route 合成（写流程=transaction/hybrid；run_flow 的写性从 AIMessage.tool_calls 解 flow_id 判定——工具节点会把回执 ToolMessage.name 统一改写为 run_flow，框架强制）。
 
-- **SSE resume 桥**（`gewu/api/chat.py`）：下一请求进来时 `get_state` 检测 `snap.next` 非空 → 把用户消息作为 `Command(resume=question)` 的值续跑——**前端照常发 /api/chat，零改动**；
-- resume 值分类处理（`classify_reply`，LLM 优先启发式兜底）：**修改**（槽位解析器从回复里抽出新值 → goto tx_confirm 重发摘要）/ **确认**（`_CONFIRM_MODIFY_RE` 命中 → 执行）/ **取消** / **new_topic**（清状态 goto route 重走正常路由）。
+**模型可发起写操作，不能拍板**——确认摘要/槽位元数据由确定性代码产出（classic tx_confirm 的语义承继），前端零改动。
 
-## 失败恢复（字段级）
+## 失败恢复（回执驱动）
 
 业务层返回结构化错误（`business.Result`）：
 
 | 字段 | 含义 | 恢复动作 |
 | --- | --- | --- |
-| `ok` / `message` | 结果与人话描述 | 直接进回执/追问文案 |
-| `err` | invalid / quota / conflict / not_found / permission / missing_arg / unknown_tool | 非 field 级 → 结束流程并说明 |
-| `field` | 字段级失败标记 | **只回退该槽位**重新追问（`tx_phase` 退 collect，由 tx_resume 续） |
-| `alternatives` | 冲突时的可选项 | 拼进追问文案（「可选时段：…」） |
+| `ok` / `message` | 结果与人话描述 | 直接进回执，模型向用户转述 |
+| `err` | invalid / quota / conflict / not_found / permission / missing_arg / unknown_tool | 非成功即 success=false 回执 |
+| `field` | 字段级失败标记 | 冲突时 `alternatives` 拼进 message（「可选时段：…」），模型引导用户改参数重发 |
 | `receipt` | VE-XXXX / LV-XXXX | 成功回执凭证号 |
 
-字段级问题（时段冲突/日期非法）只回退该槽位重新追问——冲突时带当日可选项；已收集的其他信息保留。其余失败（配额/权限）结束流程并说明。冲突恢复的完整交互：
-
-```mermaid
-sequenceDiagram
-    autonumber
-    participant U as 用户
-    participant G as tx_gate（interrupt 恢复后）
-    participant T as call_tool
-    participant B as PG business.*
-
-    U->>G: 「确认」
-    G->>T: execute_tool(book_venue, slots)
-    T->>B: book_venue(venue, date, slot, user)
-    B-->>T: Result(err=conflict, field=slot,<br/>alternatives=[14:00-16:00, 16:00-18:00])
-    T-->>G: Result
-    G-->>U: action_result(success=false) + slot_question（附可选时段）
-    Note over G: tx_phase 退 collect；venue/date 保留
-    U->>G: 「下午两点吧」（下一请求走 tx_resume）
-    G->>G: slot 解析 → 14:00-16:00 → 槽位齐 → tx_confirm
-    G-->>U: pending_action 重新确认 → interrupt
-```
+classic 时代的「tx_phase 字段级回退状态机」已随节点族退役；agent 时代的恢复 = **回执是有效 observation**：模型拿到冲突/缺参回执后向用户说明可选项、重新发起调用（缺必填参数另有槽位门硬拦截兜底）。权限失败（学生调 approve_leave）同样以越权回执交模型转述（tx-006 断言语义）。
 
 ## 权限矩阵与确定性
 
-- **权限在工具层不在业务系统**：business 对角色无感知，判定收敛在 `agent.tools.call_tool` 单一出口——路由、agent 主循环、恢复流程、LLM 选工具所有路径都绕不过这道闸：
+- **权限在工具层不在业务系统**：business 对角色无感知，判定收敛在 `agent.tools.call_tool` 单一出口——专属工具、run_flow、未来任何入口都绕不过这道闸：
 
 ```python
 def call_tool(tools, business, name, args, role, user) -> Result:
@@ -128,20 +87,22 @@ def call_tool(tools, business, name, args, role, user) -> Result:
     return t.fn(business, args, user)
 ```
 
-学生调 `approve_leave`/`pending_leaves`（counselor 专属）被明确拒绝，评测集有专项用例。工具的角色/读写属性表见 [05](05-react-agent.md)。
+学生调 `approve_leave`/`pending_leaves`（counselor 专属）被明确拒绝，评测集有专项用例；query_flows 清单同步按角色过滤（学生看不见 approve_leave 行）。
 
-- **业务规则与语料一致**：请假 1—3 天辅导员批、3 天以上 7 天以内学院批、超过 7 天教务处批（`approver_of`）；场馆每时段容量（羽毛球馆 2 组/篮球场 1 组/研讨间各 1），「每人每天 2 时段」配额在业务库判定——mock 层也按真实语义实现（`gewu/business/db.py`，P21-2 起 PG；`user` 列在 PG 为保留字，SQL 内一律双引号）。
+- **业务规则与语料一致**：请假 1—3 天辅导员批、3 天以上 7 天以内学院批、超过 7 天教务处批（`approver_of`）；场馆每时段容量（羽毛球馆 2 组/篮球场 1 组/研讨间各 1），「每人每天 2 时段」配额在业务库判定——`gewu/business/db.py`（P21-2 起 PG；`user` 列在 PG 为保留字，SQL 内一律双引号）。
 
 ## 相关文件
 
 | 文件 | 职责 |
 | --- | --- |
-| `gewu/agent/tx.py` | 工具识别、槽位元数据、advance/确认摘要、续轮分类 |
-| `gewu/agent/graph.py` | transaction/advance/tx_confirm/tx_gate/tx_resume 节点接线 |
-| `gewu/agent/tools.py` | 工具表与 call_tool 权限出口 |
-| `gewu/business/db.py` | mock 业务全量（场馆/预约/请假单、Result 结构） |
+| `gewu/agent/tools.py` | **注册表单一真相源**（ToolSpec+流程定义）与 call_tool 权限出口；resolve_flow/flow_args 闸解析 |
+| `gewu/agent/agenttools.py` | @tool 工具族：query_flows/run_flow 统一入口 + 专属工具薄包 |
+| `gewu/agent/txmeta.py` | 槽位解析器库（slot_meta/normalize_slot/build_confirm/SLOT_ORDER） |
+| `gewu/agent/mw.py` | WriteSlotGate/PendingAction 中间件与 write_call_ready 谓词 |
+| `gewu/agent/resume.py` | HITL 决策翻译（含 run_flow 载荷解包） |
+| `gewu/business/db.py` | 业务全量（场馆/预约/请假单、Result 结构） |
 | `gewu/dates.py` | 确定性中文日期解析（UTC+8） |
-| `tests/` | test_tx.py / test_business_write.py / test_dates.py |
+| `tests/` | test_registry.py / test_run_flow.py / test_tx.py / test_agent_mw.py / test_business_write.py |
 
 ---
 

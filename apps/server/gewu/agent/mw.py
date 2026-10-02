@@ -43,7 +43,7 @@ from langchain_core.messages import (
 from gewu.agent import events as ev
 from gewu.agent.emitter import emit
 from gewu.agent.prompts import agent_system_prompt
-from gewu.agent.tools import flow_defs, write_tools
+from gewu.agent.tools import flow_args, resolve_flow, write_tools
 from gewu.agent.txmeta import build_confirm, normalize_slot, slot_meta
 from gewu.dates import today_iso
 from gewu.llm.service import ctx_profile
@@ -128,28 +128,41 @@ def normalize_tool_args(meta: dict, tool: str, args: dict) -> dict[str, str]:
 
 
 def write_call_ready(business, tool_call: dict) -> bool:
-    """写工具必填参数是否齐全（HITL when 谓词与槽位门共用；口径=字段在场）。
+    """写流程调用是否就绪（HITL when 谓词与 PendingAction 共用；P33 动态解析）。
 
-    流程定义读注册表派生视图（P33 单一真相源）。
+    就绪 = resolve_flow 得流程 spec 且为写流程且必填参数齐（口径=字段在场）。
+    读流程/非流程/未知或缺失 flow_id 一律 False：HITL 跳过中断（读流程经
+    run_flow 直执行），PendingAction 跳过摘要——单一谓词同时承载 write_cfg
+    两形态（专属名直查 + run_flow 解参）的确认门判定。
     """
-    name = tool_call.get("name", "")
-    flow = flow_defs().get(name)
-    if not flow:
-        return True  # 非流程工具（防御：不在注册表的写工具不设门）
-    args = tool_call.get("args") or {}
-    return all(str(args.get(s, "") or "").strip() for s in flow["required"])
+    spec = resolve_flow(tool_call)
+    if spec is None or spec.read_only:
+        return False
+    args = flow_args(tool_call)
+    return all(str(args.get(s, "") or "").strip() for s in spec.slots_required)
 
 
 def effective_route(messages: list) -> tuple[str, str]:
-    """本轮工具轨迹 → (effective route, reason)。意图分流的判断权在工具选择。"""
+    """本轮工具轨迹 → (effective route, reason)。意图分流的判断权在工具选择。
+
+    P33：写性判定读注册表派生视图；run_flow 调用从 AIMessage.tool_calls
+    解出 flow_id 判写性——工具节点会把回执 ToolMessage.name 统一改写为
+    run_flow（框架强制），flow_id 只能从调用参数还原。
+    """
     tools: list[str] = []
+    flow_wrote = False
     for m in messages_since_last_human(messages):
+        if isinstance(m, AIMessage) and m.tool_calls:
+            for c in m.tool_calls:
+                spec = resolve_flow(c) if c.get("name") == "run_flow" else None
+                if spec is not None and not spec.read_only:
+                    flow_wrote = True
         if isinstance(m, ToolMessage) and m.name:
             tools.append(m.name)
     searched = "search_knowledge" in tools
     researched = "deep_research" in tools
     webbed = "web_search" in tools
-    wrote = any(t in write_tools() for t in tools)
+    wrote = flow_wrote or any(t in write_tools() for t in tools)
     if wrote:
         return ("hybrid", "本轮检索后办理") if searched else ("transaction", "本轮办理业务")
     if researched:
@@ -331,7 +344,11 @@ class TruncationDefenseMiddleware(AgentMiddleware):
 
 
 class WriteSlotGateMiddleware(AgentMiddleware):
-    """写工具槽位门：缺必填参数不执行，emit slot_question + 引导模型收集。"""
+    """写流程槽位门：缺必填参数不执行，emit slot_question + 引导模型收集。
+
+    P33 起 经 resolve_flow 动态解析——专属工具名直查与 run_flow 解开
+    flow_id 查注册表两形态同闸；读流程与非流程调用放行。
+    """
 
     def __init__(self, business) -> None:
         super().__init__()
@@ -339,13 +356,12 @@ class WriteSlotGateMiddleware(AgentMiddleware):
 
     def wrap_tool_call(self, request, handler):
         call = request.tool_call
-        name = call.get("name", "")
-        flow = flow_defs().get(name)
-        if name not in write_tools() or not flow:
+        spec = resolve_flow(call)
+        if spec is None or spec.read_only:
             return handler(request)
-        args = call.get("args") or {}
+        args = flow_args(call)
         meta = slot_meta(self._business)
-        missing = [s for s in flow["required"] if not str(args.get(s, "") or "").strip()]
+        missing = [s for s in spec.slots_required if not str(args.get(s, "") or "").strip()]
         if not missing:
             return handler(request)
         slot = missing[0]
@@ -356,7 +372,7 @@ class WriteSlotGateMiddleware(AgentMiddleware):
                 f"缺少必填参数 {slot}（{meta[slot]['label']}）。"
                 f"请直接向用户提问：「{ask}」收集到答案后再重新发起调用，不要编造参数。"
             ),
-            name=name,
+            name=call.get("name", ""),
             tool_call_id=call.get("id", ""),
         )
 
@@ -466,11 +482,14 @@ class PendingActionMiddleware(AgentMiddleware):
             return None
         meta = slot_meta(self._business)
         for call in ai.tool_calls:
-            name = call.get("name", "")
-            if name not in write_tools() or not write_call_ready(self._business, call):
+            if not write_call_ready(self._business, call):
                 continue
-            norm = normalize_tool_args(meta, name, call.get("args") or {})
-            pa, text, _note = build_confirm({"tx_tool": name, "tx_slots": norm}, self._business)
+            spec = resolve_flow(call)
+            # tx_tool=flow_id（run_flow 解参后与专属路径同值）：确认卡片
+            # label、pending_action 事件形状与专属路径完全一致（Q3 PARITY）。
+            norm = normalize_tool_args(meta, spec.name, flow_args(call))
+            confirm = {"tx_tool": spec.name, "tx_slots": norm}
+            pa, text, _note = build_confirm(confirm, self._business)
             emit(ev.status_evt("已整理办理信息，等待确认…"))
             emit(pa)
             emit(ev.answer_evt(text))

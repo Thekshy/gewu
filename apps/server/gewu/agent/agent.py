@@ -94,13 +94,15 @@ def build_agent(
         llm, business, tools if tools is not None else tools_for(), retriever, web=web
     )
 
-    # 写性判定读注册表派生视图（P33 单一真相源）。
+    # 写确认门（P33 Q5）：专属写工具逐名 + run_flow 统一入口，两形态并存。
+    # when=write_call_ready 动态解析：专属名直查注册表、run_flow 解开
+    # flow_id 查——读流程/参数不齐/未知 id 均不中断（槽位门收集或执行层回执兜底）。
     write_cfg = {
         name: InterruptOnConfig(
             allowed_decisions=["approve", "reject", "respond"],
             when=lambda req: write_call_ready(business, req.tool_call),
         )
-        for name in sorted(write_tools())
+        for name in sorted(write_tools() | {"run_flow"})
     }
 
     query_guard = SearchQueryGuardMiddleware()

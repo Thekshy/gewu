@@ -21,6 +21,7 @@ from langgraph.types import Command
 from gewu.agent import events as ev
 from gewu.agent.emitter import emit
 from gewu.agent.mw import normalize_tool_args
+from gewu.agent.tools import has_role, resolve_flow, role_label, tools_for
 from gewu.agent.txmeta import slot_meta
 from gewu.rag.retrieve import Retriever
 
@@ -251,6 +252,72 @@ def build_agent_tools(llm, business, tools: dict, retriever: Retriever, web=None
         )
 
     @tool
+    def query_flows(q: str = "", runtime: ToolRuntime = None) -> str:
+        """查询可办理的流程清单（flow_id｜名称｜说明｜槽位｜所需角色）。
+
+        办理类诉求不确定用哪个流程、或用户诉求含糊时，先用本工具查清单；
+        清单中多条相近或选不准时，直接反问用户要办哪一件，不要猜。
+        选定后用 run_flow(flow_id=…, args={…}) 执行。q 可选：按关键词过滤
+        （匹配流程 id/名称/说明/触发词），不传返回全量清单。
+        """
+        emit(ev.status_evt("查询可办流程…"))
+        role = (runtime.state or {}).get("role", "student")
+        term = (q or "").strip()
+        rows = []
+        for t in tools_for().values():
+            if not t.slots_required or not has_role(t.roles, role):
+                continue  # 非流程工具与当前角色不可见项均不上清单
+            if term and not any(term in s for s in (t.name, t.label, t.description, *t.triggers)):
+                continue
+            req = "、".join(t.slots_required)
+            opt = "；可选：" + "、".join(t.slots_optional) if t.slots_optional else ""
+            roles = "、".join(role_label(r) for r in t.roles)
+            rows.append(f"- {t.name}｜{t.label}｜{t.description}｜必填：{req}{opt}｜角色：{roles}")
+        if not rows:
+            return (
+                f"没有匹配「{term}」的办理流程。可去掉关键词查全量清单；"
+                "若用户诉求不在校园办理范围内，如实说明。"
+            )
+        return "\n".join(
+            [
+                "可办理流程清单（flow_id｜名称｜说明｜槽位｜角色）：",
+                *rows,
+                "执行方式：run_flow(flow_id=…, slots={槽位名: 值})；"
+                "标注写操作的流程发起后系统会向用户展示确认卡片。",
+            ]
+        )
+
+    @tool
+    def run_flow(
+        flow_id: str = "", slots: dict | None = None, runtime: ToolRuntime = None
+    ) -> Command:
+        """统一办理入口：按 flow_id 执行注册表中的办理流程（清单先用 query_flows 查）。
+
+        flow_id 必须来自 query_flows 清单，禁止编造；slots 为该流程的槽位
+        参数（平铺 dict，槽位名与清单「必填」一致；日期传中文原文由系统换
+        算，禁止自行换算；单号形如 VE-0001/LV-0001）。标注写操作的流程参数
+        齐全时才调用，发起后系统会向用户展示确认卡片；查询类流程直接执行。
+        """
+        emit(ev.status_evt(f"办理流程 {flow_id}…"))
+        fid = str(flow_id or "").strip()
+        spec = resolve_flow({"name": fid})
+        if spec is None:
+            msg = f"未知流程：{fid or '（缺少 flow_id）'}。请先用 query_flows 查询可办流程清单。"
+            emit(ev.action_result_evt(fid or "run_flow", False, msg))
+            return Command(update={"messages": [_tool_msg(runtime, msg, fid or "run_flow")]})
+        state = runtime.state or {}
+        meta = slot_meta(business)
+        norm = normalize_tool_args(meta, fid, {k: v for k, v in (slots or {}).items()})
+        result = tools_call(
+            tools, business, fid, norm, state.get("role", "student"), state.get("user", "")
+        )
+        # 事件与回执的 tool 字段=flow_id（Q3 PARITY）：确认卡片/回执/前端徽章
+        # 与专属路径同形；effective route 的写性判定从 tool_calls 解 flow_id
+        # （工具节点会把回执 ToolMessage.name 统一改写为 run_flow）。
+        emit(ev.action_result_evt(fid, result.ok, result.message, result.receipt or None))
+        return Command(update={"messages": [_tool_msg(runtime, result.message, fid)]})
+
+    @tool
     def query_venues(date: str = "", runtime: ToolRuntime = None) -> str:
         """查询某天可预约的场馆与各时段余量（日期可缺省=今天）。"""
         emit(ev.status_evt("调用工具 query_venues…"))
@@ -261,12 +328,6 @@ def build_agent_tools(llm, business, tools: dict, retriever: Retriever, web=None
         """查询本人当前有效的场馆预约列表。"""
         emit(ev.status_evt("调用工具 my_bookings…"))
         return _biz("my_bookings", runtime, {}, business, tools)
-
-    @tool
-    def leave_status(ticket_id: str, runtime: ToolRuntime = None) -> str:
-        """按请假单号查询审批状态（单号形如 LV-0001）。"""
-        emit(ev.status_evt("调用工具 leave_status…"))
-        return _biz("leave_status", runtime, {"ticket_id": ticket_id}, business, tools)
 
     @tool
     def pending_leaves(runtime: ToolRuntime = None) -> str:
@@ -324,13 +385,16 @@ def build_agent_tools(llm, business, tools: dict, retriever: Retriever, web=None
         emit(ev.status_evt("调用工具 approve_leave…"))
         return _biz("approve_leave", runtime, {"ticket_id": ticket_id}, business, tools)
 
+    # P33 Q7 样板迁移：leave_status 专属 @tool 移除（注册表行保留）——
+    # 请假单查询只能走 query_flows→run_flow 单入口，事件 tool 字段不变。
     tool_list = [
         search_knowledge,
         parse_date,
         deep_research,
+        query_flows,
+        run_flow,
         query_venues,
         my_bookings,
-        leave_status,
         pending_leaves,
         book_venue,
         cancel_booking,

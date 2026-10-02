@@ -174,3 +174,18 @@
       （index-only 召回/抽取子代理/代码级工具沙箱；LLM 选择器仅桌面版未合入
       main，不上——保 P31 热路径成就）——
       [P32 任务书](runbooks/P32-memory-layer-upgrade.md)（2026-10-02 执行）
+- [x] P33 办理流程注册表化：同构收编 run_flow + 单一真相源——P33-1 注册表统一
+      （ToolSpec 内嵌流程定义 slots_required/slots_optional/triggers/domain，
+      8 工具补齐数据；txmeta.FLOW_DEFS/mw.WRITE_TOOLS 退役为 flow_defs()/
+      write_tools() 派生视图，三真相源陷阱结构性消灭；一致性测试闸把「写工具
+      必有流程定义/triggers/roles 非空」约定变测试；行为零变更 273 测试锚定）
+      + P33-2 机制票（resolve_flow/flow_args 闸动态解析——run_flow 解开
+      flow_id 查注册表、专属名直查，write_call_ready 单谓词承载 HITL when+
+      PendingAction；write_cfg 增 run_flow 条目与专属写四件并存；query_flows
+      角色过滤清单+q 包含匹配、run_flow 统一办理入口，事件 tool 字段=flow_id
+      PARITY 零改动；leave_status 样板迁移单入口、AGENT_SYSTEM 第 7 条办理
+      引导防幻觉旧名；resume 桥解包 run_flow 载荷）。真跑五剧本全过（专属两轮
+      确认含修改取消/样板 query_flows→run_flow/临时流程写确认门/越权回执），
+      O(1) 扩展主张实证（仅加注册表行全链生效）；检索台阶三级（查表→FTS→
+      向量）数据就位不实现——
+      [P33 任务书](runbooks/P33-flow-registry.md)（2026-10-02 执行）

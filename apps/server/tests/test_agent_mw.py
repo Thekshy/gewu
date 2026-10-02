@@ -121,6 +121,7 @@ def test_effective_route_matrix():
 
 
 def test_write_call_ready(biz):
+    """P33 收紧语义：就绪 = 写流程且参数齐；读流程/非流程/未知一律 False。"""
     b = biz
     assert write_call_ready(
         b,
@@ -138,8 +139,34 @@ def test_write_call_ready(biz):
             {"leave_type": "事假", "start_date": "", "end_date": "2026-10-03", "reason": "x"},
         ),
     )
-    # 非写工具不设门
-    assert write_call_ready(b, _tool_call("search_knowledge", {}))
+    # 非流程工具/读流程：不设确认门（False=HITL 跳过中断直执行）
+    assert not write_call_ready(b, _tool_call("search_knowledge", {}))
+    assert not write_call_ready(b, _tool_call("leave_status", {"ticket_id": "LV-0001"}))
+
+
+def test_write_call_ready_run_flow_shape(biz):
+    """P33 Q4/Q5：run_flow 形态动态解析——解开 flow_id 查注册表判写性与参数。"""
+    b = biz
+    complete = {"flow_id": "submit_leave", "slots": _submit_leave_args()}
+    assert write_call_ready(b, _tool_call("run_flow", complete))
+    missing = {"flow_id": "submit_leave", "slots": {**_submit_leave_args(), "reason": ""}}
+    assert not write_call_ready(b, _tool_call("run_flow", missing))
+    # 读流程经 run_flow：不中断（直执行）
+    assert not write_call_ready(
+        b, _tool_call("run_flow", {"flow_id": "leave_status", "slots": {"ticket_id": "LV-1"}})
+    )
+    # 未知/缺失 flow_id：闸放行（执行层 unknown_tool 回执兜底）
+    assert not write_call_ready(b, _tool_call("run_flow", {"flow_id": "nope", "slots": {}}))
+    assert not write_call_ready(b, _tool_call("run_flow", {"slots": {}}))
+
+
+def _submit_leave_args() -> dict:
+    return {
+        "leave_type": "事假",
+        "start_date": "2026-10-02",
+        "end_date": "2026-10-03",
+        "reason": "家里有事",
+    }
 
 
 def test_slot_gate_returns_guidance_without_execution(biz):

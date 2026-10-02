@@ -114,6 +114,13 @@ def hitl_decisions(payload: dict, user_text: str, llm, business) -> dict:
     first = reqs[0] or {}
     tool = first.get("name", "")
     args = first.get("args") or {}
+    if tool == "run_flow":
+        # P33：run_flow 中断载荷解包——tool 还原为 flow_id、slots 取内层
+        # 槽位（@tool 参数不可名 args，内层键主名 slots、兼容 args），槽位
+        # 修改检测与专属路径共用一套解析（确认/修改/取消语义不变）。
+        tool = str(args.get("flow_id", "") or "")
+        inner = args.get("slots", args.get("args"))
+        args = inner if isinstance(inner, dict) else {}
     pseudo = {"tx_phase": "confirm", "tx_slots": args, "tx_last_asked": ""}
 
     intent = classify_reply(llm, meta, user_text, pseudo)
