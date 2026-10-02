@@ -12,7 +12,7 @@ P17 起 `mode=auto/react` 的默认链路是 **agent-first 单循环**：LangCha
 
 | 件 | 来源 | 钩子 | 职责 |
 | --- | --- | --- | --- |
-| `GuardMiddleware` | 自研（chat-langchain 同构） | before_agent，can_jump_to=end | lenient 安检：正则快路径（纯问候零 LLM）→ LLM 判 allow/meta/block（fail-open）；block/meta 短路收尾 |
+| `GuardMiddleware` | 自研（chat-langchain 同构） | before_agent，can_jump_to=end | lenient 安检：正则快路径（纯问候零 LLM）→ LLM 判 allow/meta/block（fail-open）；block/meta 短路收尾。**P28 起 block 只拦内容安全**（危险/违法违规/学术不端，话术 GUARD_BLOCK_ANSWER）——范围外合法问题放行交主循环联网/通用知识（与 AGENT_SYSTEM 第 9 条同一堵墙）；classic 的 REFUSAL_ANSWER（范围外口径）保持基线零改动 |
 | `ModelCallLimitMiddleware` | 官方 | wrap_model_call | `run_limit=8`（旧 REACT_MAX_TURNS 等价） |
 | `TruncationDefenseMiddleware` | 自研平移 | wrap_model_call | **P10 截断防御铁律**：`finish_reason=length` 且带 tool_calls 时不执行，assistant 原样回填 + 合成错误 observation 重调 handler（Pi 式，重发不记指纹；上限 2 次防 length 死循环） |
 | `UsageRecordMiddleware` | 自研 | wrap_model_call | token 记账走 LLMService 预算闸（与 classic 同口径）；P24-1 兼任观测——每次模型调用打 `[llm] agent主循环` 一行（ms + ctx_profile），补 create_agent 内部 model.invoke 不经 LLMService 封装的埋点盲区 |

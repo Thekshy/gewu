@@ -5,8 +5,6 @@ PG 用例走 conftest 的 pg_dsn（gewu_test 库）；不可达时 Skip（门禁
 
 from __future__ import annotations
 
-import json
-
 import pytest
 
 from gewu.obs import Tracer, TracerStore, clip, current_tracer, make_trace_store, set_current_tracer
@@ -107,7 +105,10 @@ def test_tracer_store_roundtrip(pg_dsn):
     assert len(spans) == 2
     s1, s2 = spans
     assert (s1[1], s1[2], s1[3]) == ("tool", "web_search", "ok")
-    assert s1[5] == {"query": "昨天 tyloo 比赛结果", "k": 5}  # psycopg 自动解 JSONB；input 原样（盲区根治点）
+    assert s1[5] == {
+        "query": "昨天 tyloo 比赛结果",
+        "k": 5,
+    }  # psycopg 自动解 JSONB；input 原样（盲区根治点）
     assert len(s1[6]["content"]) <= 4096 + 1  # output 落库截断生效
     assert (s2[1], s2[4]) == ("llm", 1234)
     store.wipe()

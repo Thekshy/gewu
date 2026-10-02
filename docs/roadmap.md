@@ -133,3 +133,11 @@
       回校园」废止）+ SearchQueryGuard 扩展 + 每日次数闸（IQS 按次计费）
       + citations 跨轮清零修复（agent_in 每轮重置，真跑发现的存量 bug）
       ——无任务书（会话内实施，方案对话留档），10-02 晨已先行部署线上
+- [x] P28 Guard 拦截语义收窄：block 从「高置信范围外」改为「仅危险/违法违规/
+      学术不端」（guard 与 AGENT_SYSTEM 第 9 条同一堵墙，P26 通用化对齐；
+      两次线上实证 guard 非确定把校外首触变掷骰子）——GUARD_BLOCK_ANSWER
+      新话术分家（classic REFUSAL_ANSWER 基线零改动）+ eval refu-001~003
+      换危险样例（原道歉邮件/A股/电影按新口径都该答）——
+      [P28 任务书](runbooks/P28-guard-block-narrowing.md)（2026-10-02 执行：
+      TYLOO 同题首触放行联网且拿到 10-01 真实赛果=原始诉求闭环；危险样例
+      三连仍拦；发现存量缺口=run_eval 未适配 P21 认证，另立 chore）

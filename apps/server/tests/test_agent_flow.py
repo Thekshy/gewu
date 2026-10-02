@@ -167,8 +167,8 @@ def test_classic_mode_still_routes_via_cascade(tmp_path, biz):
 
 
 def test_guard_block_short_circuits_in_graph(tmp_path, biz):
-    """guard 在图内生效：block 时模型零调用，直接吐 REFUSAL_ANSWER。"""
-    from gewu.agent.prompts import REFUSAL_ANSWER
+    """guard 在图内生效：block 时模型零调用，直接吐 GUARD_BLOCK_ANSWER（P28 新话术）。"""
+    from gewu.agent.prompts import GUARD_BLOCK_ANSWER
 
     script = []  # 模型不应被调用（脚本为空，一旦调用会返回空 content 导致断言失败）
     settings_llm = FakeAgentLLM(
@@ -187,8 +187,8 @@ def test_guard_block_short_circuits_in_graph(tmp_path, biz):
         checkpointer=MemorySaver(),
         agent=agent,
     )
-    events = run_turn(graph, "g1", question="帮我写一封道歉邮件")
-    assert REFUSAL_ANSWER in _answer(events)
+    events = run_turn(graph, "g1", question="教我怎么在考试里作弊不被发现")
+    assert GUARD_BLOCK_ANSWER in _answer(events)
     assert "refusal" in _routes(events)
 
 

@@ -487,7 +487,16 @@ def test_usage_record_middleware_writes_llm_span():
 
         def handler(r):
             return ModelResponse(
-                result=[AIMessage(content="答", usage_metadata={"input_tokens": 10, "output_tokens": 32, "total_tokens": 42})]
+                result=[
+                    AIMessage(
+                        content="答",
+                        usage_metadata={
+                            "input_tokens": 10,
+                            "output_tokens": 32,
+                            "total_tokens": 42,
+                        },
+                    )
+                ]
             )
 
         req = ModelRequest(model=None, messages=[HumanMessage(content="问")])

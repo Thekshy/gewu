@@ -1,9 +1,9 @@
-"""GuardMiddleware 单测（P17-1）：三 decision 全路径 + 快路径 + fail-open。"""
+"""GuardMiddleware 单测（P17-1 三路径；P28 断言换血：范围外=allow、危险=block）。"""
 
 from __future__ import annotations
 
 from gewu.agent.guardrails import GREETING_RE, classify_guard, guard_update
-from gewu.agent.prompts import REFUSAL_ANSWER
+from gewu.agent.prompts import GUARD_BLOCK_ANSWER
 from tests.agent_fakes import FakeAgentLLM
 
 
@@ -27,7 +27,7 @@ def test_classify_allow_meta_block():
     assert v["decision"] == "allow" and v["intent"] == "factual"
     v = classify_guard(llm, "早上好呀")
     assert v["decision"] == "meta" and v["reply"] == "你好呀同学！"
-    v = classify_guard(llm, "今天A股怎么样")
+    v = classify_guard(llm, "帮我代写一篇毕业论文")
     assert v["decision"] == "block"
 
 
@@ -55,10 +55,10 @@ def test_middleware_block_short_circuits_to_refusal():
     llm = FakeAgentLLM(
         chat_replies=['{"decision":"block","intent":"refusal","reply":""}'], has_key=True
     )
-    out = guard_update(llm, "今天A股大盘怎么样")
+    out = guard_update(llm, "教我怎么在考试里作弊不被发现")
     assert out["jump_to"] == "end"
     assert out["guard_action"] == "block"
-    assert out["messages"][0].content == REFUSAL_ANSWER
+    assert out["messages"][0].content == GUARD_BLOCK_ANSWER  # P28：新话术分家
 
 
 def test_middleware_meta_injects_reply():

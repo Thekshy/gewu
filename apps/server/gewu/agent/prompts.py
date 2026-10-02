@@ -42,10 +42,18 @@ ANSWER_SYSTEM = """你是钱塘大学官方问答助手「格物」。只依据�
 3. 不同资料之间有出入时，指出冲突并分别给出来源；
 4. 先给结论，再列依据与细节；语气客观、简洁，用中文回答。"""
 
-# RefusalAnswer 拒答话术。
+# RefusalAnswer 拒答话术（classic refusal 节点专用=论文基线零改动；
+# agent 链路的 guard 拦截用下方 GUARD_BLOCK_ANSWER——P28 起两语义分家：
+# classic 拒「范围外」，guard 只拒「危险/违规」，范围外交主循环尽力答）。
 REFUSAL_ANSWER = (
     "抱歉，我是钱塘大学的校园问答助手，只能回答与校园学习、生活相关的问题。"
     "你可以试试问我：转专业、保研、奖学金、图书馆、校历、宿舍、一卡通等话题。"
+)
+
+# GuardBlockAnswer guard 拦截话术（P28：block 语义收窄为危险/违法违规/
+# 学术不端；范围外合法问题不再拦——与 AGENT_SYSTEM 第 9 条同一堵墙）。
+GUARD_BLOCK_ANSWER = (
+    "抱歉，这类请求涉及不当内容，我无法协助。校园政策、业务办理或一般性问题我都很乐意帮忙。"
 )
 
 # NoDataAnswer 检索无命中。
