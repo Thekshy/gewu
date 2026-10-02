@@ -16,6 +16,7 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, System
 # lazy-import 机制劫持成空壳（P23 撞坑，详见任务书 §6.4）——module-form 稳定。
 import gewu.llm.embed as llm_embed
 from gewu.llm.chat import Usage, make_chat_model, parse_finish_reason, parse_usage
+from gewu.obs import current_tracer
 from gewu.usage import current_user
 
 if TYPE_CHECKING:
@@ -96,13 +97,38 @@ class LLMService:
         temperature: float = 0.0,
         max_tokens: int = 2048,
     ) -> str:
-        """一次补全调用，返回文本内容。messages 为 (role, content) 二元组列表。"""
+        """一次补全调用，返回文本内容。messages 为 (role, content) 二元组列表。
+
+        P27-2 兼任 llm span：guard/routing/槽位抽取/followups 等小模型全族
+        与 classic 直答经此一处接线全覆盖（agent 主循环另有 UsageRecordMiddleware）。
+        """
         kwargs: dict = {"temperature": temperature, "max_tokens": max_tokens}
         if json_mode:
             kwargs["response_format"] = {"type": "json_object"}
-        resp = self._model(small).bind(**kwargs).invoke(to_lc_messages(messages))
-        self._record(getattr(resp, "usage_metadata", None))
-        return _content_text(resp)
+        tracer = current_tracer()
+        model = self._model(small).bind(**kwargs)
+        lc_msgs = to_lc_messages(messages)
+        profile = {
+            "msgs": len(messages),
+            "chars": sum(len(c) for _, c in messages),
+            "small": small,
+            "json_mode": json_mode,
+        }
+        if tracer is None:
+            resp = model.invoke(lc_msgs)
+            self._record(getattr(resp, "usage_metadata", None))
+            return _content_text(resp)
+        with tracer.span("llm", self._model_name(small), input=profile) as sp:
+            resp = model.invoke(lc_msgs)
+            usage = getattr(resp, "usage_metadata", None)
+            self._record(usage)
+            text = _content_text(resp)
+            sp.tokens = int(usage.get("total_tokens", 0) or 0) if usage else None
+            sp.output = {"chars": len(text)}
+            return text
+
+    def _model_name(self, small: bool) -> str:
+        return self._s.llm_small_model if small else self._s.llm_model
 
     def chat_full(
         self,
@@ -129,7 +155,13 @@ class LLMService:
         """流式补全（Go ChatStream 等价）：迭代取文本增量，结束读 finish_reason。"""
         print(f"[llm] 直答上下文 {ctx_profile(messages)}")
         model = self._model(small).bind(temperature=temperature, max_tokens=max_tokens)
-        return ChatStreamResult(model, to_lc_messages(messages), record=self._record_both)
+        return ChatStreamResult(
+            model,
+            to_lc_messages(messages),
+            record=self._record_both,
+            name=self._model_name(small),
+            profile=ctx_profile(messages),
+        )
 
     def chat_with_tools(
         self,
@@ -174,15 +206,36 @@ class LLMService:
 
 
 class ChatStreamResult:
-    """流式补全的可迭代结果：逐块产出文本增量，结束后 finish_reason/usage 就位。"""
+    """流式补全的可迭代结果：逐块产出文本增量，结束后 finish_reason/usage 就位。
 
-    def __init__(self, model, messages: list[BaseMessage], record=None) -> None:
+    P27-2：迭代全程包一个 llm span（span 在调用方 Context 内启停——直答节点
+    运行于 graph 迭代中，tracer 经 chat.py 的 re-set 可见）。
+    """
+
+    def __init__(
+        self, model, messages: list[BaseMessage], record=None, *, name: str = "", profile: str = ""
+    ) -> None:
         self._chunks: Iterator = model.stream(messages)
         self._record = record  # 记账回调（LLMService._record_both；None=测试替身）
+        self._name = name
+        self._profile = profile
         self.finish_reason = ""
         self.usage = Usage()
+        self.produced_chars = 0
 
     def __iter__(self) -> Iterator[str]:
+        from gewu.obs import current_tracer  # noqa: PLC0415
+
+        tracer = current_tracer()
+        if tracer is None:
+            yield from self._drain()
+            return
+        with tracer.span("llm", self._name, input={"profile": self._profile}) as sp:
+            yield from self._drain()
+            sp.tokens = self.usage.total or None
+            sp.output = {"finish": self.finish_reason, "chars": self.produced_chars}
+
+    def _drain(self) -> Iterator[str]:
         for chunk in self._chunks:
             meta = getattr(chunk, "response_metadata", None) or {}
             if meta.get("finish_reason"):
@@ -196,6 +249,7 @@ class ChatStreamResult:
                 )
             text = _content_text(chunk)
             if text:
+                self.produced_chars += len(text)
                 yield text
         if self._record is not None and self.usage.total:
             try:

@@ -20,6 +20,14 @@ def test_settings_defaults():
     assert s.embed_api_key == ""
     assert s.pg_dsn == DEFAULT_PG_DSN
     assert s.daily_token_budget == DEFAULT_DAILY_TOKEN_BUDGET
+    assert s.iqs_api_key == ""  # P26：key 空=联网整链关闭
+    assert s.web_search_daily_limit == 200
+
+
+def test_settings_reads_iqs_env_mapping():
+    s = Settings.load(env={"IQS_API_KEY": "k3", "WEB_SEARCH_DAILY_LIMIT": "50"})
+    assert s.iqs_api_key == "k3"
+    assert s.web_search_daily_limit == 50
 
 
 def test_settings_reads_env_mapping(tmp_path: Path):

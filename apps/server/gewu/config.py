@@ -88,6 +88,10 @@ class Settings:
     # 前端经 next rewrite 同源代理访问，无跨域 cookie 依赖）
     cookie_secure: bool = False
     cors_origins: tuple[str, ...] = ()
+    # 联网检索（IQS）：key 空=整链关闭（工具不注册、提示词不拼准则，
+    # 默认行为零变化）；按次计费故配每日调用上限闸。
+    iqs_api_key: str = ""
+    web_search_daily_limit: int = 200
 
     @classmethod
     def load(cls, env: Mapping[str, str] | None = None) -> Settings:
@@ -128,4 +132,6 @@ class Settings:
             cors_origins=tuple(
                 x.strip() for x in env.get("CORS_ORIGINS", "").split(",") if x.strip()
             ),
+            iqs_api_key=env.get("IQS_API_KEY", ""),
+            web_search_daily_limit=int(env.get("WEB_SEARCH_DAILY_LIMIT", "200")),
         )

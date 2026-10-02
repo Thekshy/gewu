@@ -148,10 +148,18 @@ def mode_dispatch(state: ChatState) -> str:
 
 
 def make_agent_in_node():
-    """agent 子图入口：本轮问题（指代消解后）入对话历史。"""
+    """agent 子图入口：本轮问题（指代消解后）入对话历史 + citations 清零。
+
+    citations 通道按轮计作用域：外层字段跨轮持久化（checkpointer），
+    不清零则上一轮来源漏进本轮事件（P26 真跑发现的跨轮污染）。
+    classic 链路 answer_direct 每轮全量覆写，无此问题。
+    """
 
     def agent_in(state: ChatState) -> dict:
-        return {"messages": [HumanMessage(content=state.get("resolved") or state["question"])]}
+        return {
+            "messages": [HumanMessage(content=state.get("resolved") or state["question"])],
+            "citations": [],
+        }
 
     return agent_in
 

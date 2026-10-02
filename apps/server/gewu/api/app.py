@@ -26,6 +26,7 @@ from gewu.config import VERSION, Settings
 from gewu.llm.service import LLMService
 from gewu.memory import MemoryStore
 from gewu.middleware import RateLimitMiddleware, TraceIDMiddleware
+from gewu.obs import make_trace_store
 from gewu.rag.retrieve import LLMReranker, Retriever
 from gewu.rag.store import DocStore, Store
 from gewu.session.store import SessionStore, make_feedback_store
@@ -85,6 +86,7 @@ def create_app(
     sessions: SessionStore | None = None,
     feedback=None,
     usage=_UNSET,
+    trace=_UNSET,
     checkpointer=None,
 ) -> FastAPI:
     app = FastAPI(title="gewu", version=VERSION)
@@ -113,6 +115,9 @@ def create_app(
     # P23：per-user 用量账——缺省探测式软降级（make_usage_store：PG 不可达退
     # None 禁用，全局闸兜底）；显式传 store（admin/限额测试）或 None（强制禁用）
     app.state.usage = make_usage_store(settings.pg_dsn) if usage is _UNSET else usage
+    # P27：链路观测——缺省探测式软降级（make_trace_store：PG 不可达退 None，
+    # 全链 no-op tracer）；显式 None=强制禁用（测试替身用）
+    app.state.trace_store = make_trace_store(settings.pg_dsn) if trace is _UNSET else trace
     app.state.llm = (
         llm
         if llm is not None

@@ -1,7 +1,7 @@
 SERVER_DIR := apps/server
 WEB_DIR := apps/web
 
-.PHONY: install-web run test lint eval ingest retrieval-eval variants demo clean lint-arch design-lint pg-up pg-down invite admin
+.PHONY: install-web run test lint eval ingest retrieval-eval variants demo clean lint-arch design-lint pg-up pg-down invite admin log-report trace-query trace-query-remote
 
 # ---------- 检索存储（P12：PostgreSQL + pgvector） ----------
 
@@ -102,3 +102,13 @@ SERVER ?= root@117.72.163.14
 DEPLOY_KEY ?= $(HOME)/Downloads/JD.pem
 log-report:
 	ssh -p 22 -i $(DEPLOY_KEY) $(SERVER) 'bash /root/gewu/scripts/log-report.sh $${HOURS:-24}'
+
+# 链路追踪查询（P27）：A=latest|session|find|spans|errors|stats，ARGS 透传参数
+# 本地读 .env 的 PG_DSN；-remote 沿 log-report 的 ssh 模式查线上
+A ?= latest
+trace-query:
+	bash scripts/trace-query.sh $(A) $(ARGS)
+
+trace-query-remote:
+	ssh -p 22 -i $(DEPLOY_KEY) $(SERVER) 'bash /root/gewu/scripts/trace-query.sh $(A) $(ARGS)'
+

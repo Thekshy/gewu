@@ -116,3 +116,20 @@
       （换肤零改动即过=token 层收口兑现）、curl+浏览器真跑剧本全过（真 flash
       追问三轮质量在线、feedback good→bad 覆盖单行 PG 断言、停服重试闭环）；
       compare 双轨零改动保对照干净）
+- [x] P27 第一方链路追踪：trace/span 落 PG（三接缝系统性采集=chat 轮首尾/
+      ToolTraceMiddleware 栈最外层含拦截留痕/LLMService+UsageRecord 双 LLM
+      接缝，新工具零观测成本）+ OTel GenAI 语义命名保 ARMS exporter 后路
+      + `make trace-query` 六动作 CLI（第一消费者=AI 排障）+ P27-0 日期
+      感知小修（AGENT_SYSTEM 注入「今天是」，闭 TYLOO「昨天」不可解根因）
+      ——三方案比选（LangSmith 实测连通但出境+配额出局；ARMS 量级不值）与
+      AI 消费者视角拍板留档任务书 §0——
+      [P27 任务书](runbooks/P27-first-party-tracing.md)（2026-10-02 执行：
+      真跑验证 web_search 检索词原样落 span、guard 拦截轮也留痕；admin 链路
+      页/feedback join/TTL 列 B 期）
+- [x] P26 联网检索（阿里 IQS）+ agent 通用化：web_search 工具条件注册（key
+      空=工具/提示词准则/日限闸三处全缺席=能力注入，WeKnora 范式）+ 适配层
+      防腐（实测口径钉死：contents 勿传/publishedTime 为 ISO 串/hostname
+      中文站名）+ AGENT_SYSTEM 通用化（校外问题尽力答+口径声明，旧「引导
+      回校园」废止）+ SearchQueryGuard 扩展 + 每日次数闸（IQS 按次计费）
+      + citations 跨轮清零修复（agent_in 每轮重置，真跑发现的存量 bug）
+      ——无任务书（会话内实施，方案对话留档），10-02 晨已先行部署线上

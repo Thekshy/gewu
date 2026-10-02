@@ -31,6 +31,7 @@ from gewu.agent import events as ev
 from gewu.agent.followups import generate_follow_ups, should_generate
 from gewu.agent.state import new_state
 from gewu.api.auth import require_user
+from gewu.obs import Tracer, set_current_tracer
 from gewu.usage import current_user
 
 router = APIRouter()
@@ -163,8 +164,20 @@ def chat(request: Request, payload: Annotated[dict, Body(...)]):
         citations: list[dict] = []
         hitl_paused = False
         trace = {"route": "", "route_layer": "", "steps": 0, "tool": 0}
+        # P27：本轮观测聚合器（store 软降级时全程 no-op；print [chat] 行与
+        # trace 行在此同源产出，双写不漂移）
+        tracer = Tracer(
+            getattr(request.app.state, "trace_store", None),
+            {
+                "session_id": req["session_id"],
+                "user": req["user"],
+                "role": req["role"],
+                "mode": req["mode"],
+                "question": req["question"],
+            },
+        )
 
-        def turn_log(reason: str) -> None:
+        def turn_log(reason: str, err: str | None = None) -> None:
             """整轮汇总一行 JSON（线上排障回溯：问题/路由/步数/耗时/结局单点可见）。"""
             print(
                 "[chat] "
@@ -185,6 +198,15 @@ def chat(request: Request, payload: Annotated[dict, Body(...)]):
                 ),
                 flush=True,
             )
+            tracer.finish(
+                route=trace["route"],
+                route_layer=trace["route_layer"],
+                reason=reason,
+                latency_ms=int((time.monotonic() - t0) * 1000),
+                steps=trace["steps"],
+                answer_head=answer[:80],
+                error=err,
+            )
 
         try:
             # subgraphs=True：agent 子图（create_agent）内 middleware/工具的 custom
@@ -195,6 +217,7 @@ def chat(request: Request, payload: Annotated[dict, Body(...)]):
             stream = graph.stream(run_input, config, stream_mode="custom", subgraphs=True)
             while True:
                 current_user.set(req["user"])
+                set_current_tracer(tracer)  # P23 同款纪律：每次 next 前 re-set
                 try:
                     chunk = next(stream)
                 except StopIteration:
@@ -225,7 +248,7 @@ def chat(request: Request, payload: Annotated[dict, Body(...)]):
             turn_log("aborted")
             raise  # 客户端断开：done 已无法送达（语义上记 aborted）
         except Exception as e:  # noqa: BLE001 - 链路错误 → error 事件 + done(error)
-            turn_log("error")
+            turn_log("error", err=str(e))
             yield _sse(ev.error_evt(str(e)))
             yield _sse(ev.done_evt(int((time.monotonic() - t0) * 1000), "error"))
             return

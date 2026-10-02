@@ -35,7 +35,9 @@ from gewu.agent import events as ev
 from gewu.agent.emitter import emit
 from gewu.agent.prompts import agent_system_prompt
 from gewu.agent.tx import FLOW_DEFS, build_confirm, normalize_slot, slot_meta
+from gewu.dates import today_iso
 from gewu.llm.service import ctx_profile
+from gewu.obs import current_tracer
 
 # 写工具四件（HITL 确认门对象，与 tools.py read_only=False 对齐）。
 WRITE_TOOLS = {"book_venue", "cancel_booking", "submit_leave", "approve_leave"}
@@ -112,12 +114,15 @@ def effective_route(messages: list) -> tuple[str, str]:
             tools.append(m.name)
     searched = "search_knowledge" in tools
     researched = "deep_research" in tools
+    webbed = "web_search" in tools
     wrote = any(t in WRITE_TOOLS for t in tools)
     if wrote:
         return ("hybrid", "本轮检索后办理") if searched else ("transaction", "本轮办理业务")
     if researched:
         return "research", "本轮深研"
     if searched or tools:
+        if webbed and not searched:
+            return "factual", "本轮联网作答"
         return "factual", "本轮检索作答"
     return "chitchat", "本轮零工具直答"
 
@@ -138,12 +143,18 @@ def partial_answer(messages: list) -> str:
 
 
 class AgentPromptMiddleware(AgentMiddleware):
-    """system prompt 动态装配：主体 + 长期记忆块尾部注入。"""
+    """system prompt 动态装配：主体 + 联网准则（能力注入）+ 长期记忆块尾部注入。"""
+
+    def __init__(self, web_search: bool = False) -> None:
+        super().__init__()
+        self._web = web_search
 
     def wrap_model_call(self, request, handler):
         mem = request.state.get("mem_block", "")
         return handler(
-            request.override(system_message=SystemMessage(content=agent_system_prompt(mem)))
+            request.override(
+                system_message=SystemMessage(content=agent_system_prompt(mem, web_search=self._web))
+            )
         )
 
 
@@ -153,6 +164,7 @@ class UsageRecordMiddleware(AgentMiddleware):
     P24-1 兼任观测：每次模型调用打 [llm] agent主循环一行（ms + ctx_profile），
     补 agent 主循环不经 chat_stream/chat_with_tools 封装的埋点盲区；格式含
     chars= 使 log-report.sh 的 ctx_chars 聚合自动吃到主循环数据。
+    P27-2 兼任 llm span（tracer 关闭时零开销直通）。
     """
 
     def __init__(self, llm) -> None:
@@ -160,6 +172,26 @@ class UsageRecordMiddleware(AgentMiddleware):
         self._llm = llm
 
     def wrap_model_call(self, request, handler):
+        tracer = current_tracer()
+        model_name = str(getattr(request.model, "model_name", "") or "agent")
+        in_profile = {
+            "msgs": len(request.messages),
+            "chars": sum(len(str(m.content)) for m in request.messages),
+        }
+        if tracer is None:
+            return self._run(request, handler, model_name, in_profile)
+        with tracer.span("llm", model_name, input=in_profile) as sp:
+            resp = self._run(request, handler, model_name, in_profile)
+            tokens = 0
+            for m in resp.result:
+                usage = getattr(m, "usage_metadata", None)
+                if usage:
+                    tokens += int(usage.get("total_tokens", 0) or 0)
+            sp.tokens = tokens or None
+            sp.output = {"msgs_out": len(resp.result)}
+            return resp
+
+    def _run(self, request, handler, model_name: str, in_profile: dict):
         t0 = time.monotonic()
         resp = handler(request)
         print(
@@ -172,6 +204,27 @@ class UsageRecordMiddleware(AgentMiddleware):
             if usage:
                 self._llm.record_usage(int(usage.get("total_tokens", 0) or 0))
         return resp
+
+
+class ToolTraceMiddleware(AgentMiddleware):
+    """所有工具调用的观测接缝（P27-2）：name/args/结果摘要/ms 自动落 span。
+
+    放中间件栈列表首位=wrap 最外层：Budget/Gate/Limit 拦截件短路返回的
+    调用同样留痕——以后加任何工具零观测成本（web_search 检索词盲区的
+    根治）。tracer 关闭时零开销直通。
+    """
+
+    def wrap_tool_call(self, request, handler):
+        tracer = current_tracer()
+        if tracer is None:
+            return handler(request)
+        call = request.tool_call
+        args = {k: v for k, v in (call.get("args") or {}).items()}
+        with tracer.span("tool", str(call.get("name", "?")), input=args or None) as sp:
+            out = handler(request)
+            content = getattr(out, "content", out)
+            sp.output = {"content": str(content)}
+            return out
 
 
 class TruncationDefenseMiddleware(AgentMiddleware):
@@ -268,23 +321,60 @@ class ResearchLimitMiddleware(AgentMiddleware):
         return handler(request)
 
 
+class WebSearchBudgetMiddleware(AgentMiddleware):
+    """web_search 每日次数闸（IQS 按次计费，agent 循环失控即烧钱——代码闸兜底）。
+
+    进程内 date 键计数：单进程部署语义足够（与 token 预算闸同场景）；多进程
+    部署时升级走 usage 台账。超限回执引导模型基于已有信息作答，不崩主链路。
+    """
+
+    def __init__(self, daily_limit: int = 200) -> None:
+        super().__init__()
+        self._limit = max(0, daily_limit)
+        self._day = ""
+        self._used = 0
+
+    def wrap_tool_call(self, request, handler):
+        if request.tool_call.get("name") != "web_search":
+            return handler(request)
+        today = today_iso()
+        if today != self._day:  # 跨日重置（首次调用同路初始化）
+            self._day, self._used = today, 0
+        if self._used >= self._limit:
+            print(
+                f"[websearch] 今日联网检索已达上限（{self._limit} 次），本次拦截",
+                flush=True,
+            )
+            return ToolMessage(
+                content=(
+                    f"今日联网检索额度已用完（上限 {self._limit} 次/日）。"
+                    "请基于已有信息回答，并告知用户今日无法联网核实。"
+                ),
+                name="web_search",
+                tool_call_id=request.tool_call.get("id", ""),
+            )
+        self._used += 1
+        return handler(request)
+
+
 def _cjk_bigrams(s: str) -> set[str]:
     """二字滑窗 bigram 集（丢词判定用，免分词器）。"""
     return {s[i : i + 2] for i in range(len(s) - 1)}
 
 
 class SearchQueryGuardMiddleware(AgentMiddleware):
-    """search_knowledge 完全丢原词时代码兜底拼回原问题（P24-3）。
+    """search_knowledge / web_search 完全丢原词时代码兜底拼回原问题（P24-3）。
 
     GLM 无视否定指令是已知坑（docstring 引导是软防线，本件是硬防线）。
     只在原问题与检索词的 bigram 交集为空（完全丢词）时干预——拼接是增补
     不是替换，召回只增不减；有重合（保住核心实体）则放行，避免口语原话
     摊薄 BM25 关键词权重。deep_research 不拦：sub 是 plan 拆解产物本非原话。
+    web_search 同守卫（P26）：联网检索词丢原词同样浪费一次计费调用。
     """
 
     def wrap_tool_call(self, request, handler):
         call = request.tool_call
-        if call.get("name") != "search_knowledge":
+        if call.get("name") not in ("search_knowledge", "web_search"):
             return handler(request)
         args = call.get("args") or {}
         query = str(args.get("query", "") or "")

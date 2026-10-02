@@ -82,10 +82,13 @@ def make_client(
     llm: FakeChatLLM | None = None,
     graph=None,
     logged: bool = True,
+    trace_store=None,
 ) -> TestClient:
     (tmp_path / "usage.json").write_text("{}", encoding="utf-8")
     settings = Settings(llm_api_key="lk", embed_api_key="ek", data_dir=tmp_path)
     kwargs = {} if cp is None else {"checkpointer": cp}
+    if trace_store is not None:  # P27：e2e 断言 trace/spans 落库时注入测试库 store
+        kwargs["trace"] = trace_store
     app = create_app(
         settings,
         store=FakeStore(Stats(1, 1, False), [DocInfo("d1", "t", "s", "u", 1)]),
@@ -308,3 +311,75 @@ def test_new_state_defaults():
     assert s["resolved"] == "q"
     assert s["truncated"] is False
     assert s["answer"] == ""
+
+
+# ---------- P27：链路观测 e2e（chat 端点 → tracer → PG 两表） ----------
+
+
+def test_chat_turn_writes_trace_and_tool_args_span(tmp_path, biz, mem, auth, sess, pg_dsn):
+    """auto 轮走 web_search：trace 行 + llm/tool span 落库，工具 args 原样可见。
+
+    覆盖 chat.py 的 tracer 生命周期与 contextvar re-set（P23 纪律）——
+    span 丢失的症状是 trace 行有而 span 全无。
+    """
+    import psycopg
+    from langchain_core.messages import AIMessage
+    from langgraph.checkpoint.memory import MemorySaver
+
+    from gewu.agent.agent import build_agent
+    from gewu.agent.graph import build_graph
+    from gewu.agent.tools import tools_for
+    from gewu.obs import TracerStore
+    from tests.agent_fakes import FakeAgentLLM, FakeRetriever
+
+    store = TracerStore(pg_dsn)
+    store.wipe()
+    settings = Settings(llm_api_key="lk", embed_api_key="ek", data_dir=tmp_path)
+    llm = FakeAgentLLM(
+        script=[
+            AIMessage(
+                content="",
+                tool_calls=[
+                    {
+                        "name": "web_search",
+                        "args": {"query": "10月1日 tyloo 比赛结果"},
+                        "id": "c1",
+                        "type": "function",
+                    }
+                ],
+            ),
+            AIMessage(content="根据 [1]，比赛结果如下。"),
+        ]
+    )
+    web_hits = [{"title": "t", "url": "https://e.com/a", "snippet": "s", "site": "站", "date": ""}]
+    agent = build_agent(
+        settings, llm, FakeRetriever(), biz, tools_for(), web=lambda q, k=5: web_hits
+    )
+    graph = build_graph(
+        settings, FakeRetriever(), llm, business=biz, checkpointer=MemorySaver(), agent=agent
+    )
+    client = make_client(tmp_path, biz, mem, auth, sess, graph=graph, trace_store=store)
+
+    resp = client.post(
+        "/api/chat",
+        json={"question": "昨天tyloo的比赛结果如何", "mode": "auto", "session_id": "s1"},
+    )
+    assert resp.status_code == 200
+    events = _parse_sse(resp.text)
+    assert any(e.get("type") == "done" and e.get("reason") == "completed" for e in events)
+
+    with psycopg.connect(pg_dsn, autocommit=True) as conn:
+        tr = conn.execute(
+            "SELECT id, question, route, reason FROM agent_trace ORDER BY id DESC LIMIT 1"
+        ).fetchone()
+        spans = conn.execute(
+            "SELECT kind, name, input FROM agent_span WHERE trace_id = %s ORDER BY seq", (tr[0],)
+        ).fetchall()
+    assert tr[1] == "昨天tyloo的比赛结果如何" and tr[2] == "factual" and tr[3] == "completed"
+    kinds = {(s[0], s[1]) for s in spans}
+    assert ("tool", "web_search") in kinds  # 工具 args 原样落库（盲区根治点）
+    assert ("llm", "agent") in kinds  # 主循环两次模型调用经 UsageRecord 接缝
+    ws = next(s for s in spans if s[1] == "web_search")
+    assert ws[2]["query"] == "10月1日 tyloo 比赛结果"  # psycopg 自动解 JSONB
+    assert len(spans) >= 3  # 2×llm + 1×tool
+    store.wipe()

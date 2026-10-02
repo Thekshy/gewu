@@ -230,3 +230,88 @@ def test_multiturn_slot_collection_not_eaten_by_guard(tmp_path, biz):
     results = [e for e in resume_events if e["type"] == "action_result"]
     assert results and results[0]["success"]
     assert any(b["venue"] == "研讨间301" for b in business.my_bookings("demo-student"))
+
+
+# ---------- P26：联网检索（条件注册 + 全链事件） ----------
+
+
+def test_web_search_flow_emits_citations_and_factual_route(tmp_path, biz):
+    settings = Settings(llm_api_key="k", embed_api_key="e", data_dir=tmp_path, iqs_api_key="iqs")
+    retriever = FakeRetriever([make_hit()])
+    llm = FakeAgentLLM(
+        script=[
+            _ai_call("web_search", {"query": "2026下半年四六级报名时间"}),
+            _ai_text("根据 [1]，2026 下半年四六级笔试报名时间为 9 月 18 日至 28 日。"),
+        ]
+    )
+    web_hits = [
+        {
+            "title": "四六级报名通知",
+            "url": "https://example.com/cet",
+            "snippet": "报名时间 9 月 18 日—28 日",
+            "site": "示例教务处",
+            "date": "2026-09-11",
+        }
+    ]
+    agent = build_agent(settings, llm, retriever, biz, tools_for(), web=lambda q, k=5: web_hits)
+    graph = build_graph(
+        settings, retriever, llm, business=biz, checkpointer=MemorySaver(), agent=agent
+    )
+    events = run_turn(graph, "w1", question="四六级报名什么时候截止")
+    assert any(
+        e["type"] == "status" and "联网检索" in e.get("text", "") for e in events
+    )  # 工具内 status 事件冒泡（subgraphs=True）
+    cites = [e for e in events if e["type"] == "citations" and e["items"]]
+    assert cites and cites[-1]["items"][0]["doc_id"] == "https://example.com/cet"
+    assert cites[-1]["items"][0]["source"] == "联网检索"  # 来源 Dialog 单组收拢
+    assert "factual" in _routes(events)
+    assert not any(e["type"] == "error" for e in events)
+
+
+def test_web_search_tool_conditional_registration(biz):
+    from gewu.agent.agenttools import build_agent_tools
+
+    off = build_agent_tools(FakeAgentLLM(), biz, tools_for(), FakeRetriever())
+    assert all(t.name != "web_search" for t in off)  # key 空=不注册（能力注入）
+    on = build_agent_tools(FakeAgentLLM(), biz, tools_for(), FakeRetriever(), web=lambda q, k=5: [])
+    assert any(t.name == "web_search" for t in on)
+
+
+def test_offcampus_question_answers_directly_without_refusal(tmp_path, biz):
+    """P26 通用化：校外通用问题零工具直答（旧第 9 条「引导回校园」废止）。"""
+    graph, _, _ = make_flow(
+        tmp_path,
+        biz,
+        [
+            _ai_text(
+                "勾股定理：直角三角形两直角边平方和等于斜边平方（a²+b²=c²）。这是通用数学常识，非校园官方口径。"
+            )
+        ],
+    )
+    events = run_turn(graph, "g1", question="勾股定理是什么")
+    assert "勾股定理" in _answer(events)
+    assert not any(e["type"] == "error" for e in events)
+
+
+def test_citations_scoped_per_turn_no_cross_pollution(tmp_path, biz):
+    """P26：citations 按轮清零——上轮联网来源不得漏进本轮事件（真跑发现的跨轮污染）。"""
+    settings = Settings(llm_api_key="k", embed_api_key="e", data_dir=tmp_path, iqs_api_key="iqs")
+    retriever = FakeRetriever([make_hit()])
+    llm = FakeAgentLLM(
+        script=[
+            _ai_call("web_search", {"query": "四六级报名时间"}),
+            _ai_text("联网答 [1]。"),
+            _ai_call("search_knowledge", {"query": "转专业条件"}),
+            _ai_text("知识库答 [1]。"),
+        ]
+    )
+    web_hits = [{"title": "t", "url": "https://e.com/a", "snippet": "s", "site": "站", "date": ""}]
+    agent = build_agent(settings, llm, retriever, biz, tools_for(), web=lambda q, k=5: web_hits)
+    graph = build_graph(
+        settings, retriever, llm, business=biz, checkpointer=MemorySaver(), agent=agent
+    )
+    run_turn(graph, "x1", question="四六级报名时间")
+    events2 = run_turn(graph, "x1", question="转专业条件")  # 同 thread 第二轮
+    cites2 = [e for e in events2 if e["type"] == "citations" and e["items"]]
+    assert cites2, "第二轮应有引用"
+    assert all(c["source"] != "联网检索" for c in cites2[-1]["items"])  # 只剩本轮 KB 来源
