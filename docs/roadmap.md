@@ -141,3 +141,10 @@
       [P28 任务书](runbooks/P28-guard-block-narrowing.md)（2026-10-02 执行：
       TYLOO 同题首触放行联网且拿到 10-01 真实赛果=原始诉求闭环；危险样例
       三连仍拦；发现存量缺口=run_eval 未适配 P21 认证，另立 chore）
+- [x] 联网检索三改（P29 量级，会话内直改未立票）：freshness 时间窗（web_search
+      加 day/week/month/year → IQS 顶层 timeRange，**四档枚举实测全生效**，
+      advancedParams/queryContext 里同名参数均无效——口径钉死在 websearch.py）
+      + miss 换词重试（适配层 (hits,status) 三分支：无命中回执引导换词二跳，
+      WeKnora「证据不足改写再试」条款进 docstring）+ canonical URL 去重与
+      scheme 过滤。真跑：TYLOO 同题 span 见 freshness=day、引用全部落在
+      昨日赛况（旧闻绝迹）、校内题零联网回归。

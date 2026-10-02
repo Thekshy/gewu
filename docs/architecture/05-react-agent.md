@@ -44,7 +44,7 @@ P17 起 `mode=auto/react` 的默认链路是 **agent-first 单循环**：LangCha
 | 工具 | 类型 | 说明 |
 | --- | --- | --- |
 | `search_knowledge` | 读 | 混合检索；返回 `Command(update={messages, citations})`——observation 与引用通道一次更新（citations 带 (doc_id,title) 去重 reducer，并行 Send 安全合并） |
-| `web_search` | 读 | 联网检索（P26 条件注册）：IQS 适配层 `gewu/websearch.py` 防腐翻译（失败恒 [] 由工具回「暂不可用」降级）；citations 通道 source 统一「联网检索」组（站点名进标题）；mainText 有意不取（token 成本），全文抓取二期须带 SSRF 校验 |
+| `web_search` | 读 | 联网检索（P26 条件注册；P29 三改）：IQS 适配层 `gewu/websearch.py` 防腐翻译——返回 (hits, status) 三分支（ok/empty/error：无命中引导换词重试，不可用如实降级）+ freshness 时间窗（day/week/month/year → 顶层 timeRange，四档实测生效，治时效题旧闻混排）+ canonical URL 去重；citations 通道 source 统一「联网检索」组（站点名进标题）；mainText 有意不取（token 成本），全文抓取二期须带 SSRF 校验 |
 | `parse_date` | 读 | 确定性日期解析（`gewu/dates.py`），零 LLM 成本 |
 | `deep_research` | 读 | 复用 research 管线（plan→逐路检索→聚合，flagship 综合留在主循环）；ResearchLimit 单轮 1 次 |
 | 8 个业务工具 | 读 4 / 写 4 | 薄包 `call_tool` 单一出口；**不做角色过滤**——权限判定保持在工具层单一出口，越权回执是有效 observation（模型转述，ag-read-002/tx-006 断言语义） |

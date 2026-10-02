@@ -253,7 +253,14 @@ def test_web_search_flow_emits_citations_and_factual_route(tmp_path, biz):
             "date": "2026-09-11",
         }
     ]
-    agent = build_agent(settings, llm, retriever, biz, tools_for(), web=lambda q, k=5: web_hits)
+    agent = build_agent(
+        settings,
+        llm,
+        retriever,
+        biz,
+        tools_for(),
+        web=lambda q, k=5, freshness="": (web_hits, "ok"),
+    )
     graph = build_graph(
         settings, retriever, llm, business=biz, checkpointer=MemorySaver(), agent=agent
     )
@@ -273,7 +280,13 @@ def test_web_search_tool_conditional_registration(biz):
 
     off = build_agent_tools(FakeAgentLLM(), biz, tools_for(), FakeRetriever())
     assert all(t.name != "web_search" for t in off)  # key 空=不注册（能力注入）
-    on = build_agent_tools(FakeAgentLLM(), biz, tools_for(), FakeRetriever(), web=lambda q, k=5: [])
+    on = build_agent_tools(
+        FakeAgentLLM(),
+        biz,
+        tools_for(),
+        FakeRetriever(),
+        web=lambda q, k=5, freshness="": ([], "empty"),
+    )
     assert any(t.name == "web_search" for t in on)
 
 
@@ -306,7 +319,14 @@ def test_citations_scoped_per_turn_no_cross_pollution(tmp_path, biz):
         ]
     )
     web_hits = [{"title": "t", "url": "https://e.com/a", "snippet": "s", "site": "站", "date": ""}]
-    agent = build_agent(settings, llm, retriever, biz, tools_for(), web=lambda q, k=5: web_hits)
+    agent = build_agent(
+        settings,
+        llm,
+        retriever,
+        biz,
+        tools_for(),
+        web=lambda q, k=5, freshness="": (web_hits, "ok"),
+    )
     graph = build_graph(
         settings, retriever, llm, business=biz, checkpointer=MemorySaver(), agent=agent
     )

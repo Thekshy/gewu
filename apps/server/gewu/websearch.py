@@ -24,6 +24,24 @@ IQS_TIMEOUT = 8.0  # 对齐 followups 线程超时风格；超时降级不崩主
 SNIPPET_LIMIT = 600  # 与 search_knowledge 的 600 字口径一致
 MAX_RESULTS = 10  # 服务端单次上限，超出截断
 
+# freshness 相对窗口 → IQS 顶层 timeRange（四档均实测生效，2026-10-02 真调；
+# 注意 advancedParams.timeRange / queryContext.timeRange 均无效，参数在顶层）。
+_FRESHNESS_MAP = {"day": "OneDay", "week": "OneWeek", "month": "OneMonth", "year": "OneYear"}
+
+
+def _canonical(url: str) -> str | None:
+    """URL 合法性与规范化键：仅 http/https、须有主机、去 fragment——
+    同一页面的带锚点变体只留首条（WeKnora canonical 去重同款）。"""
+    from urllib.parse import urlsplit
+
+    try:
+        parts = urlsplit(url.strip())
+    except ValueError:
+        return None
+    if parts.scheme not in ("http", "https") or not parts.netloc:
+        return None
+    return parts._replace(fragment="").geturl()
+
 
 def _site_of(item: dict, url: str) -> str:
     """来源展示名：中文站点名优先，缺失退 URL 域名。"""
@@ -62,20 +80,26 @@ def _clean(item: dict) -> dict | None:
     }
 
 
-def search(api_key: str, query: str, k: int = 5, *, client=None) -> list[dict]:
-    """IQS 智能搜索 → 干净结果列表；参数非法或调用失败返回 []。
+def search(
+    api_key: str, query: str, k: int = 5, freshness: str = "", *, client=None
+) -> tuple[list[dict], str]:
+    """IQS 智能搜索 → (干净结果列表, 状态)。
 
-    client 注入缝：缺省 httpx 模块（每次短连接），测试传 MockTransport
-    做契约测试；生产经 functools.partial 绑定 api_key 后作为工具闭包。
+    状态三分支（调用方据此分流回执）：ok=有结果；empty=服务正常但无命中
+    （含参数非法短路）；error=网络/HTTP/超时（不崩主链路，按不可用降级）。
+    freshness：day/week/month/year → 请求体顶层 timeRange（时效题过滤旧闻；
+    非法值静默视为不过滤）。client 注入缝：缺省 httpx，测试传 MockTransport。
     """
     q = (query or "").strip()
     if not api_key or not 2 <= len(q) <= 100:  # 服务端长度约束前置
-        return []
-    body = {
+        return [], "empty"
+    body: dict = {
         "query": q,
         "engineType": "CNAuto",
         "advancedParams": {"numResults": max(1, min(int(k), MAX_RESULTS))},
     }
+    if freshness in _FRESHNESS_MAP:
+        body["timeRange"] = _FRESHNESS_MAP[freshness]
     hc = client or httpx
     try:
         resp = hc.post(
@@ -88,11 +112,19 @@ def search(api_key: str, query: str, k: int = 5, *, client=None) -> list[dict]:
         data = resp.json()
     except Exception as e:  # noqa: BLE001 - 联网失败不崩主链路，交调用方降级
         print(f"[websearch] IQS 调用失败（返回空，主链路降级）：{e}", flush=True)
-        return []
+        return [], "error"
     out: list[dict] = []
+    seen: set[str] = set()
     for item in data.get("pageItems") or []:
-        if isinstance(item, dict):
-            c = _clean(item)
-            if c:
-                out.append(c)
-    return out
+        if not isinstance(item, dict):
+            continue
+        c = _clean(item)
+        if c is None:
+            continue
+        key = _canonical(c["url"])
+        if key is None or key in seen:  # 非法 scheme 或重复页丢弃
+            continue
+        seen.add(key)
+        c["url"] = key  # 存规范化 URL（去 fragment），键值同源
+        out.append(c)
+    return out, ("ok" if out else "empty")

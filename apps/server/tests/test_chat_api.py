@@ -353,7 +353,12 @@ def test_chat_turn_writes_trace_and_tool_args_span(tmp_path, biz, mem, auth, ses
     )
     web_hits = [{"title": "t", "url": "https://e.com/a", "snippet": "s", "site": "站", "date": ""}]
     agent = build_agent(
-        settings, llm, FakeRetriever(), biz, tools_for(), web=lambda q, k=5: web_hits
+        settings,
+        llm,
+        FakeRetriever(),
+        biz,
+        tools_for(),
+        web=lambda q, k=5, freshness="": (web_hits, "ok"),
     )
     graph = build_graph(
         settings, FakeRetriever(), llm, business=biz, checkpointer=MemorySaver(), agent=agent
