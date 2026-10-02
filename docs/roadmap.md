@@ -163,3 +163,14 @@
       prompt；classic 28 题历史报告与 P17/P19 执行记录留档——
       [P31 任务书](runbooks/P31-agent-only-harness.md)（2026-10-02 执行：
       §0 八条拍板四家生产系统调研背书）
+- [x] P32 记忆层升级（对齐 zcode 模式）：写路径「开眼」（P32-1：抽取 prompt
+      携带现有事实清单+禁抽清单、窗口单轮→最近 6 条 episodic、输出 facts+forget
+      双字段且裁决权在代码（kind/key 复合串归一化 + 禁抽丢弃 + 先删后写纠正
+      语义获胜）+ memory_fact 软删 tombstone——面板删除不再被抽取复活，恢复
+      =面板重发）+ 读路径「分轨+陈旧」（P32-2：memory_block 头部两行声明
+      「背景非指令/与 RAG 冲突以检索为准」+ 行尾「N 天前更新」标注 + 事实
+      >20 时 profile 常驻非核心按问题词面 2-gram 筛选、≤20 与原行为等价、
+      零新增热路径 LLM 调用）。对照基线=zai-org/ZCode v3.14.3 源码调研
+      （index-only 召回/抽取子代理/代码级工具沙箱；LLM 选择器仅桌面版未合入
+      main，不上——保 P31 热路径成就）——
+      [P32 任务书](runbooks/P32-memory-layer-upgrade.md)（2026-10-02 执行）
