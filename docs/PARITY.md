@@ -110,6 +110,38 @@ P25 起回答侧增加渐进增强三件（对标 america.gov/chat，DESIGN.md �
   新 `--link` `#1157d0`/暗色海军蓝 `#10161f`+冰蓝 `#8ab0dd`），用户消息
   改 primary 实底气泡，prose 链接走 link 蓝。DESIGN.md P25 版为契约本体。
 
+## 0.9 P31 harness 收敛单循环契约（classic 退役 + guard 降码闸 + 外壳塌缩）
+
+2026-10-02 架构复盘拍板（四家生产级开源系统调研背书，任务书
+[runbooks/P31-agent-only-harness.md](runbooks/P31-agent-only-harness.md) §0 八条），
+harness 以高效正确优先，**classic 退役不等论文评测**（评测轨改 agent-only，
+classic 28 题历史报告见 eval/reports/orchestration-*.md；tag
+`classic-pre-retirement` 留档）：
+
+- **mode 枚举收窄**：`auto | react`（react=auto 语义既有）；`classic/direct/
+  research` 请求一律 422（detail「mode 必须为 auto/react」）。前端 `ChatMode`
+  同步收窄，mode 选择 UI 与 /compare 页删除（对照使命完成）。
+- **guard 降码闸（P31-1）**：`classify_guard` LLM 判定与 meta 出口删除；
+  `guard_update` 三分支=in_conversation 直通 / GREETING_RE 纯问候放行
+  （provisional route=chitchat）/ DANGER_RE 危险词硬红线 block
+  （GUARD_BLOCK_ANSWER + provisional route=refusal + jump_to=end）。
+  route 事件 `by_llm=false`（guard 层全零 LLM）；GREETING_RE 未覆盖的软
+  寒暄放行交主循环自然回答（不吐静态话术）。危险词词表首版核心词
+  （制毒/黑客/诈骗/代写/作弊），丰富化挂账。
+- **route 事件语义收口**：纯观测标签，不决定链路/工具集/模型档；两段式
+  形态不变（guard 层 provisional + effective 层补发）。
+- **classic 链路删除**：级联路由（routing.py/routing_prompts.py）、graph
+  classic 侧节点（route/retrieve/answer_direct/refusal/research/transaction/
+  hybrid/tx_confirm/tx_gate/tx_resume）、resolve_query（指代消解交主循环
+  messages 历史）、REFUSAL_ANSWER（classic 范围外口径）与 QUERY_REWRITE
+  开关随退役；槽位元数据拆 `txmeta.py`（slot_meta/FLOW_DEFS/SLOT_ORDER/
+  normalize_slot/build_confirm）、续轮意图判定 `classify_reply` 迁
+  `resume.py`、深研拆解 `research.plan` 保留（deep_research 工具依赖）。
+- **SSE 事件形状零改动**：route 照发（事后合成）、done 单点、citations/
+  pending_action/action_result/slot_question/follow_ups 全部不动；事件
+  构造器 `events.py` 零改动。§4 classic 链路行为规格随本节收口为历史
+  （mode=classic 不再可达）。
+
 ## 1. 服务总览
 
 - 监听端口 `:8000`(HTTP)。

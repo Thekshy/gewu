@@ -1,33 +1,15 @@
-"""tx 域纯逻辑测试：工具识别/时段解析/天数/确认摘要/续轮启发式/槽位归一。"""
+"""槽位元数据与 resume 桥纯逻辑测试：时段解析/槽位归一/确认摘要/续轮启发式。
+
+P31-2：classic 流程用例（detect_tool/phrase_days/流程推进）随链路退役删除；
+元数据迁 txmeta，classify_reply 迁 resume。
+"""
 
 from __future__ import annotations
 
-from gewu.agent.tx import (
-    classify_reply,
-    detect_tool,
-    normalize_slot,
-    parse_slot,
-    phrase_days,
-    slot_meta,
-)
+from gewu.agent.resume import classify_reply
+from gewu.agent.txmeta import normalize_slot, parse_slot, slot_meta
 from gewu.config import Settings
 from gewu.llm.service import LLMService
-
-
-def _meta(biz) -> dict:
-    return slot_meta(biz)
-
-
-def test_detect_tool_order_and_negative_guard():
-    assert detect_tool("取消预约 VE-0001") == "cancel_booking"
-    assert detect_tool("我的预约有哪些") == "my_bookings"
-    assert detect_tool("待审批的请假有哪些") == "pending_leaves"
-    assert detect_tool("帮我提交请假申请") == "submit_leave"
-    assert detect_tool("帮我预约明天晚上的羽毛球馆") == "book_venue"
-    # 负向双保险：预约心理咨询不选场馆工具（宁可落知识库也不误入办理流）
-    assert detect_tool("我想预约心理咨询") == ""
-    # 顺序契约：请假单号查询优先于 submit_leave 的宽匹配
-    assert detect_tool("LV-0001 这个请假单批了没") == "leave_status"
 
 
 def test_parse_slot():
@@ -38,15 +20,8 @@ def test_parse_slot():
     assert parse_slot("上午") == ""  # 多选词
 
 
-def test_phrase_days():
-    assert phrase_days("请一天假") == 1
-    assert phrase_days("请三天假") == 3
-    assert phrase_days("请 5 天假") == 5
-    assert phrase_days("请假") is None
-
-
 def test_normalize_slot_venue_and_date(biz):
-    meta = _meta(biz)
+    meta = slot_meta(biz)
     norm, ok = normalize_slot(meta, "venue", "羽毛球馆")
     assert ok and norm == "venue-badminton"
     norm, ok = normalize_slot(meta, "date", "明天")
@@ -56,7 +31,7 @@ def test_normalize_slot_venue_and_date(biz):
 
 
 def test_build_confirm_leave(biz):
-    from gewu.agent.tx import build_confirm
+    from gewu.agent.txmeta import build_confirm
 
     b = biz
     state = {

@@ -144,7 +144,6 @@ def create_app(
         app.state.llm,
         business=app.state.business,
         checkpointer=app.state.checkpointer,
-        memory=app.state.memory,
     )
     app.include_router(auth_routes.router)
     app.include_router(routes.router)

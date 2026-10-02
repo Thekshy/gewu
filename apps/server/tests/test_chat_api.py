@@ -2,6 +2,7 @@
 
 P21 起：需登录（cookie）；role 服务端权威（请求体 role 废弃忽略）。
 P22 起：session_id 必填且须为已登记属本人的会话（make_client 预建固定 id）。
+P31-2 起：mode 枚举收窄 auto/react，direct 链路用例改写为 agent 脚本链路。
 """
 
 from __future__ import annotations
@@ -10,6 +11,7 @@ import json
 from pathlib import Path
 
 from fastapi.testclient import TestClient
+from langchain_core.messages import AIMessage
 
 from gewu.agent.state import new_state
 from gewu.api.app import create_app
@@ -19,6 +21,7 @@ from gewu.config import Settings
 from gewu.memory import MemoryStore
 from gewu.rag.store import DocInfo, Stats
 from gewu.session.store import SessionStore
+from tests.agent_fakes import FakeAgentLLM
 from tests.conftest import make_logged_client
 from tests.test_api import FakeRetriever, FakeStore
 
@@ -33,7 +36,7 @@ class FakeChatStream:
 
 
 class FakeChatLLM:
-    """编排域 LLM 替身：直答流式返回预置增量。"""
+    """编排域 LLM 替身（admin 域共用）：主循环模型走空脚本（回答走兜底文案）。"""
 
     def __init__(self, deltas: list[str], finish_reason: str = "stop") -> None:
         self._deltas = deltas
@@ -79,13 +82,13 @@ def make_client(
     auth: AuthStore,
     sess: SessionStore,
     cp=None,
-    llm: FakeChatLLM | None = None,
+    llm=None,
     graph=None,
     logged: bool = True,
     trace_store=None,
 ) -> TestClient:
     (tmp_path / "usage.json").write_text("{}", encoding="utf-8")
-    settings = Settings(llm_api_key="lk", embed_api_key="ek", data_dir=tmp_path)
+    settings = Settings(llm_api_key="lk", embed_api_key="e", data_dir=tmp_path)
     kwargs = {} if cp is None else {"checkpointer": cp}
     if trace_store is not None:  # P27：e2e 断言 trace/spans 落库时注入测试库 store
         kwargs["trace"] = trace_store
@@ -97,7 +100,7 @@ def make_client(
         auth=auth,
         sessions=sess,
         retriever=FakeRetriever([_hit()]),
-        llm=llm or FakeChatLLM(["开放时间", "是 7:30。"]),
+        llm=llm or FakeAgentLLM(script=[AIMessage(content="开放时间是 7:30。")], has_key=True),
         **kwargs,
     )
     if graph is not None:
@@ -122,7 +125,7 @@ def _parse_sse(text: str) -> list[dict]:
 
 def test_chat_requires_login(tmp_path: Path, biz, mem, auth, sess):
     c = make_client(tmp_path, biz, mem, auth, sess, logged=False)
-    r = c.post("/api/chat", json={"question": "图书馆几点开门", "mode": "direct"})
+    r = c.post("/api/chat", json={"question": "图书馆几点开门", "mode": "auto"})
     assert r.status_code == 401
     assert r.json()["detail"] == "未登录或会话已过期"
 
@@ -132,7 +135,9 @@ def test_chat_validation(tmp_path: Path, biz, mem, auth, sess):
     cases = [
         ({"question": ""}, "问题不能为空"),
         ({"question": "字" * 501}, "问题过长"),
-        ({"question": "q", "mode": "bogus"}, "mode 必须为 auto/direct/research/react/classic"),
+        ({"question": "q", "mode": "bogus"}, "mode 必须为 auto/react"),
+        ({"question": "q", "mode": "classic"}, "mode 必须为 auto/react"),
+        ({"question": "q", "mode": "direct"}, "mode 必须为 auto/react"),
         ({"question": "q", "session_id": "s" * 65}, "session_id 过长（上限 64 字符）"),
         ({"question": 123}, "请求体不是合法 JSON"),
     ]
@@ -145,13 +150,13 @@ def test_chat_validation(tmp_path: Path, biz, mem, auth, sess):
 def test_chat_session_id_required_and_registered(tmp_path: Path, biz, mem, auth, sess):
     """P22：default 缺省废弃（未传 422 给指引）；未登记/他人会话统一 404。"""
     c = make_client(tmp_path, biz, mem, auth, sess)
-    r = c.post("/api/chat", json={"question": "图书馆几点开门", "mode": "direct"})
+    r = c.post("/api/chat", json={"question": "图书馆几点开门", "mode": "auto"})
     assert r.status_code == 422
     assert r.json()["detail"] == "session_id 不能为空（请先 POST /api/sessions 创建会话）"
 
     r = c.post(
         "/api/chat",
-        json={"question": "q", "mode": "direct", "session_id": "never-registered"},
+        json={"question": "q", "mode": "auto", "session_id": "never-registered"},
     )
     assert r.status_code == 404
     assert r.json()["detail"] == "会话不存在"
@@ -159,7 +164,7 @@ def test_chat_session_id_required_and_registered(tmp_path: Path, biz, mem, auth,
     # 他人会话同样 404（不泄露存在性）：u2 建会话，u1 引用
     other = make_logged_client(c.app, auth, email="u2@example.com")
     sid = other.post("/api/sessions", json={}).json()["session_id"]
-    r = c.post("/api/chat", json={"question": "q", "mode": "direct", "session_id": sid})
+    r = c.post("/api/chat", json={"question": "q", "mode": "auto", "session_id": sid})
     assert r.status_code == 404
 
 
@@ -170,7 +175,7 @@ def test_chat_role_param_ignored_server_side_authority(tmp_path: Path, biz, mem,
         "/api/chat",
         json={
             "question": "图书馆几点开门",
-            "mode": "direct",
+            "mode": "auto",
             "session_id": "s1",
             "role": "counselor",
         },
@@ -180,9 +185,7 @@ def test_chat_role_param_ignored_server_side_authority(tmp_path: Path, biz, mem,
 
 def test_chat_sse_headers_and_frame(tmp_path: Path, biz, mem, auth, sess):
     c = make_client(tmp_path, biz, mem, auth, sess)
-    r = c.post(
-        "/api/chat", json={"question": "图书馆几点开门", "mode": "direct", "session_id": "s1"}
-    )
+    r = c.post("/api/chat", json={"question": "图书馆几点开门", "mode": "auto", "session_id": "s1"})
     assert r.status_code == 200
     assert r.headers["content-type"].startswith("text/event-stream")
     assert r.headers["cache-control"] == "no-cache"
@@ -191,20 +194,21 @@ def test_chat_sse_headers_and_frame(tmp_path: Path, biz, mem, auth, sess):
     assert "\n\ndata: " in r.text
     events = _parse_sse(r.text)
     types = [e["type"] for e in events]
-    # 直答链路事件序：route → answer_delta* → citations → done（恰一个 done 收尾）
-    assert types[0] == "route"
+    # agent 单链事件序：status → answer_delta* → route(事后合成) → citations → done
+    # （恰一个 done 收尾；citations 紧邻 done）
+    assert types[0] == "status"
     assert "answer_delta" in types
+    assert "route" in types
     assert types[-1] == "done"
     assert types.count("done") == 1
     assert types.index("citations") == len(types) - 2
 
 
 def test_chat_done_reason_completed_and_citations(tmp_path: Path, biz, mem, auth, sess):
-    llm = FakeChatLLM(["开放时间", "是 7:30。"])
-    c = make_client(tmp_path, biz, mem, auth, sess, llm=llm)
+    c = make_client(tmp_path, biz, mem, auth, sess)
     r = c.post(
         "/api/chat",
-        json={"question": "图书馆几点开门", "mode": "direct", "session_id": "t"},
+        json={"question": "图书馆几点开门", "mode": "auto", "session_id": "t"},
     )
     events = _parse_sse(r.text)
     done = events[-1]
@@ -214,14 +218,17 @@ def test_chat_done_reason_completed_and_citations(tmp_path: Path, biz, mem, auth
     answer = "".join(e["text"] for e in events if e["type"] == "answer_delta")
     assert answer == "开放时间是 7:30。"
     cites = [e for e in events if e["type"] == "citations"][0]
-    assert cites["items"][0]["doc_id"] == "doc-x"
-    assert cites["items"][0]["n"] == 1
+    assert cites["items"] == []  # 零工具轮：citations 通道空但事件照发（契约不缺帧）
 
 
 def test_chat_truncated_marks_max_tokens(tmp_path: Path, biz, mem, auth, sess):
-    llm = FakeChatLLM(["很长".replace("长", "文") * 50], finish_reason="length")
+    long_text = "文" * 100
+    llm = FakeAgentLLM(
+        script=[AIMessage(content=long_text, response_metadata={"finish_reason": "length"})],
+        has_key=True,
+    )
     c = make_client(tmp_path, biz, mem, auth, sess, llm=llm)
-    r = c.post("/api/chat", json={"question": "讲讲校历", "mode": "direct", "session_id": "t"})
+    r = c.post("/api/chat", json={"question": "讲讲校历", "mode": "auto", "session_id": "t"})
     events = _parse_sse(r.text)
     assert events[-1]["reason"] == "max_tokens"
     assert any(e["type"] == "status" and "长度上限" in e["text"] for e in events)
@@ -229,10 +236,8 @@ def test_chat_truncated_marks_max_tokens(tmp_path: Path, biz, mem, auth, sess):
 
 def test_chat_utf8_raw_not_escaped(tmp_path: Path, biz, mem, auth, sess):
     c = make_client(tmp_path, biz, mem, auth, sess)
-    r = c.post(
-        "/api/chat", json={"question": "图书馆几点开门", "mode": "direct", "session_id": "u"}
-    )
-    assert "图书馆" in r.text  # UTF-8 原文（不转义为 \uXXXX）
+    r = c.post("/api/chat", json={"question": "图书馆几点开门", "mode": "auto", "session_id": "u"})
+    assert "开放时间" in r.text  # UTF-8 原文（不转义为 \uXXXX）
 
 
 def test_chat_error_path_emits_error_and_done(tmp_path: Path, biz, mem, auth, sess):
@@ -242,18 +247,34 @@ def test_chat_error_path_emits_error_and_done(tmp_path: Path, biz, mem, auth, se
             yield  # pragma: no cover
 
     c = make_client(tmp_path, biz, mem, auth, sess, graph=BoomGraph())
-    r = c.post("/api/chat", json={"question": "q", "mode": "direct", "session_id": "e"})
+    r = c.post("/api/chat", json={"question": "q", "mode": "auto", "session_id": "e"})
     events = _parse_sse(r.text)
     assert events[-2]["type"] == "error"
     assert events[-1]["type"] == "done"
     assert events[-1]["reason"] == "error"
 
 
-class FollowUpLLM(FakeChatLLM):
-    """direct 链路替身：chat() 吐合法追问 JSON（小模型通道复用同一替身）。"""
+class FollowUpLLM(FakeAgentLLM):
+    """检索一轮后作答的替身：route=factual 触发追问；chat() 吐合法追问 JSON。"""
 
     def __init__(self) -> None:
-        super().__init__(["开放时间", "是 7:30。"])
+        super().__init__(
+            script=[
+                AIMessage(
+                    content="",
+                    tool_calls=[
+                        {
+                            "name": "search_knowledge",
+                            "args": {"query": "图书馆 开放时间"},
+                            "id": "c1",
+                            "type": "function",
+                        }
+                    ],
+                ),
+                AIMessage(content="开放时间是 7:30。"),
+            ],
+            has_key=True,
+        )
         self.follow_up_reply = (
             '["借的书过期了会罚款吗？", "一次最多能借几本书？", "可以在图书馆订自习室吗？"]'
         )
@@ -267,7 +288,7 @@ def test_chat_follow_ups_after_done(tmp_path: Path, biz, mem, auth, sess):
     c = make_client(tmp_path, biz, mem, auth, sess, llm=FollowUpLLM())
     r = c.post(
         "/api/chat",
-        json={"question": "图书馆几点开门", "mode": "direct", "session_id": "t"},
+        json={"question": "图书馆几点开门", "mode": "auto", "session_id": "t"},
     )
     events = _parse_sse(r.text)
     types = [e["type"] for e in events]
@@ -279,6 +300,9 @@ def test_chat_follow_ups_after_done(tmp_path: Path, biz, mem, auth, sess):
         "一次最多能借几本书？",
         "可以在图书馆订自习室吗？",
     ]
+    # 检索轮引用契约：citations 携带 FakeRetriever 命中
+    cites = [e for e in events if e["type"] == "citations"][0]
+    assert cites["items"][0]["doc_id"] == "doc-x"
 
 
 def test_chat_no_follow_ups_when_route_refusal(tmp_path: Path, biz, mem, auth, sess):
@@ -301,14 +325,14 @@ def test_chat_no_follow_ups_when_route_refusal(tmp_path: Path, biz, mem, auth, s
                 return
 
     c = make_client(tmp_path, biz, mem, auth, sess, llm=FollowUpLLM(), graph=BoomGraph())
-    r = c.post("/api/chat", json={"question": "今天股市行情", "mode": "direct", "session_id": "u"})
+    r = c.post("/api/chat", json={"question": "今天股市行情", "mode": "auto", "session_id": "u"})
     events = _parse_sse(r.text)
     assert not any(e["type"] == "follow_ups" for e in events)
 
 
 def test_new_state_defaults():
     s = new_state("q", "auto", "sid", "student", "u1@example.com")
-    assert s["resolved"] == "q"
+    assert s["question"] == "q"
     assert s["truncated"] is False
     assert s["answer"] == ""
 

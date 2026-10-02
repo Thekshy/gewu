@@ -1,22 +1,32 @@
 """resume 桥翻译（P17-3）：用户文本 → HITL decisions（chat.py 调用）。
 
-SSE 端点检测到 interrupted thread 时，需区分两类中断：
-- HITL 确认门（payload 含 action_requests）→ 用 classify_reply 把用户文本
-  映射为 approve/reject/respond decision（修改绝不能走 edit——edit 会跳过
-  二次确认直接执行；修改=respond 引导模型按新参数重发，系统再次确认）；
-- classic tx_gate（payload 含 tool/label/args）→ 维持原语义，resume 原文本。
-前端零改动：照常 POST /api/chat。
+SSE 端点检测到 interrupted thread 时，HITL 确认门（payload 含
+action_requests）的载荷需把用户文本映射为 approve/reject/respond decision：
+修改绝不能走 edit——edit 会跳过二次确认直接执行；修改=respond 引导模型按
+新参数重发，系统再次确认。前端零改动：照常 POST /api/chat。
+
+P31-2：classic tx_gate 随退役删除，resume 桥收单形态；classify_reply（续轮
+意图判定，HITL resume 唯一消费者）自 tx.py 迁入本模块。
 """
 
 from __future__ import annotations
 
-from gewu.agent.tx import (
-    _CONFIRM_MODIFY_RE,
-    FLOW_DEFS,
-    SLOT_ORDER,
-    classify_reply,
-    slot_meta,
-)
+import json
+import re
+
+from gewu.agent.prompts import CLASSIFY_REPLY_SYSTEM
+from gewu.agent.txmeta import FLOW_DEFS, SLOT_ORDER, slot_meta
+from gewu.jsonx import json_str, parse_json_object
+
+# confirm 阶段的确认词与续轮意图启发式（classify_reply 用）。
+_CONFIRM_MODIFY_RE = re.compile(r"确认|确定|好的|可以|提交|是的|对")
+_REPLY_CANCEL_RE = re.compile(r"取消|算了|不办了|不要了")
+_REPLY_CONFIRM_RE = re.compile(r"确认|确定|好的|可以|提交")
+_REPLY_TOPIC_RE = re.compile(r"什么|怎么|为什么|几点|哪|谁|吗")
+
+
+def _is_question_mark(s: str) -> bool:
+    return "？" in s or "?" in s
 
 
 def find_hitl_payload(snap) -> dict | None:
@@ -51,6 +61,49 @@ def _slot_updates(meta: dict, tool: str, slots: dict, text: str) -> tuple[dict, 
         if v and v != (slots or {}).get(slot):
             (soft if slot in ("purpose", "reason") else updates)[slot] = v
     return updates, soft
+
+
+def classify_reply(llm, meta: dict, user_text: str, state: dict) -> str:
+    """判断用户回复是继续流程、取消流程、还是切换新话题（LLM 优先，启发式兜底）。"""
+    if llm is not None and llm.has_key():
+        phase = "确认" if state.get("tx_phase") == "confirm" else "补充信息"
+        prompt = CLASSIFY_REPLY_SYSTEM.format(
+            phase=phase, slots=json.dumps(state.get("tx_slots") or {}, ensure_ascii=False)
+        )
+        try:
+            raw = llm.chat(
+                [("system", prompt), ("user", user_text)],
+                json_mode=True,
+                small=True,
+                max_tokens=60,
+            )
+            obj = parse_json_object(raw)
+            intent = json_str(obj, "intent")
+            if intent in ("continue", "cancel", "new_topic"):
+                return intent
+        except Exception:  # noqa: BLE001 - 退化为启发式
+            pass
+    if _REPLY_CANCEL_RE.search(user_text):
+        return "cancel"
+    if _REPLY_CONFIRM_RE.search(user_text):
+        return "continue"
+    if _REPLY_TOPIC_RE.search(user_text):
+        return "new_topic"
+    if state.get("tx_last_asked"):
+        m = meta.get(state["tx_last_asked"])
+        if m and m["parse"](user_text):
+            return "continue"
+    for slot in SLOT_ORDER:
+        if slot in ("purpose", "reason"):
+            continue
+        if slot not in (state.get("tx_slots") or {}):
+            continue
+        m = meta.get(slot)
+        if m and m["parse"](user_text):
+            return "continue"
+    if len(user_text) <= 12 and not _is_question_mark(user_text):
+        return "continue"  # 短句大概率是在回答追问
+    return "new_topic"
 
 
 def hitl_decisions(payload: dict, user_text: str, llm, business) -> dict:

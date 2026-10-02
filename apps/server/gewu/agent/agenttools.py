@@ -21,7 +21,7 @@ from langgraph.types import Command
 from gewu.agent import events as ev
 from gewu.agent.emitter import emit
 from gewu.agent.mw import normalize_tool_args
-from gewu.agent.tx import slot_meta
+from gewu.agent.txmeta import slot_meta
 from gewu.rag.retrieve import Retriever
 
 MAX_EVIDENCE = 12  # deep_research 证据条数上限（research.py 同值）

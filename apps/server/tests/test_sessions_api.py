@@ -164,9 +164,7 @@ def test_delete_cascades_three_stores(tmp_path, biz, mem, auth, sess, cp, pg_dsn
     sid = c.post("/api/sessions", json={}).json()["session_id"]
 
     # 真跑一轮 direct 链路 → checkpointer 落盘该 thread + title 首问回填
-    r = c.post(
-        "/api/chat", json={"question": "图书馆几点开门", "mode": "direct", "session_id": sid}
-    )
+    r = c.post("/api/chat", json={"question": "图书馆几点开门", "mode": "auto", "session_id": sid})
     assert r.status_code == 200
     assert any(n > 0 for n in _cp_rows(pg_dsn, sid)), "checkpointer 应有该 thread 行"
     assert c.get("/api/sessions").json()[0]["title"] == "图书馆几点开门"

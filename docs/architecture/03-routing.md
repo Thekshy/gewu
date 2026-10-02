@@ -1,22 +1,29 @@
-# 03 · 意图路由（P17：guard 安检 + classic 级联基线）
+# 03 · 意图路由（P31 终局：route = 观测标签，判断权在动作级）
 
-P17 起意图路由分为两层形态：
+**生产路径没有前置意图分类。** 意图以两段式 route 事件**纯观测**地表达（不决定链路/工具集/模型档）：
 
-- **agent-first 主循环（mode=auto/react，默认）**：前置路由取消，意图分流的判断权转移到
-  **guard 安检**（入口，管「范围」）与 **工具轨迹合成**（出口，管「意图」）——判断权从
-  路由器转移到模型与事实（详见 [02](02-orchestration-graph.md) 的两段式 route 事件）。
-- **cascade 级联（mode=classic，实验基线）**：本文件主体描述的形态。五分类
-  factual / research / transaction / hybrid / refusal 输出**路由决策包**（dict），下游据此
-  选择链路、工具集与模型档。它是 P14~P16 的默认链路，P17 起降级保留不删——毕设
-  「前置路由 vs 工具自选」三路线对照实验的基线（对照数据见 eval/reports/orchestration-*.md）。
+- **provisional（入口，guard 层）**：`GuardMiddleware` 关键词安检闸（P31-1）在纯问候命中时发 provisional route=chitchat（零成本徽章早亮）、危险词硬红线命中时发 route=refusal 并短路拦截。
+- **effective（出口，工具轨迹合成）**：`RouteEventMiddleware.after_agent` 按本轮实际工具轨迹合成最终 route（详见 [02](02-orchestration-graph.md)）。**意图从「路由器猜」变成「工具轨迹说话」**。
 
-> **历史病根存档（P17 立项起因）**：classic 的 L1 提示词把「闲聊」写进 refusal 定义
-> （「股市、写代码、闲聊等」）且五分类无兜底类，「你好」被**按设计**路由到 refusal
-> 节点吐硬编码话术。这是前置分类器范式的结构性缺陷（分类清单必须枚举一切输入），
-> 开源两派解法：FastGPT/Dify 加显式闲聊/兜底类（本仓未采用），LangChain 官方线
-> 直接删前置路由（本仓 P17 采用）。
+判断预算全部在动作级：HITL 写确认 / 槽位门 / 检索词守卫 / 联网日限 / 轮次上限（守卫清单见 [02](02-orchestration-graph.md) 的中间件栈）。这与四家生产级开源系统的编排共识一致——「一个循环」是常态，前置意图分类无人做（Codex/Gemini CLI/OpenHands/chat-langchain，2026-10 调研）。
 
-## cascade 三级漏斗（mode=classic）
+## guard 关键词闸（P31-1）
+
+`gewu/agent/guardrails.py` 三分支，全链零 LLM：
+
+1. `in_conversation`（历史已有 AI 消息）→ 直通放行——会话感知条款（chat-langchain "NOT a follow-up"），防办理短回复「研讨间301」被安检当寒暄吃掉；
+2. `GREETING_RE` 纯问候/身份问（整句匹配）→ 放行 + provisional route=chitchat，寒暄由主循环一次调用自然生成；
+3. `DANGER_RE` 危险/违规硬红线（制毒/黑客/诈骗/代写/作弊核心词，实施性复合词命中——受害者求助「我被骗了」、防范咨询「怎么防诈骗」、政策咨询「作弊处分规定」不误拦）→ block：GUARD_BLOCK_ANSWER + provisional route=refusal + jump_to=end，21ms 短路。
+
+其余一律放行：软寒暄/能力问交主循环自然回答（一次主模型调用，质量优于 flash 生成的静态话术）。拦截纵深 = 关键词硬红线 + prompt 墙（AGENT_SYSTEM 第 9 条）+ HITL 代码闸；词表丰富化挂账独立小票。
+
+> **历史（P17~P28）**：guard 曾用 flash LLM 做 allow/meta/block lenient 判定（fail-open、meta 就地直答）。P28 已把拦截面收窄到内容安全（范围外放行），P31-1 进一步删除 LLM 判定——收窄后净收益 ≈ 拦变体危险话术，代价是首问串行一跳 + flash 非确定（两次线上实证把校外首触变掷骰子）。
+
+## 历史存档：cascade 三级漏斗（classic，P31-2 退役）
+
+> 以下形态随 `mode=classic` 退役（tag `classic-pre-retirement`，代码与单测见 tag）。保留本节作论文「前置路由 vs 工具自选」对照实验的方法学记录，历史报告见 eval/reports/orchestration-*.md；**System One 决策模型的经典插槽 L1 亦随此退役**（若后续需要确定性决策，重新评估见任务书 §5）。
+
+cascade 五分类 factual / research / transaction / hybrid / refusal 输出**路由决策包**（dict），下游据此选择链路、工具集与模型档：
 
 ```mermaid
 flowchart LR
@@ -29,114 +36,23 @@ flowchart LR
     L2 -->|失败| UNC[L2-uncertain<br/>factual + 旗舰档兜底]
 ```
 
-常量与阈值全部集中在文件头部，是调参的唯一入口：
+- **L0 规则快路径**：`exactTxRe`（办理强动词开头 + 明确办理动作共现）命中即省一次 LLM；再按咨询信号词分 hybrid / transaction。
+- **L1 小模型概率分布**：flash 输出 `{"scores": {五类概率}}`，**判断权在代码常量**（CONF_HIGH 0.80 / CONF_LOW 0.55 / MARGIN_MIN 0.15 双阈值 + margin 三档）；字符串数字不参与概率判定。
+- **L2 主模型灰度复核**：只吃灰度区流量；失败降 L2-uncertain（factual + flagship 档，不自由发挥、不反问阻断）。
+- **误路由安全网**：refusal 是代价最高的误路由——问题带办理/请求强动词或校园领域实体词时 refusal 判定不采信，强制降灰度区走 L2。这是「小模型的无视否定指令倾向必须由代码级守卫兜底」的具体化（GLM flash 已知坑在路由、工具选择两处均有代码守卫）。
+- **决策包与 fill_policy**：route 事件携带 layer/confidence/pre_rag/toolset/model_tier；transaction/hybrid 挂 8 业务工具白名单（最小权限）。
 
-| 常量 | 值 | 含义 |
-| --- | --- | --- |
-| `CONF_HIGH` | 0.80 | top1 ≥ 此值且 margin 足够 → 直接采信 L1 |
-| `CONF_LOW` | 0.55 | top1 < 此值 → 不相信 L1，走 L2 |
-| `MARGIN_MIN` | 0.15 | top1−top2 间隔，小于则视为「类别纠缠」 |
-| `L2_CONFIDENCE` | 0.9 | L2 采纳时的置信写死值 |
-| `H_CONF` | 0.5 | 启发式/降级路径的置信 |
-| `REASON_LIMIT` | 100 | reason 截断（rune） |
-| `ROUTE_ORDER` | 固定五类序 | 解析与排序的确定性基础（平局按此序取先） |
+> **历史病根存档（P17 立项起因）**：classic 的 L1 提示词把「闲聊」写进 refusal 定义（「股市、写代码、闲聊等」）且五分类无兜底类，「你好」被**按设计**路由到 refusal 节点吐硬编码话术。这是前置分类器范式的结构性缺陷（分类清单必须枚举一切输入），开源两派解法：FastGPT/Dify 加显式闲聊/兜底类（本仓未采用），LangChain 官方线直接删前置路由（本仓 P17 采用，P31 走完最后一公里）。
 
-### L0：规则快路径
-
-只接「几乎不可能错」的精确 case——`exactTxRe` 要求**办理强动词开头 + 明确办理动作**共现，命中即省一次 LLM（毫秒级、零成本、置信 1.0）：
-
-```python
-_EXACT_TX_RE = re.compile(
-    r"^(帮我|我要|我想|给我|麻烦).*(预约|预订|请假|销假|退订|取消预约|提交请假)"
-)
-```
-
-命中后再看 `_CONSULT_RE`（什么/怎么/多少/规定…咨询信号词）：办理 + 咨询动词共现判 **hybrid**（先答政策再办理），否则 transaction。
-
-### L1：小模型概率分布
-
-glm-5.3-flash 输出的是**概率分布**而非单个 label（`{"scores": {五类概率}, "reason": …}`），判断权在代码——这是「模型给证据、判断权在代码常量」原则的落点。解析函数对格式做严格守卫：
-
-```python
-for r in ROUTE_ORDER:
-    v = scores.get(r)
-    # 字符串数字不参与概率判定（模型未按格式输出时宁可走兜底）
-    if isinstance(v, (int, float)) and not isinstance(v, bool):
-        pairs.append((r, float(v)))
-if not pairs:
-    return heuristic_fallback(...)
-pairs.sort(key=lambda p: -p[1])   # 稳定排序：平局保持 routeOrder 先后
-```
-
-双阈值（0.80/0.55）+ margin（0.15）三条件组合出三档：直接采信 / 灰度区升 L2 / 不相信。JSON 解析失败同样降级启发式，保证无 key、网络异常、格式漂移三种情况链路都不断。
-
-### L2：主模型灰度复核
-
-只吃 L1 落灰度区的少量流量；glm-5.3 few-shot 二次判定，输出有效 route 则采纳（置信写死 0.9），解析失败返回 None 交上层兜底——**L2-uncertain**：转 factual 并提高模型档到 flagship（不自由发挥、不反问阻断，用户总能得到一个像样的回答）。
-
-## 误路由安全网（从真实案例学出来的守卫）
-
-**refusal 是代价最高的误路由**（直接拒绝服务）。历史上 flash 曾把「我的情况符合转专业条件吗」高置信误判 refusal——问题带办理/请求强动词或校园领域实体词（`campusDomainRe`，转专业/绩点/保研/图书馆…近 40 个词）时，refusal 判定与之直接矛盾，**不直接采信，强制降入灰度区走 L2 复核**：
-
-```python
-if dec["route"] == "refusal" and (
-    _REQ_RE.search(question)
-    or _TX_VERBS_RE.search(question)
-    or _CAMPUS_DOMAIN_RE.search(question)
-):
-    top1, margin = 0.0, 0.0   # 降入灰度区，走下方 L2 逻辑
-```
-
-这是「小模型的无视否定指令倾向必须由代码级守卫兜底，不能指望提示词」的具体化——GLM flash 的这一已知坑（见仓库外备忘）在路由、工具选择两处都有代码守卫。
-
-L1/L2 调用失败均降级启发式（`heuristic_route`，顺序判定不可调换：办理动词 → 研究信号词/长问题 → 短事实），保证无 key/网络异常时链路不断：
-
-```python
-if _TX_VERBS_RE.search(q):                 # ① 办理动词
-    wants_action, consulting = _REQ_RE.search(q), _CONSULT_RE.search(q)
-    if wants_action and consulting: return hybrid
-    if wants_action or not consulting:   return transaction
-if len(q) > 32 or any(h in q for h in _RESEARCH_HINTS):  # ② 研究信号
-    return research
-return factual                             # ③ 短事实兜底
-```
-
-## 决策包与 fill_policy
-
-路由产出不只是 label，而是一个完整的决策包：
-
-```python
-{"route": "transaction", "confidence": 1.0, "layer": "L0-rule",
- "reason": "规则快路径：明确办理指令", "by_llm": False,
- "pre_rag": False, "toolset": [8 个业务工具], "model_tier": "small"}
-```
-
-策略部分集中在 `fill_policy`（一处维护，路由类别 → 处理策略的映射表）：
-
-| route | pre_rag | model_tier | toolset |
-| --- | --- | --- | --- |
-| factual | True | standard | — |
-| research | True | flagship | — |
-| transaction / hybrid | False | small | 8 个业务工具白名单（`TRANSACTION_TOOLSET`） |
-| refusal | False | small | — |
-
-toolset 白名单同时约束 classic 的续轮流程——路由判了办理，模型可见的工具就只有这 8 个（最小权限）。route 事件（含 layer/confidence）是评测断言与前端徽章的数据源。
-
-## mode 分派的现状（P17）
-
-`mode_dispatch` 条件边：`auto/react` → agent 主循环（react 是历史评测语义的别名，与 auto 同路）；`classic/direct/research` → route 节点（cascade 或在 route 内直接构造 user-specified 决策包，不经过级联）。`REACT_MODE` 信号词转 ReAct 的拦截与 `react_plan_signal` 随旧 react 引擎退役（git 历史留档）。
-
-**triage 策略随 P14 退役、react 引擎随 P17 退役**（结论留档 [walkthrough/02](../walkthrough/02-routing.md) 与 eval/reports/）。
+**triage 策略随 P14 退役、react 独立引擎随 P17 退役、cascade 随 P31-2 退役**（结论留档 [walkthrough/02](../walkthrough/02-routing.md) 与 eval/reports/）。
 
 ## 相关文件
 
 | 文件 | 职责 |
 | --- | --- |
-| `gewu/agent/guardrails.py` | agent 链路的 guard 安检（lenient/fail-open/快路径/会话感知） |
+| `gewu/agent/guardrails.py` | guard 关键词安检闸（GREETING_RE/DANGER_RE/会话感知/provisional 事件） |
 | `gewu/agent/mw.py` | effective route 合成（`effective_route` 工具轨迹→route 常量表） |
-| `gewu/agent/routing.py` | cascade 全部路由逻辑、正则与常量阈值（classic 专用） |
-| `gewu/agent/routing_prompts.py` | L1/L2 提示词（逐字对照 Go 版；「闲聊∈refusal」为历史病根存档） |
-| `tests/test_routing.py` | 16 例单测：阈值参数化、安全网升级路径、启发式序 |
+| `gewu/api/chat.py` | mode 枚举校验（auto/react，其余 422） |
 
 ---
 

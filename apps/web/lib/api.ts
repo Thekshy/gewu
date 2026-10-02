@@ -93,8 +93,8 @@ export interface User {
   role: "student" | "counselor" | "admin";
 }
 
-/** chat 请求 mode：auto（agent-first 主循环）/classic（级联路由基线）/direct/research/react（=auto，P17 合并）。 */
-export type ChatMode = "auto" | "direct" | "research" | "react" | "classic";
+/** chat 请求 mode：auto（agent-first 主循环）/react（=auto 语义；P31 起枚举收窄，classic/direct/research 退役）。 */
+export type ChatMode = "auto" | "react";
 
 /**
  * P21：默认同源相对路径——浏览器请求发给 next 自身，经 next.config rewrites

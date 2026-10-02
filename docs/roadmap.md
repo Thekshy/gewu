@@ -148,3 +148,18 @@
       WeKnora「证据不足改写再试」条款进 docstring）+ canonical URL 去重与
       scheme 过滤。真跑：TYLOO 同题 span 见 freshness=day、引用全部落在
       昨日赛况（旧闻绝迹）、校内题零联网回归。
+- [x] P31 harness 收敛单循环：guard 降码闸（P31-1：classify_guard LLM 判定与
+      meta 出口退役，GREETING_RE/GREETING_RE+DANGER_RE 关键词三分支——纯问候
+      零成本放行、危险词硬红线 21ms 短路零 LLM、软寒暄交主循环自然答；热路径
+      小模型清零达成，首个 answer_delta 前零 small 调用实证）+ classic 全量
+      退役（P31-2：级联路由/直答/深研/tx 流程节点与 refusal 链删除，tag
+      `classic-pre-retirement` 留档，评测轨改 agent-only；txmeta.py 槽位
+      元数据拆分、classify_reply 迁 resume.py、research.plan 保留；mode 枚举
+      收窄 auto/react、compare 页与 mode 选择 UI 删除、run_eval refusal 口径
+      改 guard 关键词 block 或主循环拒答）+ 外壳塌缩（P31-3：端点直调
+      create_agent 编译产物、checkpointer 直挂、mem_block 装配迁
+      AgentPromptMiddleware、subgraphs 摘除、resume 桥单形态）——
+      判断架构终局表述=动作级代码闸是唯一下限机制，软语义全部交主模型
+      prompt；classic 28 题历史报告与 P17/P19 执行记录留档——
+      [P31 任务书](runbooks/P31-agent-only-harness.md)（2026-10-02 执行：
+      §0 八条拍板四家生产系统调研背书）

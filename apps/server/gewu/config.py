@@ -77,7 +77,6 @@ class Settings:
     rerank_threshold: float = 2.0  # LLM 精排模型分阈值（0~10）；全滤空自动退化
     rerank_mode: str = "on"  # on（默认，LLM 精排）| off
     react_mode: str = "off"  # off（默认，纯 workflow）| on（路径不定的办理问题转 ReAct）
-    query_rewrite: str = "on"  # on（默认，多轮指代消解补全）| off（路由/检索只见裸问题）
     rate_limit_per_minute: int = 600
     # 切片策略链（P15：入库侧，make ingest 生效；换策略/参数后须 REBUILD=1 重建）
     chunk_strategy: str = "auto"  # auto（画像选型）| heading（父子双层）| recursive（扁平兜底）
@@ -124,7 +123,6 @@ class Settings:
             rerank_threshold=float(env.get("RERANK_THRESHOLD", "2.0")),
             rerank_mode=env.get("RERANK_MODE", "on"),
             react_mode=env.get("REACT_MODE", "off"),
-            query_rewrite=env.get("QUERY_REWRITE", "on"),
             rate_limit_per_minute=int(env.get("RATE_LIMIT_PER_MINUTE", "600")),
             chunk_strategy=env.get("CHUNK_STRATEGY", "auto"),
             chunk_parent_limit=int(env.get("CHUNK_PARENT_LIMIT", "800")),

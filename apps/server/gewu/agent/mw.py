@@ -43,7 +43,7 @@ from langchain_core.messages import (
 from gewu.agent import events as ev
 from gewu.agent.emitter import emit
 from gewu.agent.prompts import agent_system_prompt
-from gewu.agent.tx import FLOW_DEFS, build_confirm, normalize_slot, slot_meta
+from gewu.agent.txmeta import FLOW_DEFS, build_confirm, normalize_slot, slot_meta
 from gewu.dates import today_iso
 from gewu.llm.service import ctx_profile
 from gewu.obs import current_tracer

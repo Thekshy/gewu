@@ -266,12 +266,13 @@ def _expect_ok(exp: dict, agg: RunAgg, mode: str = "auto") -> bool:
 
 def score_single(item: dict, agg: RunAgg) -> dict:
     if item["type"] == "refusal":
-        refused = "refusal" in agg.routes or "只能回答" in agg.answer
+        # P31 口径：guard 关键词 block（refusal 路由）或主循环明确拒答
+        refused = "refusal" in agg.routes or "无法协助" in agg.answer
         return {"pass": refused, "kw": None, "cite": None}
     if item["type"] == "chitchat":
-        # P17 寒暄集：自然回复 + 零引用 + effective route=chitchat + 不触发拒答话术
+        # P17 寒暄集：自然回复 + 零引用 + effective route=chitchat + 不触发拦截话术
         ok = (
-            "只能回答" not in agg.answer
+            "无法协助" not in agg.answer
             and bool(agg.answer.strip())
             and not agg.cited
             and "chitchat" in agg.routes
@@ -292,8 +293,8 @@ def main() -> int:
     parser.add_argument("--dataset", default="eval/dataset.jsonl",
                         help="数据集路径（相对仓库根或绝对路径），如 eval/dataset-agent.jsonl")
     parser.add_argument("--tag", default="", help="报告标签（写入文件名与表头，如 agent-first）")
-    parser.add_argument("--mode", dest="mode_", default="auto", choices=["auto", "direct", "research", "react", "classic"],
-                        help="全部用例统一使用的 chat mode（P17：classic=级联基线；react 与 auto 同路）")
+    parser.add_argument("--mode", dest="mode_", default="auto", choices=["auto", "react"],
+                        help="全部用例统一使用的 chat mode（P31 起 classic/direct/research 退役；react 与 auto 同路）")
     args = parser.parse_args()
 
     h = health()

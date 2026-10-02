@@ -24,7 +24,6 @@ import {
   streamChat,
   type ActionResult,
   type ChatEvent,
-  type ChatMode,
   type Citation,
   type DoneReason,
   type FeedbackRating,
@@ -53,7 +52,6 @@ import {
 } from "@/components/message-parts";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
-import { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } from "@/components/ui/select";
 
 interface Msg {
   role: "user" | "assistant";
@@ -81,13 +79,6 @@ function historyToMsg(m: HistoryMessage): Msg {
   return { role: m.role, text: m.text, steps: [], citations: [], done: true };
 }
 
-const MODE_OPTIONS: { value: ChatMode; label: string }[] = [
-  { value: "auto", label: "自动路由" },
-  { value: "direct", label: "强制直答" },
-  { value: "research", label: "强制研究" },
-  { value: "react", label: "ReAct 自主编排" },
-];
-
 const SUGGESTIONS = [
   "帮我预约明天晚上的羽毛球馆打班级比赛",
   "帮我请下周一到下周二的事假，另外超过 7 天是不是要教务处批？",
@@ -100,7 +91,6 @@ export default function Home() {
   const { user } = useRequireUser(); // P21：登录页守卫；role 服务端权威（只读展示）
   const [messages, setMessages] = useState<Msg[]>([]);
   const [input, setInput] = useState("");
-  const [mode, setMode] = useState<ChatMode>("auto");
   const [sending, setSending] = useState(false);
   const [health, setHealth] = useState<HealthInfo | null>(null);
   // P22 会话（服务端资源）：列表 + 当前 id（state 驱动侧栏高亮，ref 供 send 闭包直读）
@@ -254,7 +244,7 @@ export default function Home() {
     try {
       await streamChat(
         question,
-        mode,
+        "auto", // P31-2：mode 选择 UI 退役，主路固定 auto（react=auto 语义）
         (ev: ChatEvent) => {
           switch (ev.type) {
             case "route":
@@ -620,18 +610,6 @@ export default function Home() {
                     {ROLE_LABEL[user.role] ?? user.role}身份
                   </span>
                 )}
-                <Select value={mode} onValueChange={(v) => setMode(v as ChatMode)}>
-                  <SelectTrigger className="h-9 w-31 shrink-0" aria-label="回答模式">
-                    <SelectValue>{MODE_OPTIONS.find((o) => o.value === mode)?.label}</SelectValue>
-                  </SelectTrigger>
-                  <SelectContent>
-                    {MODE_OPTIONS.map((o) => (
-                      <SelectItem key={o.value} value={o.value}>
-                        {o.label}
-                      </SelectItem>
-                    ))}
-                  </SelectContent>
-                </Select>
                 <textarea
                   id="composer-input"
                   value={input}

@@ -1,7 +1,7 @@
-"""agent-first 全链流测试（P17-2/3）：外壳图 + create_agent 子图真跑。
+"""agent-first 全链流测试（P17-2/3；P31-2 起 classic 冒烟随链路退役）。
 
 覆盖：寒暄直答 / 检索引用（Command 状态更新）/ 写操作 HITL 中断与 resume
-（approve）/ 缺参槽位门 / 越权回执 / classic 冒烟。事件经 custom 流收集。
+（approve）/ 缺参槽位门 / 越权回执。事件经 custom 流收集。
 """
 
 from __future__ import annotations
@@ -147,23 +147,6 @@ def test_permission_denied_returns_receipt(tmp_path, biz):
     results = [e for e in events if e["type"] == "action_result"]
     assert results and not results[0]["success"] and "无权" in results[0]["message"]
     assert "无权" in _answer(events)
-
-
-def test_classic_mode_still_routes_via_cascade(tmp_path, biz):
-    settings = Settings(llm_api_key="k", embed_api_key="e", data_dir=tmp_path)
-    retriever = FakeRetriever([make_hit()])
-    business = biz
-    llm = FakeAgentLLM()  # 无 key：cascade 退化启发式
-    graph = build_graph(settings, retriever, llm, business=business, checkpointer=MemorySaver())
-    cfg = {"configurable": {"thread_id": "c6"}}
-    inp = new_state("图书馆几点开门", "classic", "c6", "student", "demo-student")
-    events = []
-    for chunk in graph.stream(inp, cfg, stream_mode="custom", subgraphs=True):
-        events.append(chunk[-1] if isinstance(chunk, tuple) else chunk)
-    routes = _routes(events)
-    assert any(r in ("factual",) for r in routes)
-    assert "答" in _answer(events)
-    assert not any(e["type"] == "error" for e in events)
 
 
 def test_guard_block_short_circuits_in_graph(tmp_path, biz):

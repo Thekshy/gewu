@@ -49,10 +49,8 @@ def _parse_chat_body(payload: dict) -> dict:
     if len(question) > 500:
         raise HTTPException(status_code=422, detail="问题过长")
     mode = payload.get("mode") or "auto"
-    if mode not in ("auto", "direct", "research", "react", "classic"):
-        raise HTTPException(
-            status_code=422, detail="mode 必须为 auto/direct/research/react/classic"
-        )
+    if mode not in ("auto", "react"):
+        raise HTTPException(status_code=422, detail="mode 必须为 auto/react")
     session_id = payload.get("session_id")
     if session_id is None or session_id == "":
         raise HTTPException(

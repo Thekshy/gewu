@@ -6,7 +6,6 @@ import { useUser } from "@/lib/auth";
 
 const ITEMS = [
   { href: "/", label: "对话" },
-  { href: "/compare", label: "对比实验" },
   { href: "/console", label: "控制台" },
   { href: "/memory", label: "记忆" },
 ];

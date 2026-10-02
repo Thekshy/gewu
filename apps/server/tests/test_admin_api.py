@@ -162,9 +162,7 @@ def test_chat_per_user_budget_429(tmp_path, biz, mem, auth, sess, usage, cp, mon
 
     # 未设个性化限额：全局缺省 200_000，先抬高到门口再验 429 文案
     usage.add("u2@example.com", 200_000)
-    r = u2.post(
-        "/api/chat", json={"question": "图书馆几点开门", "mode": "direct", "session_id": sid}
-    )
+    r = u2.post("/api/chat", json={"question": "图书馆几点开门", "mode": "auto", "session_id": sid})
     assert r.status_code == 429
     assert r.json()["detail"] == "今日个人 token 预算已用尽（上限 200000），请明天再试"
 
@@ -173,9 +171,7 @@ def test_chat_per_user_budget_429(tmp_path, biz, mem, auth, sess, usage, cp, mon
     r = c.patch("/api/admin/users/u2@example.com", json={"daily_token_limit": 50})
     assert r.status_code == 200
     usage.add("u2@example.com", 60)
-    r = u2.post(
-        "/api/chat", json={"question": "图书馆几点开门", "mode": "direct", "session_id": sid}
-    )
+    r = u2.post("/api/chat", json={"question": "图书馆几点开门", "mode": "auto", "session_id": sid})
     assert r.status_code == 429
     assert r.json()["detail"] == "今日个人 token 预算已用尽（上限 50），请明天再试"
 
@@ -185,7 +181,7 @@ def test_chat_per_user_budget_429(tmp_path, biz, mem, auth, sess, usage, cp, mon
     usage.add("boss@example.com", 300_000)  # 超缺省但低于自己的限额
     boss_sid = c.post("/api/sessions", json={}).json()["session_id"]
     r = c.post(
-        "/api/chat", json={"question": "图书馆几点开门", "mode": "direct", "session_id": boss_sid}
+        "/api/chat", json={"question": "图书馆几点开门", "mode": "auto", "session_id": boss_sid}
     )
     assert r.status_code == 200
 
