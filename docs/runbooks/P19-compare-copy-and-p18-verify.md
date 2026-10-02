@@ -45,6 +45,26 @@
 4. 回填本任务书 §4 执行记录，pathspec 限定 commit（仅 docs/runbooks/P19*）。
 5. 若仍 429：如实记录并结束（不重试循环），由用户后续手动触发。
 
-## 4. 执行记录
+## 4. 执行记录（2026-10-01 晚 ~ 10-02 中午补验完成）
 
-（执行后回填）
+**P19-1（已提交 6df13ce）**：compare 页文案四处收口，tsc+build 绿，详见 commit。
+
+**P19-2 补验结果：契约级全通过，视觉级被设计演进取代（如实记录）**：
+
+- **配额恢复确认**（10-01 13:50 后）：直答 SSE 零 429。
+- **直答全链路**（curl SSE，session p19-verify-direct-1）：route×2（两段式）+
+  status×2 + step×4 + answer_delta×N + citations + done，事件序列完整，引用
+  命中转专业办法/学分认定/推免细则三篇。
+- **办理确认流**（session p19-verify-tx-1 两轮）：首轮一步收齐四槽位 →
+  pending_action（book_venue，2026-10-02 19:00-21:00 羽毛球馆）→「确认」→
+  action_result success，回执 **VE-0270** 落库；验后 `/api/business/reset`
+  还原（bookings/tickets 双空确认）。
+- **视觉目检未按原计划执行**：补验窗口期间项目并行推进 P20~P28（P25 经用户
+  复拍板将 P18 暖编辑风整体换肤为 america.gov 机构蓝，DESIGN.md 已改 P25 版，
+  且 P25 自带完整浏览器真跑留档），P18 形态的直答成功态截图已无当代意义；
+  P18 时点的成功态视觉已由当日的临时预览页组件矩阵（亮暗双主题）覆盖。
+- **环境坑三条**（后续会撞）：① 本机 shell 挂 127.0.0.1:7897 代理且 no_proxy
+  为空，localhost curl 必须加 `--noproxy '*'` 否则 502/000 假象；② dev server
+  与 next build 共用 .next 互踩（P18 已记，本轮再犯一次：build 后 dev 全页
+  chunks 404，rm -rf .next 重启即愈）；③ MCP chrome profile 残留实例占用需
+  pkill 后重连，本轮发生两次。
