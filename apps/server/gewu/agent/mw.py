@@ -53,7 +53,14 @@ WRITE_TOOLS = {"book_venue", "cancel_booking", "submit_leave", "approve_leave"}
 
 
 def _merge_citations(existing: list | None, new: list | None) -> list:
-    """citations 通道 reducer：按 (doc_id,title) 去重合并，编号累计重排。"""
+    """citations 通道 reducer：按 (doc_id,title) 去重合并，编号累计重排。
+
+    P31-3：显式 [] 承担轮起清零（外壳 agent_in 节点退役后，清零语义搬迁到
+    端点每轮输入构造——P26 跨轮污染修复的等价承载）；工具 Command 更新照常
+    走去重合并（并行检索安全）。
+    """
+    if new is not None and not new:
+        return []
     out: list[dict] = list(existing or [])
     have = {(c["doc_id"], c["title"]) for c in out}
     for c in new or []:
@@ -66,14 +73,21 @@ def _merge_citations(existing: list | None, new: list | None) -> list:
 
 
 class GewuAgentState(AgentState):
-    """主循环子图状态扩展。role/user/mem_block 由外壳 state 流入（input schema）。"""
+    """主循环子图状态扩展（P31-3 起为唯一图状态：端点输入构造直接对齐本 schema）。
+
+    role/user/session_id 经输入流入（mem_block 装配依赖 user/session_id）；
+    answer/truncated 为终态侧记（AgentDoneMiddleware 写、SSE 端点 get_state 读）。
+    """
 
     role: NotRequired[str]
     user: NotRequired[str]
+    session_id: NotRequired[str]
     mem_block: NotRequired[str]
     citations: NotRequired[Annotated[list, _merge_citations]]
     guard_action: NotRequired[Annotated[str, PrivateStateAttr]]  # allow|block（本轮）
-    # P30：最终轮流式已发文本（外壳 ChatState 同名字段接住，agent_done 防重读）
+    answer: NotRequired[str]
+    truncated: NotRequired[bool]
+    # P30：最终轮流式已发文本（agent_done 防重读，每轮输入构造清零）
     answer_streamed: NotRequired[str]
 
 
@@ -162,11 +176,34 @@ def partial_answer(messages: list) -> str:
 
 
 class AgentPromptMiddleware(AgentMiddleware):
-    """system prompt 动态装配：主体 + 联网准则（能力注入）+ 长期记忆块尾部注入。"""
+    """system prompt 动态装配：主体 + 联网准则（能力注入）+ 长期记忆块尾部注入。
 
-    def __init__(self, web_search: bool = False) -> None:
+    P31-3：mem_block 装配自外壳 resolve_query 搬入本件 before_agent（每 run
+    从 MemoryStore 装配一次，user/session_id 从 GewuAgentState 读）——装配
+    失败静默降级（记忆是增强不是依赖）。before_agent 同时承担原 agent_in 的
+    「正在理解问题…」状态行发射（P30 首 token 前的状态行）。
+    """
+
+    def __init__(self, web_search: bool = False, memory=None) -> None:
         super().__init__()
         self._web = web_search
+        self._memory = memory
+
+    def before_agent(self, state, runtime) -> dict[str, Any] | None:
+        emit(ev.status_evt("正在理解问题…"))
+        if self._memory is None:
+            return None
+        user = state.get("user") or ""
+        session_id = state.get("session_id") or ""
+        if not user or not session_id:
+            return None
+        try:
+            from gewu.memory import memory_block  # noqa: PLC0415 - 延迟导入避免环
+
+            return {"mem_block": memory_block(self._memory, user, session_id)}
+        except Exception as e:  # noqa: BLE001 - 记忆装配失败不拦主链路
+            print(f"[agent] 记忆块装配失败（不影响主链路）：{e}")
+            return None
 
     def wrap_model_call(self, request, handler):
         mem = request.state.get("mem_block", "")
@@ -432,6 +469,44 @@ class PendingActionMiddleware(AgentMiddleware):
             emit(ev.answer_evt(text))
             break  # 一次模型响应只发一份摘要（多写调用罕见，首个为准）
         return None
+
+
+class AgentDoneMiddleware(AgentMiddleware):
+    """agent 子图出口终态收口（P31-3：外壳 agent_done 节点退役后搬迁至此）。
+
+    after_agent：answer 单点发射 + citations 事件 + 截断标记 + 轮次耗尽
+    部分结论兜底，并把 answer/truncated/citations 写回 state（SSE 端点
+    get_state 终态读取源）。确认门中断轮到不了这里（turn 悬停在子图内，
+    摘要已由 PendingAction 发出）；guard block 短路轮照常收口（消息由
+    guard 注入）。P30 流式防重：最终轮文本已由 StreamingAnswerMiddleware
+    逐 delta 发出（state.answer_streamed 记录），等价时跳过全文重发；
+    轮次耗尽兜底/错误轮与流式文本不等价 → 照发，天然兜住漏发。
+    栈位置在 RouteEventMiddleware 之前（after_* 链倒序执行 → route 事件
+    先于 answer/citations，SSE 事件序与外壳节点时代一致）。
+    """
+
+    def after_agent(self, state, runtime) -> dict[str, Any] | None:
+        msgs = state.get("messages") or []
+        ai = last_ai_message(msgs)
+        answer = ""
+        if ai is not None:
+            answer = ai_content_text(ai)
+            if "Model call limits exceeded" in answer:
+                answer = ""  # 轮次耗尽：换部分结论兜底
+        if not answer.strip():
+            answer = partial_answer(msgs) or "未能获取足够信息回答该问题，请换个说法或补充细节。"
+        truncated = False
+        if ai is not None:
+            meta = getattr(ai, "response_metadata", None) or {}
+            if str(meta.get("finish_reason", "") or "") == "length":
+                truncated = True
+                emit(ev.status_evt("回答已达长度上限，可能被截断"))
+        citations = state.get("citations") or []
+        streamed = state.get("answer_streamed") or ""
+        if streamed.strip() != answer.strip():
+            emit(ev.answer_evt(answer))
+        emit(ev.citations_evt(citations))
+        return {"answer": answer, "citations": citations, "truncated": truncated}
 
 
 class RouteEventMiddleware(AgentMiddleware):

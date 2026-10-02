@@ -86,9 +86,9 @@ if snap.next:
     payload = find_hitl_payload(snap)          # agent HITL：action_requests 在场
     if payload is not None:
         run_input = Command(resume=hitl_decisions(payload, req["question"], llm, business))
-# 消费：subgraphs=True 冒泡 agent 子图的 custom 事件（子图嵌套形态必需，否则徽章/状态静默丢失）
-for chunk in graph.stream(run_input, config, stream_mode="custom", subgraphs=True):
-    yield _sse(chunk[-1] if isinstance(chunk, tuple) else chunk)
+# 消费：P31-3 外壳塌缩后无嵌套图，subgraphs 摘除——custom 事件不再包 (namespace, event) 元组
+for evt in graph.stream(run_input, config, stream_mode="custom"):
+    yield _sse(evt)
 vals = graph.get_state(config).values           # 终态侧记（interrupt 悬停轮为当前值）
 truncated, answer, hitl_paused = bool(vals.get("truncated")), vals.get("answer", ""), bool(snap.next)
 ```

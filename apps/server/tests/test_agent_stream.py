@@ -9,14 +9,12 @@ from __future__ import annotations
 import json
 from datetime import date, timedelta
 
-from langchain_core.messages import AIMessageChunk
+from langchain_core.messages import AIMessageChunk, HumanMessage
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.types import Command
 
 from gewu.agent.agent import build_agent
-from gewu.agent.graph import build_graph
 from gewu.agent.resume import find_hitl_payload, hitl_decisions
-from gewu.agent.state import new_state
 from gewu.agent.tools import tools_for
 from gewu.config import Settings
 from tests.agent_fakes import FakeRetriever, FakeStreamAgentLLM, make_hit
@@ -62,22 +60,31 @@ def make_stream_flow(tmp_path, biz, rounds, *, stream_answer: bool = True):
     )
     retriever = FakeRetriever([make_hit()])
     llm = FakeStreamAgentLLM(rounds=rounds)
-    agent = build_agent(settings, llm, retriever, biz, tools_for())
-    graph = build_graph(
-        settings, retriever, llm, business=biz, checkpointer=MemorySaver(), agent=agent
-    )
+    graph = build_agent(settings, llm, retriever, biz, tools_for(), checkpointer=MemorySaver())
     return graph, llm
 
 
 def run_turn(graph, sid: str, question: str | None = None, resume=None) -> list[dict]:
+    """P31-3：create_agent 编译产物直跑——输入构造与 SSE 端点同款（无 subgraphs）。"""
     cfg = {"configurable": {"thread_id": sid}}
     if resume is not None:
         inp: object = Command(resume=resume)
     else:
-        inp = new_state(question or "", "auto", sid, "student", "demo-student")
+        inp = {
+            "messages": [HumanMessage(content=question or "")],
+            "question": question or "",
+            "mode": "auto",
+            "session_id": sid,
+            "role": "student",
+            "user": "demo-student",
+            "citations": [],
+            "answer_streamed": "",
+            "truncated": False,
+            "answer": "",
+        }
     events: list[dict] = []
-    for chunk in graph.stream(inp, cfg, stream_mode="custom", subgraphs=True):
-        events.append(chunk[-1] if isinstance(chunk, tuple) else chunk)
+    for chunk in graph.stream(inp, cfg, stream_mode="custom"):
+        events.append(chunk)
     return events
 
 

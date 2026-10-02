@@ -1,72 +1,42 @@
-# 02 · 编排主图（LangGraph StateGraph · P31 单循环收敛）
+# 02 · 编排主图（LangGraph · P31 单循环终态）
 
-全部会话编排收敛为 **agent-first 单循环**（LangChain 1.x `create_agent` + middleware 子图）：外壳图只保留 `agent_in → agent → agent_done` 一条链。P17 时代的「外壳手写薄图 + classic 对照分支」三件套中，classic 级联路由、direct/research 分支、tx 流程节点已随 P31-2 全量退役（tag `classic-pre-retirement` 留档；评测轨改 agent-only，28 题历史报告见 eval/reports/orchestration-*.md）——前置意图分类在生产路径上不承重（route 只是事后合成的观测标签，不决定链路/工具集/模型档），判断预算全部下沉到动作级代码闸与模型工具自选。图结构即文档——每个节点是一个可单测的函数。
+会话编排即 **agent-first 单循环**（LangChain 1.x `create_agent` + middleware 家族）：P31-3 外壳塌缩后，**SSE 端点直调 `create_agent` 编译产物**（`app.state.graph` 即子图本体，checkpointer 直挂），不再有外壳 StateGraph——入口清零/终态收口分别由端点输入构造与 `AgentDoneMiddleware.after_agent` 承接（原 agent_in/agent_done 节点的搬迁去处，见下）。P17 时代的「外壳手写薄图 + classic 对照分支」三件套中，classic 级联路由、direct/research 分支、tx 流程节点已随 P31-2 全量退役（tag `classic-pre-retirement` 留档；评测轨改 agent-only，28 题历史报告见 eval/reports/orchestration-*.md）——前置意图分类在生产路径上不承重（route 只是事后合成的观测标签，不决定链路/工具集/模型档），判断预算全部下沉到动作级代码闸与模型工具自选。
 
 ## 图结构
 
+`create_agent(model, tools, middleware=…, state_schema=GewuAgentState, checkpointer=…)` 编译产物即全部——模型-工具循环与中断语义由官方 harness 原生承载（`factory.py` 编译入口 `checkpointer` 原生参数）：
+
 ```mermaid
-flowchart TB
-    START((START)) --> AIN[agent_in<br/>本轮问题入 messages<br/>citations/流式标志清零] --> AG["agent 子图<br/>create_agent + middleware（见下）"] --> AD[agent_done<br/>answer 单点发射] --> E((END))
+flowchart LR
+    IN["POST /api/chat 输入构造<br/>messages=[HumanMessage(question)]<br/>citations=[] 轮起清零"] --> AG["create_agent 编译图<br/>Guard → 模型工具自选循环 → HITL<br/>（checkpointer 直挂 PostgresSaver）"] --> OUT["AgentDoneMiddleware.after_agent<br/>answer/citations 终态收口"] --> SSE[done 单点]
 ```
 
-> P31-3 将进一步塌缩：SSE 端点直调 `create_agent` 编译产物（`app.state.graph` 指向子图本体），外壳 StateGraph 退役。
-
-agent 子图（`gewu/agent/agent.py` 装配，`create_agent` 编译产物直接 `add_node` 嵌套进外壳图；checkpointer 只挂顶层，子图 interrupt 冒泡暂停）：
+中间件栈（`gewu/agent/agent.py build_agent` 装配；wrap_* 外层=列表在前者，after_* 链执行序=列表倒序）：
 
 ```python
-agent = create_agent(
+graph = create_agent(
     model,                                        # llm.agent_model()（GLM-5.3，温度/上限固化）
     tools=[search_knowledge, parse_date, deep_research, *8个业务工具],   # agenttools.py @tool 化
     middleware=[
+        ToolTraceMiddleware(),                    # wrap_tool_call 栈最外层：全工具观测（P27）
         GuardMiddleware(),                        # before_agent：关键词安检闸（P31-1），block 短路
         ModelCallLimitMiddleware(run_limit=8),    # 轮次上限（旧 REACT_MAX_TURNS 等价）
         TruncationDefenseMiddleware(),            # P10 截断防御（Pi 式回填重调）
         UsageRecordMiddleware(llm),               # token 记账 + [llm] per-call 埋点（P24-1）
-        AgentPromptMiddleware(),                  # system prompt + 联网准则 + 记忆块
+        AgentPromptMiddleware(memory=memory),     # before_agent 状态行+mem_block 装配；wrap_model_call system prompt
         HumanInTheLoopMiddleware(interrupt_on=写工具四件),   # 写确认门（HITL）
         PendingActionMiddleware(business),        # 确认摘要先于中断发射
         WriteSlotGateMiddleware(business),        # 缺必填参数 → slot_question 引导收集
         ResearchLimitMiddleware(),                # deep_research 单轮限 1 次（flash 代码闸）
         SearchQueryGuardMiddleware(),             # 检索词零重合拼回原话（P24-3 硬防线）
+        AgentDoneMiddleware(),                    # after_agent 终态收口（P31-3；倒序先于 RouteEvent 保事件序）
         RouteEventMiddleware(),                   # after_agent：effective route 合成补发
         SummarizationMiddleware(...),             # 上下文压缩（30k 触发、保 20 条，P13 收口）
     ],
-    state_schema=GewuAgentState,                  # messages + role/user/mem_block/citations
+    state_schema=GewuAgentState,                  # messages + role/user/session_id/citations/answer/truncated
+    checkpointer=checkpointer,                    # P31-3 直挂（PostgresSaver，thread_id=session_id）
 )
 ```
-
-## 节点清单
-
-| 节点 | 工厂（graph.py） | 职责 | 主要产出 state |
-| --- | --- | --- | --- |
-| `agent_in` | `make_agent_in_node` | 本轮问题追加进 `messages` 对话历史；citations/answer_streamed 轮起清零（P26/P30 跨轮污染防御） | `messages` |
-| `agent` | `build_agent`（agent.py） | agent-first 主循环子图：guard 安检 → 模型工具自选循环 → HITL 确认门 | `messages`/`citations`/interrupt |
-| `agent_done` | `make_agent_done_node` | answer 单点发射 + 截断标记 + 轮次耗尽部分结论兜底 | `answer`/`citations`/`truncated` |
-
-P31-2 退役的节点（`resolve_query/route/retrieve/answer_direct/refusal/research/transaction/hybrid/tx_confirm/tx_gate/tx_resume` 与全部条件边）见 tag `classic-pre-retirement`；槽位元数据/确认摘要拆至 `gewu/agent/txmeta.py` 供 agent 侧中间件与 resume 桥共用，deep_research 的子问题拆解 `plan` 保留在 `gewu/agent/research.py`。
-
-## 共享状态（ChatState）
-
-图的状态是跨节点传递的唯一媒介（`gewu/agent/state.py`，TypedDict）——**所有跨节点字段必须显式声明**（LangGraph 会静默丢弃 schema 外的 key，这是 P14 调试中两度撞上的坑）：
-
-```python
-class ChatState(TypedDict, total=False):
-    # 请求上下文
-    question: str   # 本轮问题（记忆存档/用户可见层用）
-    mode: str       # auto | react(=auto)（P31 起 mode 枚举收窄，服务端 422 兜底）
-    role: str
-    user: str
-    session_id: str
-    # agent-first 主循环（P17）：对话历史（add_messages 合并，checkpointer 持久化）
-    messages: Annotated[list[BaseMessage], add_messages]
-    # 引用与回答
-    citations: list[dict]
-    truncated: bool # 主答案撞 max_tokens（done.reason=max_tokens 的依据）
-    answer: str     # 本轮累积回答文本（记忆固化用）
-    answer_streamed: str  # P30 流式防重：最终轮已流式发出的文本（轮起清零）
-```
-
-classic 的跨轮字段（`resolved/route/hits/tx_*/hybrid_then_tx/mem_block`）随节点退役删除；办理语义由 `messages` 对话 + HITL 中断承载。**跨轮状态只有 `messages` 一族**——由 checkpointer 持久化，跨请求、跨进程存活（见 [07](07-state-persistence.md)）。`thread_id = session_id`：一个会话一个 thread，interrupt 恢复以此为锚。
 
 ## 关键设计
 
@@ -79,7 +49,7 @@ classic 的跨轮字段（`resolved/route/hits/tx_*/hybrid_then_tx/mem_block`）
 
 **多轮指代消解（resolve_query 退役后的承接）**：agent 路径模型看 `messages` 历史自行消解指代（P31-2 起）；原 QUERY_REWRITE 补全是增强不是依赖（四门控本就静默回退），与主循环能力冗余，故不保留。
 
-**事件发射（custom stream writer + subgraphs 冒泡）**。节点/工具/中间件内经 `gewu/agent/emitter.py` 把 PARITY 十类事件送入 custom 流；SSE 端点以 `graph.stream(..., stream_mode="custom", subgraphs=True)` 消费——**子图嵌套形态下必须带 `subgraphs=True`**，否则 agent 子图内 middleware/工具的事件被父图吞掉（症状：徽章/状态静默丢失）。
+**事件发射（custom stream writer）**。节点/工具/中间件内经 `gewu/agent/emitter.py` 把 PARITY 十类事件送入 custom 流；SSE 端点以 `graph.stream(..., stream_mode="custom")` 消费——P31-3 外壳塌缩后无嵌套图，`subgraphs` 参数摘除（P17 时代子图嵌套形态必须带 `subgraphs=True` 否则事件被父图吞掉的历史坑随形态消失，custom 事件也不再包 (namespace, event) 元组）。
 
 **done 单点**。done 事件（含 reason: completed/max_tokens/error）只在 SSE 端点发射一次；终态 `answer`/`truncated` 从 `graph.get_state(config).values` 读取（agent 链路的 answer 由 agent_done 节点写、interrupt 悬停轮则为当前值）。一次 chat 恰一个 done，与 Go RunChat 单点语义对齐。
 
@@ -94,15 +64,15 @@ sequenceDiagram
     autonumber
     participant U as 用户
     participant A as POST /api/chat
-    participant S as agent 子图（create_agent）
+    participant S as create_agent 编译图（顶层）
     participant H as HITL middleware
-    participant CP as checkpointer（PG）
+    participant CP as checkpointer（PG 直挂）
 
     U->>A: 第 1 轮「帮我预约明晚羽毛球馆」
-    A->>S: agent_in → agent
+    A->>S: 端点输入构造（citations=[] 清零）→ 图起跑
     S->>S: 模型调 book_venue（参数齐）→ PendingActionMiddleware 发确认摘要
     S->>H: after_model 命中 interrupt_on[book_venue]
-    H->>CP: interrupt(HITLRequest) 暂停（子图冒泡到顶层）
+    H->>CP: interrupt(HITLRequest) 暂停
     S-->>U: pending_action + 确认文案 → done
     U->>A: 第 2 轮「确认」
     A->>A: 端点查 snap.tasks 命中 action_requests → resume.py 翻译
@@ -111,21 +81,30 @@ sequenceDiagram
     S-->>U: answer（办理成功 + 凭证号）→ done；effective=transaction
 ```
 
-resume 翻译（`gewu/agent/resume.py`，含 `classify_reply` 续轮意图判定）：用户文本映射为 approve（确认）/reject（取消）/respond（修改=按新参数重发再确认、切话题=放弃办理）——前端零改动照常 POST。**修改绝不走 edit decision**（edit 会替换参数直接执行、跳过二次确认）。跨重启续办：PostgresSaver 落盘 + 重启后 resume 桥照常工作（P17-6 真跑验证）。
+resume 翻译（`gewu/agent/resume.py`，含 `classify_reply` 续轮意图判定）：用户文本映射为 approve（确认）/reject（取消）/respond（修改=按新参数重发再确认、切话题=放弃办理）——前端零改动照常 POST。**修改绝不走 edit decision**（edit 会替换参数直接执行、跳过二次确认）。跨重启续办：PostgresSaver 直挂编译图落盘 + 重启后 resume 桥照常工作（P17-6 首验、P31-3 直挂形态复验）。
+
+## 终态收口与事件序（P31-3 搬迁对照）
+
+| 外壳节点（P31-2 前） | P31-3 去处 |
+| --- | --- |
+| `agent_in`（清零 + 状态行） | 端点输入构造（citations=[] 经 reducer 清零、answer_streamed 清零）+ AgentPromptMiddleware.before_agent（「正在理解问题…」状态行） |
+| `agent_done`（answer/citations 收口 + 截断标记 + 兜底） | `AgentDoneMiddleware.after_agent`（含 answer/truncated 写回 state 供端点 get_state 终态读取） |
+| `resolve_query`（指代补全 + mem_block） | 指代消解交模型 messages 历史；mem_block 装配迁 AgentPromptMiddleware（每 run 从 MemoryStore 取） |
+| `build_graph` 外壳 StateGraph | 退役——`app.state.graph` 直指 create_agent 编译产物 |
+
+SSE 事件序不变：… → answer_delta* → route(effective) → citations → done（AgentDoneMiddleware 在栈中位于 RouteEventMiddleware 之前，after_* 链倒序执行保证 route 先于 citations）。`stream_mode="custom"` 不再带 `subgraphs`（无嵌套图，custom 事件不再包 (namespace, event) 元组）。
 
 ## 相关文件
 
 | 文件 | 职责 |
 | --- | --- |
-| `gewu/agent/graph.py` | 单链外壳装配（agent_in/agent/agent_done；P31-3 塌缩后退役） |
-| `gewu/agent/agent.py` | agent-first 主循环装配（create_agent + middleware 栈） |
-| `gewu/agent/mw.py` | 自定义中间件族（截断防御/槽位门/确认摘要/route 合成）与 GewuAgentState |
+| `gewu/agent/agent.py` | 主循环装配（create_agent + middleware 栈 + checkpointer 直挂）＝顶层图 |
+| `gewu/agent/mw.py` | 自定义中间件族（安检/终态收口/槽位门/确认摘要/route 合成）与 GewuAgentState |
 | `gewu/agent/guardrails.py` | GuardMiddleware 关键词安检闸（GREETING_RE/DANGER_RE/会话感知） |
 | `gewu/agent/agenttools.py` | 主循环 @tool 工具集（检索/日期/deep_research/8 业务工具） |
 | `gewu/agent/txmeta.py` | 办理槽位元数据与确认摘要（slot_meta/FLOW_DEFS/build_confirm） |
 | `gewu/agent/research.py` | deep_research 的子问题拆解（plan 纯函数） |
 | `gewu/agent/resume.py` | resume 桥翻译（classify_reply + 用户文本 → HITL decisions） |
-| `gewu/agent/state.py` | ChatState 定义与 `new_state` 入口 |
-| `gewu/api/chat.py` | stream 消费（subgraphs=True）、done 单点、interrupt/resume 桥 |
+| `gewu/api/chat.py` | 输入构造（citations 轮起清零）、stream 消费、done 单点、interrupt/resume 桥 |
 
 ---

@@ -11,7 +11,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse
 from langgraph.checkpoint.memory import MemorySaver
 
-from gewu.agent.graph import build_graph
+from gewu.agent.agent import build_agent
 from gewu.api import admin as admin_routes
 from gewu.api import auth as auth_routes
 from gewu.api import chat as chat_routes
@@ -138,12 +138,15 @@ def create_app(
     app.state.checkpointer = (
         checkpointer if checkpointer is not None else _make_checkpointer(settings)
     )
-    app.state.graph = build_graph(
+    # P31-3 外壳塌缩：create_agent 编译产物即顶层图（checkpointer 直挂，
+    # memory 注入 AgentPromptMiddleware 每 run 装配 mem_block）。
+    app.state.graph = build_agent(
         settings,
-        app.state.retriever,
         app.state.llm,
-        business=app.state.business,
+        app.state.retriever,
+        app.state.business,
         checkpointer=app.state.checkpointer,
+        memory=app.state.memory,
     )
     app.include_router(auth_routes.router)
     app.include_router(routes.router)

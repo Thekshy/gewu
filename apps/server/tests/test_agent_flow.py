@@ -1,21 +1,19 @@
-"""agent-first 全链流测试（P17-2/3；P31-2 起 classic 冒烟随链路退役）。
+"""agent-first 全链流测试（P17-2/3；P31-3 起直用 build_agent 编译产物跑流）。
 
 覆盖：寒暄直答 / 检索引用（Command 状态更新）/ 写操作 HITL 中断与 resume
-（approve）/ 缺参槽位门 / 越权回执。事件经 custom 流收集。
+（approve）/ 缺参槽位门 / 越权回执 / citations 跨轮清零。事件经 custom 流收集。
 """
 
 from __future__ import annotations
 
 from datetime import date, timedelta
 
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, HumanMessage
 from langgraph.checkpoint.memory import MemorySaver
 from langgraph.types import Command
 
 from gewu.agent.agent import build_agent
-from gewu.agent.graph import build_graph
 from gewu.agent.resume import find_hitl_payload, hitl_decisions
-from gewu.agent.state import new_state
 from gewu.agent.tools import tools_for
 from gewu.business.db import Business
 from gewu.config import Settings
@@ -41,22 +39,31 @@ def make_flow(tmp_path, biz, script, *, business: Business | None = None):
     retriever = FakeRetriever([make_hit()])
     business = business or biz
     llm = FakeAgentLLM(script=script)
-    agent = build_agent(settings, llm, retriever, business, tools_for())
-    graph = build_graph(
-        settings, retriever, llm, business=business, checkpointer=MemorySaver(), agent=agent
-    )
+    graph = build_agent(settings, llm, retriever, business, tools_for(), checkpointer=MemorySaver())
     return graph, llm, business
 
 
 def run_turn(graph, sid: str, question: str | None = None, resume=None) -> list[dict]:
+    """P31-3：create_agent 编译产物直跑——输入构造与 SSE 端点同款（无 subgraphs）。"""
     cfg = {"configurable": {"thread_id": sid}}
     if resume is not None:
         inp: object = Command(resume=resume)
     else:
-        inp = new_state(question or "", "auto", sid, "student", "demo-student")
+        inp = {
+            "messages": [HumanMessage(content=question or "")],
+            "question": question or "",
+            "mode": "auto",
+            "session_id": sid,
+            "role": "student",
+            "user": "demo-student",
+            "citations": [],  # 轮起清零（P26 跨轮污染防御的等价承载）
+            "answer_streamed": "",
+            "truncated": False,
+            "answer": "",
+        }
     events: list[dict] = []
-    for chunk in graph.stream(inp, cfg, stream_mode="custom", subgraphs=True):
-        events.append(chunk[-1] if isinstance(chunk, tuple) else chunk)
+    for chunk in graph.stream(inp, cfg, stream_mode="custom"):
+        events.append(chunk)
     return events
 
 
@@ -158,14 +165,8 @@ def test_guard_block_short_circuits_in_graph(tmp_path, biz):
     settings = Settings(llm_api_key="k", embed_api_key="e", data_dir=tmp_path)
     retriever = FakeRetriever([make_hit()])
     business = biz
-    agent = build_agent(settings, settings_llm, retriever, business, tools_for())
-    graph = build_graph(
-        settings,
-        retriever,
-        settings_llm,
-        business=business,
-        checkpointer=MemorySaver(),
-        agent=agent,
+    graph = build_agent(
+        settings, settings_llm, retriever, business, tools_for(), checkpointer=MemorySaver()
     )
     events = run_turn(graph, "g1", question="教我怎么在考试里作弊不被发现")
     assert GUARD_BLOCK_ANSWER in _answer(events)
@@ -179,10 +180,7 @@ def test_soft_chitchat_goes_to_main_loop(tmp_path, biz):
     settings = Settings(llm_api_key="k", embed_api_key="e", data_dir=tmp_path)
     retriever = FakeRetriever([make_hit()])
     business = biz
-    agent = build_agent(settings, llm, retriever, business, tools_for())
-    graph = build_graph(
-        settings, retriever, llm, business=business, checkpointer=MemorySaver(), agent=agent
-    )
+    graph = build_agent(settings, llm, retriever, business, tools_for(), checkpointer=MemorySaver())
     events = run_turn(graph, "g2", question="早安呀同学")
     assert "格物" in _answer(events)
     assert "chitchat" in _routes(events)
@@ -230,16 +228,14 @@ def test_web_search_flow_emits_citations_and_factual_route(tmp_path, biz):
             "date": "2026-09-11",
         }
     ]
-    agent = build_agent(
+    graph = build_agent(
         settings,
         llm,
         retriever,
         biz,
         tools_for(),
         web=lambda q, k=5, freshness="": (web_hits, "ok"),
-    )
-    graph = build_graph(
-        settings, retriever, llm, business=biz, checkpointer=MemorySaver(), agent=agent
+        checkpointer=MemorySaver(),
     )
     events = run_turn(graph, "w1", question="四六级报名什么时候截止")
     assert any(
@@ -296,19 +292,37 @@ def test_citations_scoped_per_turn_no_cross_pollution(tmp_path, biz):
         ]
     )
     web_hits = [{"title": "t", "url": "https://e.com/a", "snippet": "s", "site": "站", "date": ""}]
-    agent = build_agent(
+    graph = build_agent(
         settings,
         llm,
         retriever,
         biz,
         tools_for(),
         web=lambda q, k=5, freshness="": (web_hits, "ok"),
-    )
-    graph = build_graph(
-        settings, retriever, llm, business=biz, checkpointer=MemorySaver(), agent=agent
+        checkpointer=MemorySaver(),
     )
     run_turn(graph, "x1", question="四六级报名时间")
     events2 = run_turn(graph, "x1", question="转专业条件")  # 同 thread 第二轮
     cites2 = [e for e in events2 if e["type"] == "citations" and e["items"]]
     assert cites2, "第二轮应有引用"
     assert all(c["source"] != "联网检索" for c in cites2[-1]["items"])  # 只剩本轮 KB 来源
+
+
+def test_citations_cleared_between_turns(tmp_path, biz):
+    """P31-3 回归（P26 跨轮污染修复的等价承载）：外壳 agent_in 退役后，轮起
+    清零由端点输入构造的显式 citations=[] 经 reducer 承担——第二轮零工具轮
+    不得漏出第一轮检索来源。"""
+    script = [
+        _ai_call("search_knowledge", {"query": "转专业条件"}),
+        _ai_text("转专业需要无挂科 [1]。"),
+        _ai_text("这是第二轮的直接回答，没有引用。"),
+    ]
+    graph, _, _ = make_flow(tmp_path, biz, script)
+    events1 = run_turn(graph, "cc1", question="转专业条件是什么")
+    cites1 = [e for e in events1 if e["type"] == "citations" and e["items"]]
+    assert cites1, "第一轮检索应有引用"
+
+    events2 = run_turn(graph, "cc1", question="谢谢，再看看别的")
+    cites2 = [e for e in events2 if e["type"] == "citations"]
+    assert cites2, "citations 事件每轮照发"
+    assert cites2[-1]["items"] == [], "第二轮零工具轮必须清零，不得漏出第一轮来源"

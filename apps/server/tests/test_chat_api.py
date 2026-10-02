@@ -13,7 +13,6 @@ from pathlib import Path
 from fastapi.testclient import TestClient
 from langchain_core.messages import AIMessage
 
-from gewu.agent.state import new_state
 from gewu.api.app import create_app
 from gewu.auth.store import AuthStore
 from gewu.business.db import Business
@@ -330,13 +329,6 @@ def test_chat_no_follow_ups_when_route_refusal(tmp_path: Path, biz, mem, auth, s
     assert not any(e["type"] == "follow_ups" for e in events)
 
 
-def test_new_state_defaults():
-    s = new_state("q", "auto", "sid", "student", "u1@example.com")
-    assert s["question"] == "q"
-    assert s["truncated"] is False
-    assert s["answer"] == ""
-
-
 # ---------- P27：链路观测 e2e（chat 端点 → tracer → PG 两表） ----------
 
 
@@ -351,7 +343,6 @@ def test_chat_turn_writes_trace_and_tool_args_span(tmp_path, biz, mem, auth, ses
     from langgraph.checkpoint.memory import MemorySaver
 
     from gewu.agent.agent import build_agent
-    from gewu.agent.graph import build_graph
     from gewu.agent.tools import tools_for
     from gewu.obs import TracerStore
     from tests.agent_fakes import FakeAgentLLM, FakeRetriever
@@ -376,16 +367,14 @@ def test_chat_turn_writes_trace_and_tool_args_span(tmp_path, biz, mem, auth, ses
         ]
     )
     web_hits = [{"title": "t", "url": "https://e.com/a", "snippet": "s", "site": "站", "date": ""}]
-    agent = build_agent(
+    graph = build_agent(
         settings,
         llm,
         FakeRetriever(),
         biz,
         tools_for(),
         web=lambda q, k=5, freshness="": (web_hits, "ok"),
-    )
-    graph = build_graph(
-        settings, FakeRetriever(), llm, business=biz, checkpointer=MemorySaver(), agent=agent
+        checkpointer=MemorySaver(),
     )
     client = make_client(tmp_path, biz, mem, auth, sess, graph=graph, trace_store=store)
 

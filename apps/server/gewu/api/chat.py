@@ -26,10 +26,10 @@ from typing import Annotated
 
 from fastapi import APIRouter, Body, HTTPException, Request
 from fastapi.responses import StreamingResponse
+from langchain_core.messages import HumanMessage
 
 from gewu.agent import events as ev
 from gewu.agent.followups import generate_follow_ups, should_generate
-from gewu.agent.state import new_state
 from gewu.api.auth import require_user
 from gewu.obs import Tracer, set_current_tracer
 from gewu.usage import current_user
@@ -130,11 +130,24 @@ def chat(request: Request, payload: Annotated[dict, Body(...)]):
     # 与本轮 LLM 调用/记账同线程；consolidate 异步线程在 work() 首行显式 set。
     graph = request.app.state.graph
     config = {"configurable": {"thread_id": req["session_id"]}}
-    state_input = new_state(req["question"], req["mode"], req["session_id"], user.role, user.email)
+    # P31-3：输入构造直接对齐 GewuAgentState（外壳 new_state/agent_in 退役）。
+    # citations 显式 [] 经 reducer 承担轮起清零（P26 跨轮污染修复的等价承载，
+    # 回归测试 test_citations_cleared_between_turns）；answer_streamed 同款。
+    state_input = {
+        "messages": [HumanMessage(content=req["question"])],
+        "question": req["question"],
+        "mode": req["mode"],
+        "session_id": req["session_id"],
+        "role": req["role"],
+        "user": req["user"],
+        "citations": [],
+        "answer_streamed": "",
+        "truncated": False,
+        "answer": "",
+    }
 
-    # interrupt/resume 桥：thread 停在确认门时以用户消息 resume。
-    # agent 链路的 HITL 中断（payload 含 action_requests）需翻译为 decisions
-    # （approve/reject/respond）；classic tx_gate 维持原文本 resume。
+    # interrupt/resume 桥：thread 停在确认门时以 HITL decisions resume
+    # （P31-3 起单形态：classic tx_gate 原文 resume 分支随链路退役）。
     from langgraph.types import Command
 
     from gewu.agent.resume import find_hitl_payload, hitl_decisions
@@ -142,7 +155,7 @@ def chat(request: Request, payload: Annotated[dict, Body(...)]):
     run_input = state_input
     try:
         snap = graph.get_state(config)
-        if snap.next:  # 停在确认门（agent HITL / classic tx_gate）
+        if snap.next:  # 停在确认门（agent HITL）
             payload = find_hitl_payload(snap)
             if payload is not None:
                 run_input = Command(
@@ -150,8 +163,6 @@ def chat(request: Request, payload: Annotated[dict, Body(...)]):
                         payload, req["question"], request.app.state.llm, request.app.state.business
                     )
                 )
-            else:
-                run_input = Command(resume=req["question"])
     except Exception:  # noqa: BLE001 - 状态读取失败按新会话处理
         pass
 
@@ -207,20 +218,19 @@ def chat(request: Request, payload: Annotated[dict, Body(...)]):
             )
 
         try:
-            # subgraphs=True：agent 子图（create_agent）内 middleware/工具的 custom
-            # 事件必须显式开启冒泡（P17）；yield 形态为 (namespace, event)。
+            # P31-3 外壳塌缩：create_agent 编译产物为顶层图，无嵌套——
+            # subgraphs 摘除，custom 事件不再包 (namespace, event) 元组。
             # 记账归属：SSE sync 迭代每次 next 可能换 Context（anyio 线程池），
             # contextvar 须在每次取事件前 re-set——graph 节点的 LLM 调用/记账
             # 都发生在 next() 的调用栈里，随 Context 副本传播。
-            stream = graph.stream(run_input, config, stream_mode="custom", subgraphs=True)
+            stream = graph.stream(run_input, config, stream_mode="custom")
             while True:
                 current_user.set(req["user"])
                 set_current_tracer(tracer)  # P23 同款纪律：每次 next 前 re-set
                 try:
-                    chunk = next(stream)
+                    evt = next(stream)
                 except StopIteration:
                     break
-                evt = chunk[-1] if isinstance(chunk, tuple) else chunk
                 t = evt.get("type")
                 if t == "route":
                     trace["route"] = evt.get("route", "")
