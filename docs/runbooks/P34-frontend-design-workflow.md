@@ -251,6 +251,23 @@
   （memory.py:70），服务器无需手动 SQL；工作区仅 P34 改动（P33 已被
   并行会话 commit 完毕：947c593/fa12ff4），push 将带 P32×2+P33×2+P34。
 
+### 部署与线上验证（2026-10-02 深夜）
+
+- push：be87b13..d403b5d（P32×2 + P33×2 + P34 一并上远端）。
+- 部署（沿 P24 rsync 直推流程）：服务器备份
+  `/root/backup-gewu-pre-p34-20261002-2353.tar.gz`（39M，排除
+  node_modules/__pycache__/.venv）→ rsync server（含 uv sync，幂等
+  无新依赖）+ rsync web（源码+本地 .next 产物，排 node_modules，
+  Node v22 兼容本地 build）→ systemctl restart gewu-api +
+  pm2 restart gewu-web。
+- 线上验证：`/api/health` = status ok / llm+embeddings true / 15 docs /
+  60 chunks；gewu.mrpwn.top 200（nginx+Certbot：/api→8000、web→3001，
+  公网直连 IP:3001 防火墙关闭仅走 443）；login 页渲染评审 PASS
+  （P25 机构蓝 token 线上生效）。空态/对话页需登录，视觉终验与本地
+  build 同产物等价（本地亮暗双 PASS 已闭环）。
+- 入口与运维：外部唯一入口 https://gewu.mrpwn.top ；api=systemd
+  gewu-api（uv run uvicorn :8000）；web=pm2 gewu-web（:3001）。
+
 ---
 
 ## 附录 A：参照池初稿（2026-10-02 预研，执行时截图校准）
