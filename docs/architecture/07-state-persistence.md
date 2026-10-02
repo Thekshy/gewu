@@ -10,7 +10,9 @@
 | 会话登记（归属/标题/kind） | PG 表 `chat_sessions`（P22） | 跨请求、跨重启 | `DELETE /api/sessions/{id}` 三处连带之一 |
 | 业务数据（预约/请假单） | PG 表 `bookings`/`leave_tickets` | 永久（演示语义） | `/api/business/reset` 手动清（P21 起 admin-only） |
 | 长期记忆（fact/episodic） | PG 表 `memory_fact`/`memory_episodic` | 永久积累 | 同 key UPSERT 覆盖；user_id=P21 起为真实 email；P22 起 fact 用户可管（/memory 页）、episodic 随会话删除连带清 |
-| 每日 token 用量 | `data/usage.json` | 当天 | 跨天自动归零 |
+| 消息反馈（赞/踩） | PG 表 `message_feedback`（P25） | 永久积累 | 同 `(user,session,question)` UNIQUE upsert 覆盖（改主意不双行） |
+| per-user token 用量 | PG 表 `token_usage`（P23） | 按 (user, day) 累加 | 次日自然新行（无清理任务） |
+| 全局每日 token 用量 | `data/usage.json` | 当天 | 跨天自动归零 |
 
 ## 会话资源化（P22：`gewu/session/store.py`）
 
@@ -73,9 +75,14 @@ def _make_checkpointer(settings: Settings):
 
 **评测口径注意**：记忆固化线程与下一轮请求的 L1 路由存在并发争用（偶发路由降级漂移）——全量评测以 `MEMORY_CONSOLIDATE=off` 隔离（记忆固化不在 PARITY 契约内），运行态默认 on。归因过程见 [P14 任务书 §6](../runbooks/P14-langgraph-migration.md)。
 
-## 预算（`gewu/budget.py`）
+## 预算（双闸：`gewu/budget.py` + `gewu/usage.py`）
 
-每日 token 预算（缺省 200 万，`DAILY_TOKEN_BUDGET`）：chat 入口 `ensure()` 超限抛 `BudgetExhausted` → 429；`LLMService` 三个通道（chat / chat_with_tools / 流式迭代完成）统一把 `usage_metadata.total` 入账。持久化是整文件覆写 `{"date": "...", "tokens": n}`——与 Go 版同格式，跨重启有效、跨天归零（每次读/写前检查文件日期 rollover）；记账文件写失败不影响主链路（内存值仍准确到进程生命周期）。
+token 成本是两道闸、两本账：
+
+- **全局闸**（`budget.py`，usage.json 文件制）：每日 token 预算（缺省 200 万，`DAILY_TOKEN_BUDGET`），chat 入口 `ensure()` 超限抛 `BudgetExhausted` → 429；`LLMService` 各通道统一把 `usage_metadata.total` 入账。持久化是整文件覆写 `{"date": "...", "tokens": n}`——与 Go 版同格式，跨重启有效、跨天归零；记账文件写失败不影响主链路。
+- **个人闸**（P23，`usage.py`，PG `token_usage` 表）：按 `(user, day)` UPSERT 累加，chat 入口比对 `users.daily_token_limit ?? DAILY_USER_BUDGET(20 万)` 超限 429（文案与全局闸区分）；记账归属经 `usage.current_user` ContextVar 从 chat 入口传播到 LLMService 记账口**双写**（全局账 + 个人账）。装配 `make_usage_store` 探测式软降级——PG 不可达退 None 禁用个人功能，全局闸仍兜底。
+
+ContextVar 传播的两个坑（P23 撞出、已在代码注释固化）：StreamingResponse 的 sync 迭代由线程池分派（每次 next 可能换线程），contextvar 必须在 `generate()` 迭代体开头 re-set；consolidate/follow_ups 异步线程不继承，work() 首行显式 set。
 
 ## 一轮会话触及的全部状态
 
@@ -106,10 +113,11 @@ sequenceDiagram
 
 | 文件 | 职责 |
 | --- | --- |
-| `gewu/api/app.py` | checkpointer 装配（autocommit 坑在此） |
+| `gewu/api/app.py` | checkpointer 装配（autocommit 坑在此）与各存储域注入 |
 | `gewu/agent/state.py` | ChatState 字段全景（哪些进 checkpoint） |
 | `gewu/memory.py` | 双表 schema、memory_block 装配、consolidate 固化 |
-| `gewu/budget.py` | 每日预算闸与记账 |
+| `gewu/budget.py` / `gewu/usage.py` | 全局预算闸（usage.json）与 per-user 用量账（PG） |
+| `gewu/session/store.py` | chat_sessions 登记与 message_feedback 表 |
 | `gewu/api/chat.py` | 流后异步固化入口 |
 
 ---

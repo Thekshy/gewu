@@ -18,8 +18,6 @@ P17 起意图路由分为两层形态：
 
 ## cascade 三级漏斗（mode=classic）
 
-## 三级漏斗
-
 ```mermaid
 flowchart LR
     Q[问题] --> L0{L0 规则快路径}

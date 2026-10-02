@@ -34,17 +34,18 @@ agent = create_agent(
     model,                                        # llm.agent_model()（GLM-5.3，温度/上限固化）
     tools=[search_knowledge, parse_date, deep_research, *8个业务工具],   # agenttools.py @tool 化
     middleware=[
-        GuardMiddleware(),                        # before_agent：lenient 安检，block/meta 短路
+        GuardMiddleware(llm),                     # before_agent：lenient 安检，block/meta 短路
         ModelCallLimitMiddleware(run_limit=8),    # 轮次上限（旧 REACT_MAX_TURNS 等价）
         TruncationDefenseMiddleware(),            # P10 截断防御（Pi 式回填重调）
-        UsageRecordMiddleware(),                  # token 记账（预算闸口径）
+        UsageRecordMiddleware(llm),               # token 记账 + [llm] per-call 埋点（P24-1）
         AgentPromptMiddleware(),                  # system prompt + 记忆块
         HumanInTheLoopMiddleware(interrupt_on=写工具四件),   # 写确认门（HITL）
-        PendingActionMiddleware(),                # 确认摘要先于中断发射
-        WriteSlotGateMiddleware(),                # 缺必填参数 → slot_question 引导收集
+        PendingActionMiddleware(business),        # 确认摘要先于中断发射
+        WriteSlotGateMiddleware(business),        # 缺必填参数 → slot_question 引导收集
         ResearchLimitMiddleware(),                # deep_research 单轮限 1 次（flash 代码闸）
+        SearchQueryGuardMiddleware(),             # 检索词零重合拼回原话（P24-3 硬防线）
         RouteEventMiddleware(),                   # after_agent：effective route 合成补发
-        SummarizationMiddleware(),                # 上下文压缩（P13 顺延线收口）
+        SummarizationMiddleware(...),             # 上下文压缩（30k 触发、保 20 条，P13 收口）
     ],
     state_schema=GewuAgentState,                  # messages + role/user/mem_block/citations
 )

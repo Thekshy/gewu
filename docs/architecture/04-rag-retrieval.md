@@ -30,8 +30,9 @@ flowchart LR
 `Retriever.search()` 的主干即漏斗的代码形态：
 
 ```python
-def search(self, query: str, k: int = 0) -> list[Hit]:
-    query = self.rewriter.expand(query)              # ① 改写（无 key 原样返回）
+def search(self, query: str, k: int = 0, *, expand: bool = True) -> list[Hit]:
+    if expand:
+        query = self.rewriter.expand(query)          # ① 改写（无 key 原样返回；工具路径传 False）
     if not self.store.has_embeddings():
         raise MissingVectorsError(...)               # 索引级缺失直接报错，不静默降级
     bm_scored  = self.store.bm25_search(query, pool)
@@ -55,6 +56,12 @@ REWRITE_SYSTEM（节选）：
 ```
 
 注意 GLM 温度 0 仍非确定——改写输出方差是端到端检索对照差异的主导项（P14-1 方差基线归因，见 [10](10-evaluation.md)）。
+
+**P24 的两处提速与一道硬防线**（线上「食堂位置」检索实证驱动）：
+
+- **工具路径免二次改写**：agent 主循环里 `search_knowledge`/`deep_research` 的 query 已是 LLM 提炼的关键词串，再过 rewriter 是重复劳动——这两个调用点传 `expand=False` 直入漏斗；直答链路（用户原话）保持 `expand=True`；
+- **改写输出保序去重**：rewriter 的拼接结果按词去重且保持首现序，避免「原词+术语」串里重复词摊薄 BM25 权重；
+- **SearchQueryGuardMiddleware 硬防线**（`agent/mw.py`，docstring 引导之外的代码闸）：模型给的检索词与原问题 CJK bigram **零重合**（完全丢词）时拼回原话再检索——拼接是增补不是替换，召回只增不减；有重合则放行（口语原话摊薄关键词权重）。deep_research 不拦（子问题是 plan 拆解产物本非原话）。
 
 ## 双路召回与加权 RRF 融合
 

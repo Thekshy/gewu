@@ -115,7 +115,7 @@ sequenceDiagram
 
 ## 权限矩阵与确定性
 
-- **权限在工具层不在业务系统**：business 对角色无感知，判定收敛在 `agent.tools.call_tool` 单一出口——路由、ReAct、恢复流程、LLM 选工具所有路径都绕不过这道闸：
+- **权限在工具层不在业务系统**：business 对角色无感知，判定收敛在 `agent.tools.call_tool` 单一出口——路由、agent 主循环、恢复流程、LLM 选工具所有路径都绕不过这道闸：
 
 ```python
 def call_tool(tools, business, name, args, role, user) -> Result:

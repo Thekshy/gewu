@@ -1,18 +1,18 @@
 # 01 · 系统总览
 
-「格物」是面向高校场景的校园制度智能问答与业务执行 Agent：事实问题走 RAG 直答、复合政策问题走 Deep Research、办理诉求走知行执行层（槽位 → 确认 → 执行 → 回执）、范围外问题礼貌拒答——全部收敛在同一条 SSE 事件流下，前端与评测共用同一契约。本文给出系统组成、技术栈、模块地图与依赖规则；各领域的深入拆解见后续各篇。
+「格物」是面向高校场景的校园制度智能问答与业务执行 Agent：事实问题走 RAG 直答、复合政策问题走 Deep Research、办理诉求走确认门执行（摘要 → 确认 → 执行 → 回执）、寒暄自然回应、范围外礼貌拒答——全部收敛在同一条 SSE 事件流下，前端与评测共用同一契约。P17 起默认链路为 **agent-first 单循环**（create_agent + middleware），P14~P16 的级联固定图保留为 `mode=classic` 实验基线。本文给出系统组成、技术栈、模块地图与依赖规则；各领域的深入拆解见后续各篇。
 
 ## 系统组成
 
-gewu 是一个**模块化单体**：FastAPI 服务进程承载全部会话编排与业务逻辑，Next.js 前端静态托管，持久化统一在 PostgreSQL（知识库 + 会话检查点 + 业务台账 + 长期记忆 + 用户/会话，P21 起 SQLite 全部退役）；LLM 与 Embedding 经 OpenAI 兼容协议访问外部 API。
+gewu 是一个**模块化单体**：FastAPI 服务进程承载全部会话编排与业务逻辑，Next.js 前端静态托管，持久化统一在 PostgreSQL（知识库 + 会话检查点 + 业务台账 + 长期记忆 + 用户/会话/用量/反馈，P21 起 SQLite 全部退役）；LLM 与 Embedding 经 OpenAI 兼容协议访问外部 API。
 
 | 组件 | 位置 | 端口/形态 | 职责 |
 | --- | --- | --- | --- |
-| server | `apps/server/`（Python 3.12+ / uv） | `:8000` | 主服务：REST API、SSE 流式问答、LangGraph 会话编排、RAG 检索、业务执行。装配入口 `main.py` → 工厂 `gewu/api/app.py` |
-| web | `apps/web/`（Next.js） | dev `:3000` | 聊天界面 / 三路线对比实验台 / 控制台；手写 SSE 解析（`lib/api.ts`），对 interrupt 无感知 |
-| PostgreSQL | docker-compose（pgvector 镜像） | `:5433` | 知识库三表（docs/chunks/vectors，FTS + halfvec HNSW）与 LangGraph checkpoints 表族，共用一个实例 |
+| server | `apps/server/`（Python 3.12+ / uv） | `:8000` | 主服务：27 端点（7 路由文件）、SSE 流式问答、agent 编排、RAG 检索与入库、业务执行、用户/会话/管理域。装配入口 `main.py` → 工厂 `gewu/api/app.py` |
+| web | `apps/web/`（Next.js + shadcn/ui） | dev `:3000` | 六个界面区：登录/注册（邀请码）、聊天（含追问 pills/来源 Dialog/赞踩）、双底座对比实验台、控制台、记忆面板（/memory）、管理后台（/admin）；手写 SSE 解析（`lib/api.ts`），对 interrupt 无感知 |
+| PG（知识库+检查点） | docker-compose（pgvector 镜像） | `:5433` | 知识库三表（docs/chunks/vectors，FTS + halfvec HNSW）与 LangGraph checkpoints 表族 |
 | PG（业务/记忆） | `business.*` / `memory_*` 表 | psycopg pool | mock 业务台账（预约/请假单）与长期记忆（fact/episodic），P21-2 自 SQLite 迁入 |
-| PG（auth） | `users` / `auth_sessions` / `invite_codes` | psycopg pool | P21 用户体系：邀请码封闭注册、cookie 会话、role 权威 |
+| PG（用户/运营域） | `users`/`auth_sessions`/`invite_codes`/`chat_sessions`/`token_usage`/`message_feedback` | psycopg pool | P21~P25：用户体系、会话登记、按用户用量账、消息反馈 |
 | LLM API | 外部（OpenAI 兼容） | HTTPS | glm-5.3（主模型）+ glm-5.3-flash（小模型）双档；embedding-3（2048 维） |
 
 运行形态刻意保持单一：`make run`（或 `docker compose up`）起全部依赖，`make pg-up` 只拉 PG。没有多进程编排、没有消息队列——这是微服务退役后的刻意选择（见文末）。
@@ -21,91 +21,98 @@ gewu 是一个**模块化单体**：FastAPI 服务进程承载全部会话编排
 
 | 层 | 选型 | 说明 |
 | --- | --- | --- |
-| 会话编排 | **LangGraph**（StateGraph + interrupt + checkpointer） | P14 起核心；主图见 [02](02-orchestration-graph.md) |
+| 会话编排（默认链路） | **LangChain 1.x `create_agent` + middleware** | P17 起 `mode=auto/react`；agent 主循环见 [05](05-react-agent.md) |
+| 会话编排（外壳与基线） | LangGraph（StateGraph + interrupt + checkpointer） | 外壳图与 classic 级联基线见 [02](02-orchestration-graph.md) |
 | Web 框架 | FastAPI + uvicorn | :8000，SSE 流式；装配工厂 `gewu/api/app.py`（可脱离 main 测试） |
 | 模型接入 | langchain-openai（ChatOpenAI） | OpenAI 兼容协议，换端点即换供应商；智谱 thinking 私有参数按开关注入 |
+| 认证 | argon2-cffi + 服务端 cookie 会话 | argon2id 密码、`gewu_session` httpOnly cookie，见 [11](11-auth.md) |
 | 向量/关键词 | PostgreSQL + pgvector（halfvec HNSW + tsvector GIN） | 读写收口存储函数，见 [04](04-rag-retrieval.md) |
 | 会话持久化 | LangGraph PostgresSaver | 同一 PG 实例，checkpoints/checkpoint_blobs/checkpoint_writes 表族 |
-| 业务/记忆/认证 | psycopg（ConnectionPool，rag.Store 同款） | mock 业务、长期记忆与用户认证，见 [07](07-state-persistence.md)/[11](11-auth.md) |
-| 工具链 | uv + ruff + pytest + GitHub Actions | CI 双 job（server + web），门禁见 [09](09-cross-cutting.md) |
+| 业务/记忆/用户/运营 | psycopg（ConnectionPool，rag.Store 同款） | 见 [07](07-state-persistence.md)/[11](11-auth.md) |
+| 工具链 | uv + ruff + pytest + GitHub Actions | CI 双 job（server + web）；本地门禁 make lint / lint-arch / design-lint，见 [09](09-cross-cutting.md) |
 
 ## 模块间通信
 
 | 链路 | 协议/机制 | 说明 |
 | --- | --- | --- |
-| 浏览器 → server | HTTP + **SSE**（`POST /api/chat`） | `data: {json}\n\n` 分帧，UTF-8 原文不转义；十类事件契约见 [08](08-api-contract.md) |
+| 浏览器 → server | HTTP + **SSE**（`POST /api/chat`） | `data: {json}\n\n` 分帧，UTF-8 原文不转义；十一类事件契约见 [08](08-api-contract.md)；前端经 next rewrites 同源代理 |
+| 浏览器 ↔ server（身份） | `gewu_session` cookie（httpOnly, SameSite=Lax, 30d） | 服务端会话表（auth_sessions 存 sha256 摘要），见 [11](11-auth.md) |
 | server → PostgreSQL | psycopg3 连接池（psycopg_pool） | 知识库走存储函数（`rag_fts_search`/`rag_upsert_doc`）；checkpointer 要求 autocommit 连接 |
-| server → PG（业务/记忆/auth） | psycopg ConnectionPool | 三域各自连接池；复合写操作持进程锁保持单写者语义 |
-| agent → rag/llm/business | 进程内函数调用，经 Protocol 接口 | `Retriever` 依赖 `RetrievalStore`/`RagLLM` 最小协议，测试用 Fake 同构替换 |
-| 主图 ↔ ReAct 子图 | `config.configurable` 注入 `ReactContext` | 运行时对象（检索器/业务系统/工具表）不能进 state——checkpointer 的 msgpack 序列化会拒绝 |
-| server → LLM API | HTTPS（OpenAI 兼容 `/chat/completions`、`/embeddings`） | 双模型缓存分发；用量经 `TokenBudget` 统一入账 |
+| agent → rag/llm/business | 进程内函数调用 | `Retriever` 依赖最小 Protocol，测试用 Fake 同构替换 |
+| 外壳图 ↔ agent 子图 | 工具闭包持有运行时对象；role/user/mem_block 经子图 state 流入 | 运行时对象不进 state（checkpointer msgpack 拒绝）——P17 起连 `config.configurable` 通道都不再需要，见 [05](05-react-agent.md) |
+| server → LLM API | HTTPS（OpenAI 兼容 `/chat/completions`、`/embeddings`） | 双模型缓存分发；用量经 contextvar 归属双写（全局闸 + 个人账），见 [09](09-cross-cutting.md) |
 
 ## 总体架构图
 
 ```mermaid
 flowchart TB
     subgraph Web[apps/web · Next.js]
-        UI[聊天 / 对比实验台 / 控制台]
+        UI[登录 · 聊天 · 对比实验台 · 控制台 · /memory · /admin]
     end
     subgraph Server[apps/server · FastAPI :8000]
-        MW[中间件：限流 · X-Trace-Id · CORS]
-        API[api 层：chat SSE / search / docs / business / health]
-        GRAPH[agent 编排：LangGraph 主图]
+        MW[中间件：限流 · X-Trace-Id · CORS 白名单]
+        API[api 层 27 端点：chat SSE / auth / sessions / memory / admin / feedback / search / docs / business / health]
+        GRAPH[编排：外壳图 + agent 主循环 create_agent]
     end
     subgraph Domains[gewu/]
-        ROUTE[routing 级联路由]
-        RAG[rag 混合检索]
-        REACT[react 子图]
+        GUARD[guardrails guard 安检]
+        RAG[rag 检索与入库]
+        AGT[mw 中间件族 + agenttools]
         TX[tx 知行执行层]
         LLM[llm 模型访问]
         BIZ[business mock 业务]
         MEM[memory 长期记忆]
+        AUTH[auth · session · usage 用户/会话/用量域]
     end
-    PG[(PostgreSQL<br/>docs/chunks/vectors<br/>+ checkpoints)]
-    PG2[(PG business/memory/auth<br/>users · auth_sessions · invite_codes)]
+    PG[(PostgreSQL<br/>知识库 + checkpoints<br/>+ business/memory<br/>+ users/chat_sessions/token_usage …)]
     EXT[[LLM / Embedding API<br/>OpenAI 兼容]]
 
-    UI -->|HTTP/SSE| MW --> API --> GRAPH
-    GRAPH --> ROUTE & REACT & TX & MEM
-    ROUTE & REACT & TX --> LLM --> EXT
-    GRAPH --> RAG --> PG
+    UI -->|HTTP/SSE + cookie| MW --> API --> GRAPH
+    GRAPH --> GUARD & AGT & TX & MEM
+    GUARD & AGT & TX --> LLM --> EXT
+    AGT --> RAG
+    RAG --> PG
     GRAPH -.checkpointer.-> PG
-    TX --> BIZ --> SQ
-    MEM --> SQ
+    TX --> BIZ --> PG
+    MEM --> PG
+    AUTH --> PG
+    API --> AUTH
 ```
 
 ## 模块地图与依赖规则
 
 | 域 | 位置（相对 `apps/server/`） | 职责（一句话） |
 | --- | --- | --- |
-| 接口 | `gewu/api/` | 6 端点 + SSE 写出 + interrupt/resume 桥；只做 HTTP 语义 |
-| 编排 | `gewu/agent/` | 外壳主图（graph.py）、agent 主循环装配（agent.py）、自研中间件族（mw.py）、guard 安检（guardrails.py）、主循环工具集（agenttools.py）、resume 翻译（resume.py）、路由（routing.py，classic）、执行层（tx.py）、深研（research.py）、工具权限（tools.py）、状态（state.py）、事件（events.py）、提示词（prompts.py） |
-| 检索 | `gewu/rag/` | 混合检索管线（retrieve.py）、PG 存取（store.py）、DDL 权威（schema.py） |
-| 模型访问 | `gewu/llm/` | ChatOpenAI 工厂（chat.py）+ 自定义 Embeddings（embed.py）+ 门面（service.py） |
+| 接口 | `gewu/api/` | 7 路由文件 27 端点 + SSE 写出 + interrupt/resume 桥 + follow_ups 追发；只做 HTTP 语义 |
+| 编排 | `gewu/agent/` | 外壳主图（graph.py）、agent 主循环装配（agent.py）、中间件族（mw.py）、guard 安检（guardrails.py）、主循环工具集（agenttools.py）、resume 翻译（resume.py）、追问生成（followups.py）、路由（routing.py，classic）、执行层（tx.py）、深研（research.py）、工具权限（tools.py）、状态（state.py）、事件（events.py）、提示词（prompts.py） |
+| 检索 | `gewu/rag/` | 混合检索管线（retrieve.py）、PG 存取（store.py）、DDL 权威（schema.py）、切片策略链（chunker.py）、入库主流程（ingest.py） |
+| 模型访问 | `gewu/llm/` | ChatOpenAI 工厂（chat.py）+ 自定义 Embeddings（embed.py）+ 门面（service.py，含 agent_model 工厂与记账口） |
 | 业务 | `gewu/business/` | mock 场馆预约 + 请假审批（对角色无感知，权限在工具层） |
+| 用户/会话/用量 | `gewu/auth/` · `gewu/session/` · `gewu/usage.py` | 认证三表与守卫（[11](11-auth.md)）、会话登记与反馈表（[07](07-state-persistence.md)）、per-user token 账（[09](09-cross-cutting.md)） |
 | 支撑 | `gewu/` 顶层 | config / budget / memory / middleware / dates / jsonx |
 
 **依赖规则**（`make lint-arch`，`scripts/lint-arch.sh` 的 grep 断言零依赖守护）：
 
-1. `api`（接口层）→ `agent`/`rag`/`business`/支撑域；路由实现层（routes.py/chat.py）禁止直接 import `llm`（app.py 作为装配工厂豁免）；
+1. `api` 路由实现层（routes/chat/sessions/memory/admin/feedback 六文件）禁止直接 import `llm`（app.py 作为装配工厂豁免）；
 2. `rag`、`llm`、`business` ↛ `agent`（反向禁止）；三者之间禁止横向 import（经编排层解耦）；
 3. `business` 只经 `agent.tools` 的 `call_tool` 单一出口被触达——权限矩阵在这里收敛（未知工具/越权/缺参在进入业务系统前拦截）；
-4. 支撑域（memory/budget/middleware）不 import 业务域；
-5. `main.py` 只做装配（仅 import `gewu.api` / `gewu.config`；`app.py` 是可测试的装配工厂，等价于 Go 时代的 `cmd/server/main.go`，享有豁免）。
+4. 支撑域（memory/budget/middleware/**auth/session/usage**）不 import 业务域（agent/rag/business）；
+5. `main.py` 只做装配（仅 import `gewu.api` / `gewu.config`）；
+6. **web 侧规则**：`apiFetch` 调用点不得自带 `${API_BASE}`（双拼出非法主机名且请求不出网——2026-10-01 线上会话创建失败事故的根因，lint 挡回归）。
 
-规则原文见 `scripts/lint-arch.sh` 头部注释；违规即非零退出，进 CI。
+规则原文见 `scripts/lint-arch.sh`；违规即非零退出，进 CI。
 
 ## 仓库顶层目录导览
 
 | 目录 | 职责 |
 | --- | --- |
-| `apps/server/` | 服务端全部代码：`main.py` 装配入口、`gewu/` 六域、`tests/`（单测 + PG 集成 + 契约）、`scripts/smoke_chat.py` 冒烟 |
-| `apps/web/` | Next.js 前端（SSE 手写解析，对确认门 interrupt 无感知） |
+| `apps/server/` | 服务端全部代码：`main.py` 装配入口、`ingest_main.py` 入库 CLI、`gewu/` 七域、`scripts/`（smoke_chat 冒烟 / auth_tool 邀请码 CLI）、`tests/`（240 例：单测 + PG 集成 + 契约） |
+| `apps/web/` | Next.js 前端六区（SSE 手写解析，对确认门 interrupt 无感知）；设计契约见仓库根 DESIGN.md |
 | `docs/` | 本系列（architecture/）+ walkthrough/（作者讲解）+ runbooks/（P 系列任务书）+ ADR/ + research/ + history/ |
-| `eval/` | 评测资产：数据集、run_eval.py、检索对照脚本、reports/ 全量留档，见 [10](10-evaluation.md) |
+| `eval/` | 评测资产：四份数据集、run_eval.py、检索层评测 run_retrieval_eval.py、对照脚本、reports/ 全量留档，见 [10](10-evaluation.md) |
 | `scripts/` | lint-arch.sh（依赖守护）等工程脚本 |
 | `docker/` + `docker-compose.yml` | PG（pgvector:pg17）与本地依赖编排 |
-| `data/` | 运行时产物：usage.json（token 预算）与 archive/（SQLite 退役归档，git 忽略） |
+| `data/` | 运行时产物：usage.json（全局 token 预算）与 archive/（SQLite 退役归档，git 忽略） |
 
 ## 为什么是模块化单体
 
@@ -115,4 +122,4 @@ tag `pre-ms-removal`。
 
 ---
 
-下一篇《02 · 编排主图》深入 `gewu/agent/graph.py`：图结构、共享状态、条件边与一次问答的完整生命周期。
+下一篇《02 · 编排主图》深入 `gewu/agent/graph.py`：外壳图结构、agent 子图装配与两类典型请求的完整生命周期。

@@ -4,7 +4,9 @@ P17 起 `mode=auto/react` 的默认链路是 **agent-first 单循环**：LangCha
 
 ## 装配
 
-`gewu/agent/agent.py` 的 `build_agent`：create_agent 编译产物直接 `add_node` 嵌套进外壳图（checkpointer 只挂顶层，子图 interrupt 冒泡暂停，[02](02-orchestration-graph.md)）。模型经 `llm.agent_model()` 工厂构造（温度/max_tokens 固化在实例，不经 LLMService 的 bind 链）；工具集 `agenttools.py` 全量 `@tool` 化（11 个：检索/日期/deep_research + 8 业务工具）。
+`gewu/agent/agent.py` 的 `build_agent`：create_agent 编译产物直接 `add_node` 嵌套进外壳图（checkpointer 只挂顶层，子图 interrupt 冒泡暂停，[02](02-orchestration-graph.md)）。模型经 `llm.agent_model()` 工厂构造（温度/max_tokens 固化在实例，不经 LLMService 的 bind 链；压缩摘要用小档 `agent_model(small=True)`）；工具集 `agenttools.py` 全量 `@tool` 化（11 个基线：检索/日期/deep_research + 8 业务工具；P26 联网开启时 +1=web_search）。装配常量：`AGENT_MAX_TURNS=8`（轮次上限，react.py 同值平移）、`AGENT_MAX_TOKENS=1200`（单次模型调用上限）、`SUMMARY_TRIGGER_TOKENS=30_000` / `SUMMARY_KEEP_MESSAGES=20`（上下文压缩）。
+
+联网检索（P26，条件装配）：`settings.iqs_api_key` 非空时整链开启——web_search 工具注册、AGENT_SYSTEM 拼联网准则、WebSearchBudgetMiddleware 入栈；key 空=三处全部缺席（能力注入：配置里没有的工具，模型看不见）。适配层 `gewu/websearch.py` 走阿里 IQS（POST `/search/unified`，Bearer 鉴权；实测口径以 2026-10-01 真调为准——`contents` 字段勿传、`publishedTime` 为 ISO 串）。AGENT_SYSTEM 第 9 条同步通用化：校外问题尽力答（联网/通用知识+口径声明），仅危险违法才拒——原「引导回校园话题」废止。
 
 ## 中间件栈（执行序：wrap_* 外层=列表在前者）
 
@@ -13,12 +15,14 @@ P17 起 `mode=auto/react` 的默认链路是 **agent-first 单循环**：LangCha
 | `GuardMiddleware` | 自研（chat-langchain 同构） | before_agent，can_jump_to=end | lenient 安检：正则快路径（纯问候零 LLM）→ LLM 判 allow/meta/block（fail-open）；block/meta 短路收尾 |
 | `ModelCallLimitMiddleware` | 官方 | wrap_model_call | `run_limit=8`（旧 REACT_MAX_TURNS 等价） |
 | `TruncationDefenseMiddleware` | 自研平移 | wrap_model_call | **P10 截断防御铁律**：`finish_reason=length` 且带 tool_calls 时不执行，assistant 原样回填 + 合成错误 observation 重调 handler（Pi 式，重发不记指纹；上限 2 次防 length 死循环） |
-| `UsageRecordMiddleware` | 自研 | wrap_model_call | token 记账走 LLMService 预算闸（与 classic 同口径） |
+| `UsageRecordMiddleware` | 自研 | wrap_model_call | token 记账走 LLMService 预算闸（与 classic 同口径）；P24-1 兼任观测——每次模型调用打 `[llm] agent主循环` 一行（ms + ctx_profile），补 create_agent 内部 model.invoke 不经 LLMService 封装的埋点盲区 |
 | `AgentPromptMiddleware` | 自研 | wrap_model_call | system prompt（AGENT_SYSTEM）+ 记忆块尾部注入（`request.override(system_message=…)`） |
 | `HumanInTheLoopMiddleware` | 官方 | after_model | 写工具四件 interrupt 确认门：`interrupt_on` 配 allowed_decisions=[approve,reject,respond] + `when=write_call_ready` 谓词（参数不齐不中断，交给槽位门） |
 | `PendingActionMiddleware` | 自研平移 | after_model | 确认摘要（pending_action + 文案）在 HITL 中断**之前**发射——interrupt 节点零副作用纪律（P14）的延续 |
 | `WriteSlotGateMiddleware` | 自研平移 | wrap_tool_call | 写工具缺必填参数不执行：emit slot_question + 引导模型向用户收集（classic advance 追问语义的事件级等价物） |
 | `ResearchLimitMiddleware` | 自研 | wrap_tool_call | deep_research 单轮限 1 次（flash 无视否定指令必须代码兜底） |
+| `WebSearchBudgetMiddleware` | 自研 | wrap_tool_call | web_search 每日次数闸（P26；IQS 按次计费，agent 循环失控即烧钱——进程内 date 键计数，超限回执降级；仅联网开启时入栈） |
+| `SearchQueryGuardMiddleware` | 自研 | wrap_tool_call | search_knowledge / web_search（P26 扩）检索词与原问题 CJK bigram 零重合时拼回原话（P24-3；docstring 引导是软防线，本件是硬防线；deep_research 不拦——子问题是 plan 拆解产物） |
 | `RouteEventMiddleware` | 自研 | after_agent | effective route 合成补发（两段式第二段；guard block/meta 轮跳过） |
 | `SummarizationMiddleware` | 官方 | — | 上下文压缩（30k tokens 触发、保 20 条）——P13 顺延线收口 |
 
@@ -40,6 +44,7 @@ P17 起 `mode=auto/react` 的默认链路是 **agent-first 单循环**：LangCha
 | 工具 | 类型 | 说明 |
 | --- | --- | --- |
 | `search_knowledge` | 读 | 混合检索；返回 `Command(update={messages, citations})`——observation 与引用通道一次更新（citations 带 (doc_id,title) 去重 reducer，并行 Send 安全合并） |
+| `web_search` | 读 | 联网检索（P26 条件注册）：IQS 适配层 `gewu/websearch.py` 防腐翻译（失败恒 [] 由工具回「暂不可用」降级）；citations 通道 source 统一「联网检索」组（站点名进标题）；mainText 有意不取（token 成本），全文抓取二期须带 SSRF 校验 |
 | `parse_date` | 读 | 确定性日期解析（`gewu/dates.py`），零 LLM 成本 |
 | `deep_research` | 读 | 复用 research 管线（plan→逐路检索→聚合，flagship 综合留在主循环）；ResearchLimit 单轮 1 次 |
 | 8 个业务工具 | 读 4 / 写 4 | 薄包 `call_tool` 单一出口；**不做角色过滤**——权限判定保持在工具层单一出口，越权回执是有效 observation（模型转述，ag-read-002/tx-006 断言语义） |
@@ -58,6 +63,7 @@ P17 起 `mode=auto/react` 的默认链路是 **agent-first 单循环**：LangCha
 | `gewu/agent/mw.py` | 自研中间件族 + GewuAgentState + effective_route/槽位门纯函数 |
 | `gewu/agent/guardrails.py` | GuardMiddleware（快路径正则/lenient prompt/fail-open/会话感知） |
 | `gewu/agent/agenttools.py` | @tool 工具集（事件就地发射 + Command 状态更新） |
+| `gewu/websearch.py` | IQS 联网搜索适配层（P26；支撑域，反向禁依赖 agent——lint-arch 守护） |
 | `gewu/agent/resume.py` | resume 桥翻译（用户文本 → HITL decisions） |
 | `gewu/agent/tools.py` | 业务工具表、权限矩阵与 call_tool 单一出口（双底座共用） |
 | `tests/test_agent_flow.py` / `tests/test_agent_mw.py` / `tests/test_guardrails.py` | 全链流测试 / 中间件单测 / guard 单测 |
