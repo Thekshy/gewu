@@ -42,7 +42,6 @@ from gewu import websearch
 from gewu.agent.agenttools import build_agent_tools
 from gewu.agent.guardrails import GuardMiddleware
 from gewu.agent.mw import (
-    WRITE_TOOLS,
     AgentDoneMiddleware,
     AgentPromptMiddleware,
     GewuAgentState,
@@ -89,18 +88,19 @@ def build_agent(
     if web is None and settings.iqs_api_key:
         web = partial(websearch.search, settings.iqs_api_key)
     web_on = web is not None
-    from gewu.agent.tools import tools_for  # noqa: PLC0415 - 延迟导入避免环
+    from gewu.agent.tools import tools_for, write_tools  # noqa: PLC0415 - 延迟导入避免环
 
     tool_list = build_agent_tools(
         llm, business, tools if tools is not None else tools_for(), retriever, web=web
     )
 
+    # 写性判定读注册表派生视图（P33 单一真相源）。
     write_cfg = {
         name: InterruptOnConfig(
             allowed_decisions=["approve", "reject", "respond"],
             when=lambda req: write_call_ready(business, req.tool_call),
         )
-        for name in sorted(WRITE_TOOLS)
+        for name in sorted(write_tools())
     }
 
     query_guard = SearchQueryGuardMiddleware()

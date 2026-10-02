@@ -43,13 +43,11 @@ from langchain_core.messages import (
 from gewu.agent import events as ev
 from gewu.agent.emitter import emit
 from gewu.agent.prompts import agent_system_prompt
-from gewu.agent.txmeta import FLOW_DEFS, build_confirm, normalize_slot, slot_meta
+from gewu.agent.tools import flow_defs, write_tools
+from gewu.agent.txmeta import build_confirm, normalize_slot, slot_meta
 from gewu.dates import today_iso
 from gewu.llm.service import ctx_profile
 from gewu.obs import current_tracer
-
-# 写工具四件（HITL 确认门对象，与 tools.py read_only=False 对齐）。
-WRITE_TOOLS = {"book_venue", "cancel_booking", "submit_leave", "approve_leave"}
 
 
 def _merge_citations(existing: list | None, new: list | None) -> list:
@@ -130,11 +128,14 @@ def normalize_tool_args(meta: dict, tool: str, args: dict) -> dict[str, str]:
 
 
 def write_call_ready(business, tool_call: dict) -> bool:
-    """写工具必填参数是否齐全（HITL when 谓词与槽位门共用；口径=字段在场）。"""
+    """写工具必填参数是否齐全（HITL when 谓词与槽位门共用；口径=字段在场）。
+
+    流程定义读注册表派生视图（P33 单一真相源）。
+    """
     name = tool_call.get("name", "")
-    flow = FLOW_DEFS.get(name)
+    flow = flow_defs().get(name)
     if not flow:
-        return True  # 非流程工具（防御：不在 FLOW_DEFS 的写工具不设门）
+        return True  # 非流程工具（防御：不在注册表的写工具不设门）
     args = tool_call.get("args") or {}
     return all(str(args.get(s, "") or "").strip() for s in flow["required"])
 
@@ -148,7 +149,7 @@ def effective_route(messages: list) -> tuple[str, str]:
     searched = "search_knowledge" in tools
     researched = "deep_research" in tools
     webbed = "web_search" in tools
-    wrote = any(t in WRITE_TOOLS for t in tools)
+    wrote = any(t in write_tools() for t in tools)
     if wrote:
         return ("hybrid", "本轮检索后办理") if searched else ("transaction", "本轮办理业务")
     if researched:
@@ -180,7 +181,8 @@ class AgentPromptMiddleware(AgentMiddleware):
 
     P31-3：mem_block 装配自外壳 resolve_query 搬入本件 before_agent（每 run
     从 MemoryStore 装配一次，user/session_id 从 GewuAgentState 读）——装配
-    失败静默降级（记忆是增强不是依赖）。before_agent 同时承担原 agent_in 的
+    失败静默降级（记忆是增强不是依赖）。P32-2：当前问题（最后一条用户消息）
+    一并传入，供非核心事实的词面分轨筛选。before_agent 同时承担原 agent_in 的
     「正在理解问题…」状态行发射（P30 首 token 前的状态行）。
     """
 
@@ -197,10 +199,15 @@ class AgentPromptMiddleware(AgentMiddleware):
         session_id = state.get("session_id") or ""
         if not user or not session_id:
             return None
+        question = ""
+        for m in reversed(state.get("messages") or []):
+            if isinstance(m, HumanMessage):
+                question = str(m.content)
+                break
         try:
             from gewu.memory import memory_block  # noqa: PLC0415 - 延迟导入避免环
 
-            return {"mem_block": memory_block(self._memory, user, session_id)}
+            return {"mem_block": memory_block(self._memory, user, session_id, question=question)}
         except Exception as e:  # noqa: BLE001 - 记忆装配失败不拦主链路
             print(f"[agent] 记忆块装配失败（不影响主链路）：{e}")
             return None
@@ -333,8 +340,8 @@ class WriteSlotGateMiddleware(AgentMiddleware):
     def wrap_tool_call(self, request, handler):
         call = request.tool_call
         name = call.get("name", "")
-        flow = FLOW_DEFS.get(name)
-        if name not in WRITE_TOOLS or not flow:
+        flow = flow_defs().get(name)
+        if name not in write_tools() or not flow:
             return handler(request)
         args = call.get("args") or {}
         meta = slot_meta(self._business)
@@ -460,7 +467,7 @@ class PendingActionMiddleware(AgentMiddleware):
         meta = slot_meta(self._business)
         for call in ai.tool_calls:
             name = call.get("name", "")
-            if name not in WRITE_TOOLS or not write_call_ready(self._business, call):
+            if name not in write_tools() or not write_call_ready(self._business, call):
                 continue
             norm = normalize_tool_args(meta, name, call.get("args") or {})
             pa, text, _note = build_confirm({"tx_tool": name, "tx_slots": norm}, self._business)

@@ -1,13 +1,19 @@
-"""agent 工具层（移植自 Go internal/agent/tools.go）。
+"""agent 工具层（移植自 Go internal/agent/tools.go；P33 起为办理流程注册表）。
 
 业务系统不认识角色——权限判定统一收敛在工具层（安全边界单一出口）：
 未知工具 / 越权 / 缺参数在进入业务系统之前被拦截。
+
+P33 注册表单一真相源：ToolSpec 一行内嵌写性（read_only）/ 槽位
+（slots_required/slots_optional）/ 触发词与业务域（triggers/domain，检索
+台阶数据）。原 txmeta.FLOW_DEFS 与 mw.WRITE_TOOLS 两个静态常量改由
+flow_defs() / write_tools() 派生视图替代——加新办理流程只动本表一行，
+漏登静默失去确认门的三源陷阱结构性消灭。
 """
 
 from __future__ import annotations
 
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 
 from gewu.business import db as biz
 from gewu.business.db import Business, Result
@@ -22,8 +28,12 @@ def _need(args: dict[str, str], key: str) -> tuple[str, Result | None]:
 
 
 @dataclass
-class Tool:
-    """agent 可调用的业务动作（权限矩阵在 CallTool 执行）。"""
+class ToolSpec:
+    """agent 可调用的业务动作 + 内嵌流程定义（注册表行，权限矩阵在 CallTool 执行）。
+
+    slots_required 非空即「流程工具」（可经 run_flow 收编执行，query_flows
+    可见）；read_only=False 且有流程定义 = 写流程（HITL 确认门对象）。
+    """
 
     name: str
     label: str
@@ -31,6 +41,10 @@ class Tool:
     roles: list[str]
     read_only: bool
     fn: Callable[[Business, dict[str, str], str], Result]
+    slots_required: list[str] = field(default_factory=list)
+    slots_optional: list[str] = field(default_factory=list)
+    triggers: list[str] = field(default_factory=list)  # 触发词（检索台阶数据，Q6 只就位）
+    domain: str = ""  # 业务域标签（booking/leave，检索过滤用）
 
 
 def _fmt_venues(b: Business, args: dict[str, str], _user: str) -> Result:
@@ -128,75 +142,127 @@ TOOL_ORDER = [
 ]
 
 
-def tools_for() -> dict[str, Tool]:
-    """构造工具表（权限矩阵，PARITY §10）。"""
+def tools_for() -> dict[str, ToolSpec]:
+    """构造注册表（工具 + 流程定义单一真相源，PARITY §10 权限矩阵）。
+
+    P33 数据口径：slots_required 非空 = 流程工具（与原 FLOW_DEFS 成员集
+    等价：五件含 leave_status 读流程）；triggers 全量就位供检索台阶消费。
+    """
     specs = [
-        Tool(
+        ToolSpec(
             "query_venues",
             "查询场馆",
             "查询某天可预约的场馆与余量",
             ["student", "counselor"],
             True,
             _fmt_venues,
+            triggers=["场馆", "可预约", "余量", "场地", "空场"],
+            domain="booking",
         ),
-        Tool(
+        ToolSpec(
             "my_bookings",
             "我的预约",
             "查询本人当前有效预约",
             ["student", "counselor"],
             True,
             _my_bookings,
+            triggers=["我的预约", "预约记录", "订了什么"],
+            domain="booking",
         ),
-        Tool(
+        ToolSpec(
             "leave_status",
             "请假单查询",
             "按请假单号查询审批状态",
             ["student", "counselor"],
             True,
             _leave_status,
+            slots_required=["ticket_id"],
+            triggers=["请假单", "审批进度", "审批状态", "请假进度", "批了吗"],
+            domain="leave",
         ),
-        Tool(
+        ToolSpec(
             "pending_leaves",
             "待审批请假",
             "查看所有待审批请假申请",
             ["counselor"],
             True,
             _pending_leaves,
+            triggers=["待审批", "待办请假", "等待审批"],
+            domain="leave",
         ),
-        Tool(
+        ToolSpec(
             "book_venue",
             "预约场馆",
             "预约场馆的某个时段（写操作，需确认）",
             ["student", "counselor"],
             False,
             _book,
+            slots_required=["venue", "date", "slot"],
+            slots_optional=["purpose"],
+            triggers=["预约", "订场馆", "订场地", "约场地", "占场"],
+            domain="booking",
         ),
-        Tool(
+        ToolSpec(
             "cancel_booking",
             "取消预约",
             "取消本人的预约（写操作，需确认）",
             ["student", "counselor"],
             False,
             _cancel,
+            slots_required=["booking_id"],
+            triggers=["取消预约", "退订", "不约了"],
+            domain="booking",
         ),
-        Tool(
+        ToolSpec(
             "submit_leave",
             "请假申请",
             "提交请假申请（写操作，需确认）",
             ["student", "counselor"],
             False,
             _submit_leave,
+            slots_required=["leave_type", "start_date", "end_date", "reason"],
+            triggers=["请假", "请事假", "请病假", "提交请假", "休个假"],
+            domain="leave",
         ),
-        Tool(
+        ToolSpec(
             "approve_leave",
             "批准请假",
             "批准一张请假单（写操作，需确认，仅辅导员）",
             ["counselor"],
             False,
             _approve_leave,
+            slots_required=["ticket_id"],
+            triggers=["批准", "审批通过", "同意请假", "通过请假"],
+            domain="leave",
         ),
     ]
     return {t.name: t for t in specs}
+
+
+def flow_defs() -> dict[str, dict]:
+    """流程定义派生视图（原 txmeta.FLOW_DEFS 常量的活体替代）。
+
+    name → {label, required, optional}，mw 槽位门/HITL、txmeta 确认摘要、
+    resume 桥统一消费；注册表是唯一真相源，本视图只读不缓存。
+    """
+    return {
+        t.name: {
+            "label": t.label,
+            "required": list(t.slots_required),
+            "optional": list(t.slots_optional),
+        }
+        for t in tools_for().values()
+        if t.slots_required
+    }
+
+
+def write_tools() -> set[str]:
+    """写性判定派生视图（原 mw.WRITE_TOOLS 静态集合的替代）。
+
+    口径：read_only=False 且有流程定义（一致性测试闸保证写工具必有
+    slots_required，两条件恒等价，双写防未来加无槽位写工具时静默设门）。
+    """
+    return {t.name for t in tools_for().values() if not t.read_only and t.slots_required}
 
 
 def role_label(role: str) -> str:
@@ -208,7 +274,7 @@ def has_role(roles: list[str], role: str) -> bool:
     return role in roles
 
 
-def tool_descriptions(tools: dict[str, Tool], role: str) -> str:
+def tool_descriptions(tools: dict[str, ToolSpec], role: str) -> str:
     """生成给 LLM 的工具清单（只含该角色可见的工具）。"""
     lines = [
         f"- {name}：{tools[name].description}"
@@ -219,7 +285,7 @@ def tool_descriptions(tools: dict[str, Tool], role: str) -> str:
 
 
 def call_tool(
-    tools: dict[str, Tool],
+    tools: dict[str, ToolSpec],
     business: Business,
     name: str,
     args: dict[str, str],

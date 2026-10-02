@@ -1,5 +1,9 @@
 """业务办理槽位元数据（P31-2 自 tx.py 拆分：classic 流程节点退役后，agent 侧
-中间件与工具注册仍依赖的槽位/流程/确认摘要纯逻辑收拢于此）。
+中间件与工具注册仍依赖的槽位/确认摘要纯逻辑收拢于此）。
+
+P33 起收缩为槽位解析器库：流程定义（label/必填/可选）已迁入 tools.py
+注册表（单一真相源），本模块只保留 SLOT_ORDER/slot_meta/normalize_slot/
+build_confirm 纯解析逻辑，流程数据经 flow_defs() 派生视图消费。
 
 核心原则沿用（PARITY §9）：日期换算一律走确定性解析（gewu.dates）；
 label/ask 文案逐字保留。流程编排（collect/confirm/interrupt）已随 classic
@@ -11,10 +15,12 @@ from __future__ import annotations
 import re
 
 from gewu.agent import events as ev
+from gewu.agent.tools import flow_defs
 from gewu.business.db import Business, approver_of, leave_days
 from gewu.dates import parse_iso
 
-# slotOrder 槽位遍历顺序（resume 桥确认阶段修改检测依赖此序）。
+# slotOrder 槽位遍历顺序（resume 桥确认阶段修改检测依赖此序；槽位解析器
+# 存在性清单——槽位定义本体在 slot_meta，流程归属在注册表）。
 SLOT_ORDER = [
     "venue",
     "date",
@@ -27,23 +33,6 @@ SLOT_ORDER = [
     "booking_id",
     "ticket_id",
 ]
-
-# flowDefs 办理流程定义（label/必填/可选；HITL 确认门与槽位门共用）。
-FLOW_DEFS: dict[str, dict] = {
-    "book_venue": {
-        "label": "预约场馆",
-        "required": ["venue", "date", "slot"],
-        "optional": ["purpose"],
-    },
-    "submit_leave": {
-        "label": "请假申请",
-        "required": ["leave_type", "start_date", "end_date", "reason"],
-        "optional": [],
-    },
-    "cancel_booking": {"label": "取消预约", "required": ["booking_id"], "optional": []},
-    "approve_leave": {"label": "批准请假", "required": ["ticket_id"], "optional": []},
-    "leave_status": {"label": "请假单查询", "required": ["ticket_id"], "optional": []},
-}
 
 _BOOKING_ID_RE = re.compile(r"VE-\d+")
 _TICKET_ID_RE = re.compile(r"LV-\d+")
@@ -178,11 +167,15 @@ def normalize_slot(meta: dict, slot: str, value: str) -> tuple[str, bool]:
 
 
 def build_confirm(state: dict, business: Business) -> tuple[dict, str, str]:
-    """确认摘要 → (pending_action 事件, 确认文案, note)（PARITY §9.3.3）。"""
+    """确认摘要 → (pending_action 事件, 确认文案, note)（PARITY §9.3.3）。
+
+    流程定义经 flow_defs() 派生视图消费（注册表单一真相源）；tool 取值为
+    flow_id——run_flow 入口的确认卡片与专属路径同形（Q3 PARITY 零改动）。
+    """
     meta = slot_meta(business)
     tool = state["tx_tool"]
     slots = state.get("tx_slots") or {}
-    flow = FLOW_DEFS[tool]
+    flow = flow_defs()[tool]
     args: dict[str, str] = {}
     for s in flow["required"] + flow["optional"]:
         if s in slots:

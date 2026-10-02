@@ -15,7 +15,8 @@ import json
 import re
 
 from gewu.agent.prompts import CLASSIFY_REPLY_SYSTEM
-from gewu.agent.txmeta import FLOW_DEFS, SLOT_ORDER, slot_meta
+from gewu.agent.tools import flow_defs
+from gewu.agent.txmeta import SLOT_ORDER, slot_meta
 from gewu.jsonx import json_str, parse_json_object
 
 # confirm 阶段的确认词与续轮意图启发式（classify_reply 用）。
@@ -48,7 +49,7 @@ def _slot_updates(meta: dict, tool: str, slots: dict, text: str) -> tuple[dict, 
     purpose/reason 这类自由文本字段任何文本都能 parse 出值，单独分组——
     是否算「补充修改」由调用方结合确认词与文本长度决定（防「确认」被吞）。
     """
-    flow = FLOW_DEFS.get(tool) or {}
+    flow = flow_defs().get(tool) or {}
     updates: dict[str, str] = {}
     soft: dict[str, str] = {}
     for slot in SLOT_ORDER:
