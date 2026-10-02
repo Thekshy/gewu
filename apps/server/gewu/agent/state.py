@@ -35,6 +35,9 @@ class ChatState(TypedDict, total=False):
     citations: list[dict]
     truncated: bool  # 主答案撞 max_tokens（done.reason=max_tokens 的依据）
     answer: str  # 本轮累积回答文本（记忆固化用）
+    # P30 流式防重：agent 主循环最终轮已流式发出的文本（agent_done 等价校验用，
+    # 轮起清零——与 citations 同款跨轮污染防御）
+    answer_streamed: str
 
     # 办理流程跨轮状态（Phase: idle | collect | confirm）——classic workflow 链路；
     # agent 链路的办理收集在 messages 对话内完成，不落这些字段。

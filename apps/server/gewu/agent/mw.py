@@ -17,6 +17,8 @@
   （两段式第二段）。
 - SearchQueryGuardMiddleware：search_knowledge 检索词与原问题零重合时拼回
   原话（P24-3；docstring 引导是软防线，本件是硬防线）。
+- StreamingAnswerMiddleware：主循环答案 token 级流式（P30）——模型调用经
+  流式代理逐 delta 发 answer_delta，中间轮 answer_reset 撤回。
 
 P24-1：UsageRecordMiddleware 兼任 agent 主循环 [llm] per-call 观测（ms +
 ctx_profile，补 create_agent 内部 model.invoke 不经 LLMService 封装的盲区）。
@@ -29,7 +31,14 @@ from typing import Annotated, Any, NotRequired
 
 from langchain.agents.middleware import AgentMiddleware
 from langchain.agents.middleware.types import AgentState, PrivateStateAttr
-from langchain_core.messages import AIMessage, HumanMessage, SystemMessage, ToolMessage
+from langchain_core.language_models.chat_models import BaseChatModel, ChatGeneration, ChatResult
+from langchain_core.messages import (
+    AIMessage,
+    AIMessageChunk,
+    HumanMessage,
+    SystemMessage,
+    ToolMessage,
+)
 
 from gewu.agent import events as ev
 from gewu.agent.emitter import emit
@@ -64,6 +73,8 @@ class GewuAgentState(AgentState):
     mem_block: NotRequired[str]
     citations: NotRequired[Annotated[list, _merge_citations]]
     guard_action: NotRequired[Annotated[str, PrivateStateAttr]]  # allow|meta|block（本轮）
+    # P30：最终轮流式已发文本（外壳 ChatState 同名字段接住，agent_done 防重读）
+    answer_streamed: NotRequired[str]
 
 
 # ---------- 消息行走辅助 ----------
@@ -74,6 +85,14 @@ def last_ai_message(messages: list) -> AIMessage | None:
         if isinstance(m, AIMessage):
             return m
     return None
+
+
+def ai_content_text(message) -> str:
+    """AIMessage/chunk 的 content 归一为纯文本（流式防重两端统一口径）。"""
+    c = message.content
+    if isinstance(c, str):
+        return c
+    return "".join(seg.get("text", "") if isinstance(seg, dict) else str(seg) for seg in c)
 
 
 def messages_since_last_human(messages: list) -> list:
@@ -426,11 +445,86 @@ class RouteEventMiddleware(AgentMiddleware):
             ev.route_decision_evt(
                 {
                     "route": route,
-                    "confidence": 0.9,
-                    "layer": "effective",
                     "reason": reason,
+                    "layer": "effective",
+                    "confidence": 0.9,
                     "by_llm": True,
                 }
             )
         )
         return None
+
+
+class _StreamingChatModel(BaseChatModel):
+    """流式代理模型（P30）：对外保持 invoke 契约，内部跑 inner.stream。
+
+    request.model 是未绑定 tools 的原始模型（tools/system message 由官方
+    handler 拼装后落到本代理）——所以走「代理 + 官方 handler」而不是裸调
+    request.model.stream：bind_tools / tool_choice / 模型设置零漂移。
+    逐 chunk 回调 on_delta（emit answer_delta），AIMessageChunk 聚合返回，
+    usage_metadata / finish_reason / tool_calls 天然保留在聚合消息上。
+    """
+
+    inner: Any = None
+    on_delta: Any = None
+    on_round_done: Any = None
+
+    @property
+    def _llm_type(self) -> str:
+        return "streaming-proxy"
+
+    def bind_tools(self, tools, **kwargs):
+        # 工具绑定下沉 inner，返回包住已绑定模型的新代理（回调原样携带）
+        return _StreamingChatModel(
+            inner=self.inner.bind_tools(tools, **kwargs),
+            on_delta=self.on_delta,
+            on_round_done=self.on_round_done,
+        )
+
+    def _generate(self, messages, stop=None, run_manager=None, **kwargs):  # noqa: ARG002
+        # BaseChatModel.stream 产出 AIMessageChunk（消息本身，非 GenerationChunk）
+        agg: AIMessageChunk | None = None
+        emitted = False
+        for chunk in self.inner.stream(messages, stop=stop, **kwargs):
+            agg = chunk if agg is None else agg + chunk
+            if self.on_delta is not None:
+                text = ai_content_text(chunk)
+                if text:
+                    emitted = True
+                    self.on_delta(text)
+        result = agg if agg is not None else AIMessageChunk(content="")
+        if self.on_round_done is not None:
+            self.on_round_done(result, emitted)
+        return ChatResult(generations=[ChatGeneration(message=result)])
+
+
+class StreamingAnswerMiddleware(AgentMiddleware):
+    """agent 主循环答案 token 级流式（P30）。
+
+    位置=栈列表最末（SummarizationMiddleware 之后）＝wrap 最内层：压缩后的
+    messages 才进流式，Summarization 内部的摘要小模型调用不经代理不误发。
+    中间轮（聚合出 tool_calls）已发文本由 answer_reset 撤回（前端转存为
+    step）；最终轮文本经 after_model 写 state.answer_streamed，agent_done
+    等价校验防全文重发（轮次耗尽/错误轮文本不等价 → 照发，兜住漏发风险）。
+    """
+
+    def wrap_model_call(self, request, handler):
+        proxy = _StreamingChatModel(
+            inner=request.model,
+            on_delta=lambda text: emit(ev.answer_evt(text)),
+            on_round_done=self._on_round_done,
+        )
+        return handler(request.override(model=proxy))
+
+    @staticmethod
+    def _on_round_done(agg, emitted: bool) -> None:
+        # 只撤回确实发过文本的轮（纯 tool_calls 轮零 delta，无需 reset）
+        if emitted and getattr(agg, "tool_calls", None):
+            emit(ev.answer_reset_evt())
+
+    def after_model(self, state, runtime) -> dict[str, Any] | None:
+        ai = last_ai_message(state.get("messages") or [])
+        if ai is None or ai.tool_calls:
+            return None
+        # 最终轮：该文本已由 wrap_model_call 的代理逐 delta 发出
+        return {"answer_streamed": ai_content_text(ai)}

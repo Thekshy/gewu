@@ -3,7 +3,7 @@
 from __future__ import annotations
 
 from langchain_core.language_models.chat_models import BaseChatModel, ChatGeneration, ChatResult
-from langchain_core.messages import AIMessage
+from langchain_core.messages import AIMessage, AIMessageChunk
 
 from gewu.rag.store import Hit, Scored
 
@@ -62,6 +62,47 @@ class FakeAgentLLM:
 
     def record_usage(self, total_tokens: int) -> None:
         self.recorded.append(total_tokens)
+
+
+class FakeStreamChunksModel(BaseChatModel):
+    """按轮吐 chunk 流的假模型（P30 流式测试）：脚本元素 = list[AIMessageChunk]。
+
+    stream() 直接 yield AIMessageChunk（对齐 BaseChatModel.stream 的真实契约：
+    产出消息本身而非 GenerationChunk）；_generate 聚合返回（STREAM_ANSWER
+    关闭时的 invoke 路径）。脚本耗尽返回空 content 单 chunk。
+    """
+
+    rounds: list = []
+
+    @property
+    def _llm_type(self) -> str:
+        return "fake-stream-chunks"
+
+    def bind_tools(self, tools, **kwargs):  # noqa: ARG002
+        return self
+
+    def _round(self) -> list[AIMessageChunk]:
+        return self.rounds.pop(0) if self.rounds else [AIMessageChunk(content="")]
+
+    def _generate(self, messages, stop=None, run_manager=None, **kwargs):  # noqa: ARG002
+        agg: AIMessageChunk | None = None
+        for c in self._round():
+            agg = c if agg is None else agg + c
+        return ChatResult(generations=[ChatGeneration(message=agg)])
+
+    def stream(self, messages, stop=None, run_manager=None, **kwargs):  # noqa: ARG002
+        yield from self._round()
+
+
+class FakeStreamAgentLLM(FakeAgentLLM):
+    """FakeAgentLLM 的流式版：主循环模型逐 chunk 吐（rounds 元素=chunk 列表）。"""
+
+    def __init__(self, rounds: list | None = None, **kw) -> None:
+        super().__init__(**kw)
+        self._rounds = list(rounds or [])
+
+    def agent_model(self, *, small: bool = False, max_tokens: int = 1200):
+        return FakeStreamChunksModel(rounds=[] if small else self._rounds)
 
 
 class FakeStream:

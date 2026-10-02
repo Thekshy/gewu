@@ -18,6 +18,8 @@ classic 分支保持手写图不动（对照组双底座叙事）。中间件栈
     WebSearchBudgetMiddleware  wrap_tool_call：联网日限闸（P26，IQS 按次计费）
     RouteEventMiddleware       after_agent：effective route 合成补发
     SummarizationMiddleware    上下文压缩（P13 顺延线收口）
+    StreamingAnswerMiddleware  wrap_model_call：主循环答案 token 级流式（P30，
+                               栈列表最末=最内层，STREAM_ANSWER=0 时不装配）
 """
 
 from __future__ import annotations
@@ -43,6 +45,7 @@ from gewu.agent.mw import (
     ResearchLimitMiddleware,
     RouteEventMiddleware,
     SearchQueryGuardMiddleware,
+    StreamingAnswerMiddleware,
     ToolTraceMiddleware,
     TruncationDefenseMiddleware,
     UsageRecordMiddleware,
@@ -100,6 +103,9 @@ def build_agent(settings, llm, retriever, business, tools: dict, web=None):
             keep=("messages", SUMMARY_KEEP_MESSAGES),
         ),
     ]
+    if settings.stream_answer:
+        # 栈列表最末=wrap 最内层：Summarization 压缩后的 messages 才进流式
+        stack.append(StreamingAnswerMiddleware())
     if web_on:
         stack.insert(
             stack.index(query_guard), WebSearchBudgetMiddleware(settings.web_search_daily_limit)

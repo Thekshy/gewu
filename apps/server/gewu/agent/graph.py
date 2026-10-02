@@ -23,7 +23,7 @@ from langgraph.types import Command
 
 from gewu.agent import events as ev
 from gewu.agent.emitter import emit
-from gewu.agent.mw import last_ai_message, partial_answer
+from gewu.agent.mw import ai_content_text, last_ai_message, partial_answer
 from gewu.agent.prompts import ANSWER_SYSTEM, NO_DATA_ANSWER, QUERY_REWRITE_SYSTEM, REFUSAL_ANSWER
 from gewu.agent.routing import CascadeRouter, fill_policy
 from gewu.agent.state import ChatState
@@ -153,12 +153,15 @@ def make_agent_in_node():
     citations 通道按轮计作用域：外层字段跨轮持久化（checkpointer），
     不清零则上一轮来源漏进本轮事件（P26 真跑发现的跨轮污染）。
     classic 链路 answer_direct 每轮全量覆写，无此问题。
+    answer_streamed 同款轮起清零（P30 防重标志不能跨轮残留）。
     """
 
     def agent_in(state: ChatState) -> dict:
+        emit(ev.status_evt("正在理解问题…"))  # P30：guard/首 token 前的状态行
         return {
             "messages": [HumanMessage(content=state.get("resolved") or state["question"])],
             "citations": [],
+            "answer_streamed": "",
         }
 
     return agent_in
@@ -169,6 +172,9 @@ def make_agent_done_node():
 
     确认门中断轮不到这里（turn 悬停在子图内，摘要已由 PendingAction 发出）；
     guard 短路轮也经过这里（消息由 guard 注入，answer 单点发射不重复）。
+    P30 流式防重：最终轮文本已由 StreamingAnswerMiddleware 逐 delta 发出
+    （state.answer_streamed 记录），等价时跳过全文重发；轮次耗尽兜底/错误轮
+    与流式文本不等价 → 照发，天然兜住漏发。
     """
 
     def agent_done(state: ChatState) -> dict:
@@ -176,14 +182,7 @@ def make_agent_done_node():
         ai = last_ai_message(msgs)
         answer = ""
         if ai is not None:
-            c = ai.content
-            answer = (
-                c
-                if isinstance(c, str)
-                else "".join(
-                    seg.get("text", "") if isinstance(seg, dict) else str(seg) for seg in c
-                )
-            )
+            answer = ai_content_text(ai)
             if "Model call limits exceeded" in answer:
                 answer = ""  # 轮次耗尽：换部分结论兜底
         if not answer.strip():
@@ -195,7 +194,9 @@ def make_agent_done_node():
                 truncated = True
                 emit(ev.status_evt("回答已达长度上限，可能被截断"))
         citations = state.get("citations") or []
-        emit(ev.answer_evt(answer))
+        streamed = state.get("answer_streamed") or ""
+        if streamed.strip() != answer.strip():
+            emit(ev.answer_evt(answer))
         emit(ev.citations_evt(citations))
         return {"answer": answer, "citations": citations, "truncated": truncated}
 

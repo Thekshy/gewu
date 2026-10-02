@@ -92,6 +92,8 @@ class Settings:
     # 默认行为零变化）；按次计费故配每日调用上限闸。
     iqs_api_key: str = ""
     web_search_daily_limit: int = 200
+    # P30 agent 主循环答案流式（STREAM_ANSWER=0 紧急回退：单帧全文=改前行为）
+    stream_answer: bool = True
 
     @classmethod
     def load(cls, env: Mapping[str, str] | None = None) -> Settings:
@@ -134,4 +136,5 @@ class Settings:
             ),
             iqs_api_key=env.get("IQS_API_KEY", ""),
             web_search_daily_limit=int(env.get("WEB_SEARCH_DAILY_LIMIT", "200")),
+            stream_answer=env.get("STREAM_ANSWER", "1").lower() not in ("0", "false", "no", "off"),
         )

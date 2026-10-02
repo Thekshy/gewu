@@ -125,6 +125,18 @@ export default function Compare() {
       case "answer_delta":
         patchRound(side, (r) => ({ ...r, answer: r.answer + String(ev.text ?? "") }));
         break;
+      case "answer_reset":
+        // P30：流式中间轮撤回——已显示文本转存为一条 step 后清空
+        patchRound(side, (r) =>
+          r.answer
+            ? {
+                ...r,
+                timeline: [...r.timeline, { kind: "step" as const, text: r.answer }],
+                answer: "",
+              }
+            : r,
+        );
+        break;
       case "citations":
         patchRound(side, { citations: (ev.items as TrackRound["citations"]) ?? [] });
         break;

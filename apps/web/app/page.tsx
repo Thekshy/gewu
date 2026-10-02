@@ -269,6 +269,26 @@ export default function Home() {
             case "answer_delta":
               patchLast((m) => ({ ...m, text: m.text + String(ev.text ?? "") }));
               break;
+            case "answer_reset":
+              // P30：流式中间轮撤回——已显示文本转存为一条 step（思考轨迹行）
+              patchLast((m) =>
+                m.text
+                  ? {
+                      ...m,
+                      steps: [
+                        ...m.steps,
+                        {
+                          type: "step",
+                          index: m.steps.length + 1,
+                          subquestion: m.text,
+                          sources: [],
+                        } as unknown as Step,
+                      ],
+                      text: "",
+                    }
+                  : m,
+              );
+              break;
             case "citations":
               patchLast({ citations: (ev.items as Citation[]) ?? [] });
               break;

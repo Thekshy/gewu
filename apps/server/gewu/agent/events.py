@@ -40,6 +40,12 @@ def answer_evt(text: str) -> dict:
     return {"type": "answer_delta", "text": text}
 
 
+def answer_reset_evt() -> dict:
+    """P30：流式撤回——本轮已发 delta 聚合出 tool_calls（中间轮），前端清空已显示
+    文本并转存为一条 step。事件形状只做加法，既有契约不动。"""
+    return {"type": "answer_reset"}
+
+
 def citations_evt(items: list[dict] | None) -> dict:
     """items 必须是数组（空也要 []，不能是 null）。"""
     return {"type": "citations", "items": items or []}
