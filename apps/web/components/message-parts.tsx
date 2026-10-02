@@ -168,17 +168,34 @@ export function ConfirmCard({
 
 export function ReceiptAlert({ result }: { result: ActionResult }) {
   const ok = result.success;
-  return (
-    <Alert variant={ok ? "default" : "destructive"} className="items-center py-2">
-      {ok ? (
-        <CheckCircle2 className="size-4 text-emerald-600 dark:text-emerald-400" aria-hidden />
-      ) : (
+  if (!ok) {
+    return (
+      <Alert variant="destructive" className="items-center py-2">
         <XCircle className="size-4" aria-hidden />
-      )}
-      <AlertDescription className={cn(ok && "text-foreground")}>
-        {result.message}
-        {ok && result.receipt ? `（凭证号 ${result.receipt}）` : ""}
-      </AlertDescription>
+        <AlertDescription>{result.message}</AlertDescription>
+      </Alert>
+    );
+  }
+  // 办理成功时刻（编辑式白名单之三，DESIGN.md receipt-alert）：成功是全流程
+  // 情绪峰值——图标 spring 落定 + 凭证号 mono 独立行升格（数字政务「签收章」）；
+  // 仍是单层 Alert，不嵌套卡。
+  return (
+    <Alert className="items-center gap-3 py-2.5">
+      <motion.span
+        initial={{ scale: 0.4, opacity: 0 }}
+        animate={{ scale: 1, opacity: 1 }}
+        transition={{ type: "spring", stiffness: 500, damping: 30 }}
+      >
+        <CheckCircle2 className="size-4 text-emerald-600 dark:text-emerald-400" aria-hidden />
+      </motion.span>
+      <div className="min-w-0 flex-1">
+        <span className="text-sm text-foreground">{result.message}</span>
+        {result.receipt && (
+          <span className="mt-0.5 block font-mono text-xs tracking-wide text-primary">
+            凭证号 {result.receipt}
+          </span>
+        )}
+      </div>
     </Alert>
   );
 }

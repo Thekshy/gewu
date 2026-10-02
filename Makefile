@@ -1,7 +1,7 @@
 SERVER_DIR := apps/server
 WEB_DIR := apps/web
 
-.PHONY: install-web run test lint eval ingest retrieval-eval variants demo clean lint-arch design-lint pg-up pg-down invite admin log-report trace-query trace-query-remote
+.PHONY: install-web run test lint eval ingest retrieval-eval variants demo clean lint-arch design-lint design-review pg-up pg-down invite admin log-report trace-query trace-query-remote
 
 # ---------- 检索存储（P12：PostgreSQL + pgvector） ----------
 
@@ -96,6 +96,11 @@ lint-arch:
 # 剩余白名单项记录在仓库根 DESIGN.md「门禁白名单」区
 design-lint:
 	bash scripts/design-lint.sh
+
+# 视觉评审回路（P34-3）：build 产物临时服务 + 截图清单留档，
+# 供 chrome-devtools 亮暗双主题截图对照 referencing 参数评审（DESIGN.md workflow ⑤）
+design-review:
+	bash scripts/design-review.sh
 
 # 线上日志体检：拉服务器 journalctl 四层埋点 → 优化向报告（HOURS=48 可调窗口）
 SERVER ?= root@117.72.163.14

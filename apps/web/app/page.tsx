@@ -3,7 +3,10 @@
 import { useEffect, useRef, useState } from "react";
 import { motion } from "motion/react";
 import {
+  CalendarCheck,
   ChevronRight,
+  FilePenLine,
+  GraduationCap,
   Info,
   Loader2,
   PanelLeft,
@@ -79,10 +82,37 @@ function historyToMsg(m: HistoryMessage): Msg {
   return { role: m.role, text: m.text, steps: [], citations: [], done: true };
 }
 
-const SUGGESTIONS = [
-  "帮我预约明天晚上的羽毛球馆打班级比赛",
-  "帮我请下周一到下周二的事假，另外超过 7 天是不是要教务处批？",
-  "转专业之后原课程绩点还算吗？会影响保研吗？",
+/** P34-2 空态任务预览卡（america.gov task preview 同构）：用真实任务形态代替
+ *  纯文字 chip——「展示你能办成什么」；编辑式白名单第三形态（DESIGN.md task-card）。 */
+const TASK_CARDS = [
+  {
+    icon: CalendarCheck,
+    title: "预约场馆",
+    desc: "羽毛球馆 · 明晚 · 班级赛",
+    q: "帮我预约明天晚上的羽毛球馆打班级比赛",
+  },
+  {
+    icon: FilePenLine,
+    title: "提交请假",
+    desc: "事假 1 天 · 附政策依据",
+    q: "帮我请下周一到下周二的事假，另外超过 7 天是不是要教务处批？",
+  },
+  {
+    icon: GraduationCap,
+    title: "查制度",
+    desc: "转专业绩点 · 保研影响",
+    q: "转专业之后原课程绩点还算吗？会影响保研吗？",
+  },
+];
+
+/** P34-2 输入框轮换示例问题（america.gov rotating questions 同构）：
+ *  仅输入为空时轮换，开始打字即停。 */
+const ROTATING_EXAMPLES = [
+  "预约体育馆要提前几天？",
+  "请假超过 7 天谁来审批？",
+  "转专业后原课绩点怎么算？",
+  "奖学金评定的时间线是？",
+  "校外人员能进图书馆吗？",
 ];
 
 const LS_CURRENT_SESSION = "gewu.current-session";
@@ -100,6 +130,13 @@ export default function Home() {
   const [sessionErr, setSessionErr] = useState<string | null>(null);
   const sessionId = useRef<string | null>(null);
   const bottomRef = useRef<HTMLDivElement>(null);
+  // P34-2 轮换示例问题：输入为空时 2.8s 轮换，有值即停
+  const [exampleIdx, setExampleIdx] = useState(0);
+  useEffect(() => {
+    if (input) return;
+    const t = setInterval(() => setExampleIdx((v) => (v + 1) % ROTATING_EXAMPLES.length), 2800);
+    return () => clearInterval(t);
+  }, [input]);
 
   useEffect(() => {
     fetchHealth().then(setHealth);
@@ -365,15 +402,11 @@ export default function Home() {
       >
         跳到输入框
       </a>
-      {/* 环境光：画布顶部的冷色氛围（navy 光斑 + 微点阵，token 化随 P25 换肤自动呈蓝） */}
+      {/* 环境光：画布顶部的冷色氛围（navy 光斑 + 微点阵，token 化随 P25 换肤自动呈蓝）。
+          P34-2 修复：原块被重复渲染两次、且混入契约外 amber 光斑（视觉评审判黄光偏强）——
+          收敛为契约内单份 primary 冷光。 */}
       <div aria-hidden className="pointer-events-none absolute inset-x-0 top-0 -z-10 h-96 overflow-hidden">
         <div className="absolute -top-24 left-1/4 size-96 rounded-full bg-primary/[0.07] blur-3xl dark:bg-primary/10" />
-        <div className="absolute -top-10 right-1/4 size-72 rounded-full bg-amber-400/[0.07] blur-3xl dark:bg-amber-400/10" />
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_1px_1px,var(--color-foreground)_1px,transparent_0)] bg-[size:22px_22px] opacity-[0.05] [mask-image:radial-gradient(70%_60%_at_50%_0%,black,transparent)] dark:opacity-[0.07]" />
-      </div>
-      <div aria-hidden className="pointer-events-none absolute inset-x-0 top-0 -z-10 h-96 overflow-hidden">
-        <div className="absolute -top-24 left-1/4 size-96 rounded-full bg-primary/[0.07] blur-3xl dark:bg-primary/10" />
-        <div className="absolute -top-10 right-1/4 size-72 rounded-full bg-amber-400/[0.07] blur-3xl dark:bg-amber-400/10" />
         <div className="absolute inset-0 bg-[radial-gradient(circle_at_1px_1px,var(--color-foreground)_1px,transparent_0)] bg-[size:22px_22px] opacity-[0.05] [mask-image:radial-gradient(70%_60%_at_50%_0%,black,transparent)] dark:opacity-[0.07]" />
       </div>
 
@@ -431,35 +464,48 @@ export default function Home() {
                 会话
               </Button>
             </div>
-            <div className="mx-auto w-full max-w-3xl space-y-4 px-4 py-6">
+            <div className="mx-auto w-full max-w-3xl space-y-5 px-4 py-6">
               {messages.length === 0 && (
-                <div className="relative flex min-h-[65vh] flex-col items-center justify-center gap-4 text-center">
+                <div className="relative flex min-h-[65vh] flex-col items-center justify-center gap-5 text-center">
                   {/* 空态：编辑式排版——衬线大标语直接铺在画布上，无卡片（DESIGN.md empty-state） */}
                   <motion.div
                     initial={{ opacity: 0, scale: 0.85 }}
                     animate={{ opacity: 1, scale: 1 }}
-                    transition={{ duration: 0.45, ease: "easeOut" }}
-                    className="flex size-16 items-center justify-center rounded-xl bg-primary font-display text-3xl font-semibold text-primary-foreground shadow-md"
+                    transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
+                    className="flex size-20 items-center justify-center rounded-xl bg-primary font-display text-4xl font-semibold text-primary-foreground shadow-md"
                     aria-hidden
                   >
                     格
                   </motion.div>
-                  <BlurText
-                    text="问校园政策，或者直接办事——预约场馆、提交请假。"
-                    animateBy="letters"
-                    delay={55}
-                    stepDuration={0.3}
-                    className="justify-center font-display text-2xl font-semibold leading-snug sm:text-3xl"
-                  />
+                  {/* 48px 断崖下 CJK 断词不可控（BlurText 逐字 span + flex-wrap，
+                      text-balance 无效）——手动两行分行，断点落在短语边界 */}
+                  <div>
+                    <BlurText
+                      text="问校园政策，或者直接办事——"
+                      animateBy="letters"
+                      delay={45}
+                      stepDuration={0.25}
+                      className="justify-center font-display text-[34px] font-semibold leading-[1.15] tracking-[-0.01em] sm:text-5xl"
+                    />
+                    <BlurText
+                      text="预约场馆、提交请假。"
+                      animateBy="letters"
+                      delay={45}
+                      stepDuration={0.25}
+                      className="justify-center font-display text-[34px] font-semibold leading-[1.15] tracking-[-0.01em] sm:text-5xl"
+                    />
+                  </div>
                   {/* 说明行不做延迟入场（operate.md：产品页不排加载序列，
                       1.2s delay 会被检测器采样成低对比）；入场时刻只留 BlurText */}
-                  <p className="max-w-md text-sm text-muted-foreground">
-                    办理类请求会经过：槽位收集 → 确认摘要 → 执行 → 回执；写操作必须确认后才会执行。
-                  </p>
-                  {/* 信任行（P25，america.gov 信任声明同款姿态） */}
-                  <p className="max-w-md text-xs text-muted-foreground">
-                    回答仅基于钱塘大学官方制度文档生成，全部引用可溯源到发文部门。
-                  </p>
+                  <div className="mt-1 space-y-2">
+                    <p className="max-w-md text-sm text-muted-foreground">
+                      办理类请求会经过：槽位收集 → 确认摘要 → 执行 → 回执；写操作必须确认后才会执行。
+                    </p>
+                    {/* 信任行（P25，america.gov 信任声明同款姿态） */}
+                    <p className="max-w-md text-xs text-muted-foreground">
+                      回答仅基于钱塘大学官方制度文档生成，全部引用可溯源到发文部门。
+                    </p>
+                  </div>
                 </div>
               )}
 
@@ -467,9 +513,9 @@ export default function Home() {
                 msg.role === "user" ? (
                   <motion.div
                     key={i}
-                    initial={{ opacity: 0, y: 10 }}
+                    initial={{ opacity: 0, y: 8 }}
                     animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.25, ease: "easeOut" }}
+                    transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
                     className="flex justify-end"
                   >
                     {/* 用户消息：primary 实底气泡（P25 起，america.gov 同款；DESIGN.md user-message） */}
@@ -480,9 +526,9 @@ export default function Home() {
                 ) : (
                   <motion.div
                     key={i}
-                    initial={{ opacity: 0, y: 10 }}
+                    initial={{ opacity: 0, y: 8 }}
                     animate={{ opacity: 1, y: 0 }}
-                    transition={{ duration: 0.25, ease: "easeOut" }}
+                    transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
                     className="flex items-start gap-2.5"
                   >
                     <div
@@ -543,22 +589,30 @@ export default function Home() {
                         </Alert>
                       )}
                       {msg.done && !msg.error && (
-                        <MessageActions
-                          citations={msg.citations}
-                          text={msg.text}
-                          feedback={msg.feedback}
-                          onFeedback={(r) => rate(i, r)}
-                          onlyCopy={msg.route === undefined && msg.latency === undefined}
-                        />
+                        <motion.div
+                          initial={i === 1 ? { opacity: 0, y: 8 } : false}
+                          animate={{ opacity: 1, y: 0 }}
+                          transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1], delay: 0.1 }}
+                        >
+                          {/* 首答完成时刻（编辑式白名单之二）：操作条收束浮现，
+                              一次性节奏——后续回答不再 stagger（DESIGN.md message-actions） */}
+                          <MessageActions
+                            citations={msg.citations}
+                            text={msg.text}
+                            feedback={msg.feedback}
+                            onFeedback={(r) => rate(i, r)}
+                            onlyCopy={msg.route === undefined && msg.latency === undefined}
+                          />
+                        </motion.div>
                       )}
                       {msg.done && !msg.error && msg.followUps && msg.followUps.length > 0 && (
                         <div className="flex flex-wrap gap-2 pt-1">
-                          {msg.followUps.map((q) => (
+                          {msg.followUps.map((q, qi) => (
                             <motion.button
                               key={q}
                               initial={{ opacity: 0, y: 6 }}
                               animate={{ opacity: 1, y: 0 }}
-                              transition={{ duration: 0.25, ease: "easeOut" }}
+                              transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1], delay: i === 1 ? qi * 0.06 : 0 }}
                               onClick={() => {
                                 patchAt(i, { followUpSent: true });
                                 send(q);
@@ -586,22 +640,28 @@ export default function Home() {
           {/* 底部操作带：hairline 分隔即可。bg-background 是画布同色的冗余，
               且 border-t + bg 组合会被 impeccable 判成 card-like 嵌套（P20 基线） */}
           <div className="shrink-0 border-t">
-            <div className="mx-auto w-full max-w-3xl space-y-2 px-4 py-3">
+            <div className="mx-auto w-full max-w-3xl space-y-3 px-4 py-4">
               <div className="flex flex-wrap gap-2">
-                {SUGGESTIONS.map((s) => (
+                {TASK_CARDS.map((t) => (
                   <button
-                    key={s}
-                    onClick={() => send(s)}
+                    key={t.title}
+                    onClick={() => send(t.q)}
                     disabled={sending || !currentSession}
-                    className="rounded-full border bg-card px-3 py-1 text-xs text-muted-foreground transition-colors hover:border-primary/40 hover:bg-accent hover:text-foreground disabled:pointer-events-none disabled:opacity-50"
+                    className="flex items-center gap-2.5 rounded-xl border bg-card px-3.5 py-2.5 text-left transition-[border-color,box-shadow] duration-150 ease-out-expo hover:border-primary/40 hover:shadow-sm disabled:pointer-events-none disabled:opacity-50"
                   >
-                    {s}
+                    <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
+                      <t.icon className="size-4" aria-hidden />
+                    </span>
+                    <span className="min-w-0">
+                      <span className="block text-sm font-medium text-foreground">{t.title}</span>
+                      <span className="block text-xs text-muted-foreground">{t.desc}</span>
+                    </span>
                   </button>
                 ))}
               </div>
               {/* composer：hairline 卡 + 主色 focus 环，实心主色发送钮（DESIGN.md composer）。
                   身份为只读徽章——P21 起 role 服务端权威（users.role），不可在客户端切换 */}
-              <div className="flex items-end gap-2 rounded-2xl border bg-card p-2 shadow-sm transition-colors focus-within:border-primary/50 focus-within:ring-4 focus-within:ring-primary/10">
+              <div className="flex items-end gap-2 rounded-2xl border bg-card p-2 shadow-sm transition-[border-color,box-shadow] duration-150 ease-out-expo focus-within:border-primary/60 focus-within:shadow-md focus-within:ring-4 focus-within:ring-primary/10">
                 {user && (
                   <span
                     className="h-9 shrink-0 rounded-lg bg-primary/10 px-3 text-xs font-medium leading-9 text-primary"
@@ -613,9 +673,9 @@ export default function Home() {
                 <textarea
                   id="composer-input"
                   value={input}
-                  placeholder={
-                    currentSession ? "输入你的问题，Enter 发送，Shift+Enter 换行" : "正在准备会话…"
-                  }
+              placeholder={
+                currentSession ? `试试：${ROTATING_EXAMPLES[exampleIdx]}` : "正在准备会话…"
+              }
                   rows={1}
                   className="max-h-40 min-h-9 flex-1 resize-none border-0 bg-transparent px-1 py-2 text-sm outline-none placeholder:text-muted-foreground"
                   onChange={(e) => setInput(e.target.value)}

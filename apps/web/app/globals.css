@@ -8,6 +8,10 @@
 @custom-variant dark (&:is(.dark *));
 
 @theme inline {
+    /* P34-2 高级感三件套：expo-out 交互曲线 token（标杆实测 120-180ms 配陡
+       ease-out 族）；CSS transition 用 ease-out-expo 工具类消费，motion 库
+       直接写 [0.16, 1, 0.3, 1] 数组（见 DESIGN.md motion 节） */
+    --ease-out-expo: cubic-bezier(0.16, 1, 0.3, 1);
     /* P20 Operate 化：font-heading（CardTitle/AlertDialogTitle 等 UI chrome）回归 sans；
        衬线只留三个内容时刻 + 品牌资产（见 DESIGN.md 衬线域），直接用 font-display 工具类 */
     --font-heading: var(--font-sans);
