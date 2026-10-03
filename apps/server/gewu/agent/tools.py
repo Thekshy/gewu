@@ -298,12 +298,20 @@ def flow_args(tool_call: dict) -> dict:
 
 
 def role_label(role: str) -> str:
-    """角色中文名（越权提示文案用）。"""
-    return "学生" if role == "student" else "辅导员"
+    """角色中文名（越权提示文案用）。
+
+    P37 修复：原实现是 `"学生" if role == "student" else "辅导员"`——admin 也被
+    标成「辅导员」，于是管理员演示办理时会收到自相矛盾的回执（右上角写着管理员，
+    回执说你是辅导员且无权预约）。
+    """
+    labels = {"student": "学生", "counselor": "辅导员", "admin": "管理员"}
+    return labels.get(role) or role or "未知身份"
 
 
 def has_role(roles: list[str], role: str) -> bool:
-    return role in roles
+    """权限矩阵（P37 拍板 A）：admin 视为超集——可代学生办理，也可审批，
+    服务演示与运维；其余角色严格按 ToolSpec.roles 判定。"""
+    return role == "admin" or role in roles
 
 
 def tool_descriptions(tools: dict[str, ToolSpec], role: str) -> str:

@@ -7,7 +7,15 @@ flow_args 全分支（Q4 闸动态解析的机制闸）。
 
 from __future__ import annotations
 
-from gewu.agent.tools import flow_args, flow_defs, resolve_flow, tools_for, write_tools
+from gewu.agent.tools import (
+    flow_args,
+    flow_defs,
+    has_role,
+    resolve_flow,
+    role_label,
+    tools_for,
+    write_tools,
+)
 
 # 旧 txmeta.FLOW_DEFS 成员集（P33-1 零行为变更锚点）。
 _LEGACY_FLOW_IDS = {"book_venue", "submit_leave", "cancel_booking", "approve_leave", "leave_status"}
@@ -93,3 +101,34 @@ def test_flow_args_both_shapes():
     assert flow_args(_call("run_flow", {"flow_id": "book_venue", "slots": "bad"})) == {}
     assert flow_args(_call("run_flow", {"flow_id": "book_venue"})) == {}
     assert flow_args(_call("book_venue", "bad")) == {}
+
+
+def test_role_label_three_branches():
+    """P37：角色中文名三分支——原实现把 admin 也标成「辅导员」，导致管理员
+    演示办理时收到自相矛盾的回执（右上角管理员 / 回执说辅导员无权）。"""
+    assert role_label("student") == "学生"
+    assert role_label("counselor") == "辅导员"
+    assert role_label("admin") == "管理员"
+    assert role_label("") == "未知身份"
+
+
+def test_admin_is_role_superset():
+    """P37 拍板 A：admin 是超集，可代学生办理（预约/取消/请假）也可审批；
+    学生与辅导员仍严格按 ToolSpec.roles 判定（越权回执语义不变）。"""
+    student_only = ["student"]
+    counselor_only = ["counselor"]
+    # admin：两类工具都放行（演示与运维需要）
+    assert has_role(student_only, "admin")
+    assert has_role(counselor_only, "admin")
+    # 非 admin 不放宽：学生拿不到辅导员工具，反之亦然
+    assert has_role(student_only, "student")
+    assert not has_role(counselor_only, "student")
+    assert not has_role(student_only, "counselor")
+    # 注册表口径：预约是 student/counselor 工具、审批是 counselor 工具；
+    # admin 经 has_role 超集拿到两者（上面两行已断言），注册表本身不含 admin 字样
+    reg = tools_for()
+    assert reg["book_venue"].roles == ["student", "counselor"]
+    assert reg["approve_leave"].roles == ["counselor"]
+    assert has_role(reg["book_venue"].roles, "admin")
+    assert has_role(reg["approve_leave"].roles, "admin")
+    assert not has_role(reg["approve_leave"].roles, "student")
