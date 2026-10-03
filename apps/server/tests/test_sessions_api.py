@@ -115,11 +115,11 @@ def test_create_and_list_kind_filter_and_isolation(tmp_path, biz, mem, auth, ses
     s1 = r.json()
     assert s1["kind"] == "chat" and s1["title"] == "" and s1["session_id"]
 
-    r = c.post("/api/sessions", json={"kind": "compare"})
-    assert r.json()["kind"] == "compare"
+    # P36：compare 枚举随 classic 退役（与 bogus 同为 422）
+    assert c.post("/api/sessions", json={"kind": "compare"}).status_code == 422
 
     r = c.get("/api/sessions")
-    assert {s["kind"] for s in r.json()} == {"chat", "compare"}
+    assert {s["kind"] for s in r.json()} == {"chat"}
     r = c.get("/api/sessions?kind=chat")
     assert [s["kind"] for s in r.json()] == ["chat"]
     r = c.get("/api/sessions?kind=bogus")

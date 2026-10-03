@@ -445,7 +445,6 @@ export default function AdminPage() {
                 <SelectContent>
                   <SelectItem value="all">全部类型</SelectItem>
                   <SelectItem value="chat">对话</SelectItem>
-                  <SelectItem value="compare">对比实验</SelectItem>
                 </SelectContent>
               </Select>
               <Input

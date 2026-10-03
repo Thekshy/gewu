@@ -221,15 +221,15 @@ def test_admin_sessions_inspect_and_delete_cascade(
 ):
     c = make_admin_client(tmp_path, biz, mem, auth, sess, usage, cp)
     u2 = make_logged_client(c.app, auth, email="u2@example.com")
-    sid = u2.post("/api/sessions", json={"kind": "compare"}).json()["session_id"]
+    sid = u2.post("/api/sessions", json={}).json()["session_id"]
 
     rows = c.get("/api/admin/sessions").json()
     assert {r["session_id"] for r in rows} >= {sid}
     by_sid = {r["session_id"]: r for r in rows}
     assert by_sid[sid]["user"] == "u2@example.com"
-    assert by_sid[sid]["kind"] == "compare"
+    assert by_sid[sid]["kind"] == "chat"
 
-    assert {r["kind"] for r in c.get("/api/admin/sessions?kind=compare").json()} == {"compare"}
+    assert {r["kind"] for r in c.get("/api/admin/sessions?kind=chat").json()} == {"chat"}
     assert all("u2@" in r["user"] for r in c.get("/api/admin/sessions?q=u2@").json())
     assert c.get("/api/admin/sessions?kind=bogus").status_code == 422
 

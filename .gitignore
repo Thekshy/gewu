@@ -2,6 +2,7 @@
 __pycache__/
 *.pyc
 apps/server/.venv/
+.venv/
 
 # Go 构建产物
 bin/
@@ -27,6 +28,7 @@ eval/reports/*
 
 # 本地安全扫描工具状态
 .mimosa/
+.impeccable/
 .idea/
 .mentor/
 .video_agent/

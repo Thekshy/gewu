@@ -173,7 +173,7 @@ export async function logout(): Promise<void> {
 
 // ---------- 会话（P22：会话为服务端资源，CRUD + 历史恢复） ----------
 
-export type SessionKind = "chat" | "compare";
+export type SessionKind = "chat"; // P36：compare 枚举随 classic 退役
 
 export interface SessionInfo {
   session_id: string;

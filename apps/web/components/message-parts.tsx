@@ -38,7 +38,7 @@ import {
   TooltipTrigger,
 } from "@/components/ui/tooltip";
 
-/** 聊天主页与 compare 轨道共用的消息积木：路由徽章 / 研究过程 / 槽位卡 /
+/** 聊天主页的消息积木：路由徽章 / 研究过程 / 槽位卡 /
  * 确认卡 / 回执 / 引用 / 消息操作条 / 结束元信息。纯展示不含数据流——
  * 反馈上报由页面层经 onFeedback 回调注入（P25）。 */
 

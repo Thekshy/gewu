@@ -12,14 +12,14 @@ from dataclasses import dataclass
 
 from psycopg_pool import ConnectionPool
 
-VALID_KINDS = ("chat", "compare")
+VALID_KINDS = ("chat",)  # P36：compare 枚举随 classic 退役（存量行 SELECT 不受影响）
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS chat_sessions (
     session_id TEXT PRIMARY KEY,
     "user"     TEXT NOT NULL,
     title      TEXT NOT NULL DEFAULT '',
-    kind       TEXT NOT NULL DEFAULT 'chat' CHECK (kind IN ('chat', 'compare')),
+    kind       TEXT NOT NULL DEFAULT 'chat' CHECK (kind IN ('chat')),
     created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at TIMESTAMPTZ NOT NULL DEFAULT now()
 );
