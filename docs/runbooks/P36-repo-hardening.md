@@ -139,4 +139,66 @@
 
 ## 6. 执行记录
 
-（待回填）
+### P36 全票执行（2026-10-03）
+
+**审计摸底**（三路并行 Explore：安全 / 文档时效 / 依赖与死代码）：无高危
+（.env 未入库、SQL 全参数化、admin 全鉴权、argon2id+sha256、无 SSRF/XSS 面）；
+4 中危 + 若干低危如 §背景；文档欠账与死代码清单同任务书 §2。
+
+**代码侧**（commit d1251ed / 23e6879）：
+
+- 安全七项全落地：`_internal()` 收口 5 处 500 + SSE error 笼统文案；client_ip
+  改 XFF **末段**；login 双键限速（email 10/分 + ip 30/分，复用 RateLimiter，
+  新增 `reset()` 供测试隔离）；/api/docs 加 require_user；`API_DOCS` 开关
+  （缺省关三文档面）；trace-query.sh 全量改 `psql -v :'x'` 引用 + 数字参
+  数正则闸；compose web 端口绑 127.0.0.1。
+- 死代码与卫生：删 6 前端死文件（eventStream.tsx 163 行 + 5 个 ui 原语，
+  引用关系逐一复核）；pyproject 删 4 条幽灵 per-file-ignores + dev 组去重
+  httpx（uv.lock 随之重锁）；REACT_MODE 从 config 删除（mode=react 请求值
+  保留）；compare 枚举四点退役（VALID_KINDS/DDL/SessionKind/admin 过滤项，
+  存量行不受影响）；untrack .impeccable/.mimosa 状态文件 + .gitignore 补
+  `.impeccable/` 与根 `.venv/`；**AGENTS.md 首次入库**。
+- 测试：+4 新用例（client_ip 末段/api_docs 开关/500 笼统文案/login 双键
+  429），5 处存量用例适配（限流测试改用 /api/auth/me 计次、docs 契约改
+  登录态、sessions/admin 的 compare 段改 422 断言、SSE error 断言笼统文案）。
+
+**门禁**：ruff 全绿；pytest 全量 **290 passed**（PG 5432）；web build 过
+（五路由 / /admin /console /login /memory）。本地真跑（8010 分端口，8000 被
+并行会话进程占用未动）：/docs+/openapi.json 404、/api/docs 未登录 401、
+login 第 11 次 429 且旁账号不受牵连——四项行为与单测一致。
+
+**文档侧**（commit 10b17d5）：根 README 重写（单循环架构图/五页面/make
+ingest/27 端点指向 08/部署安全注记，15 条失实全改）；architecture 01/09/10
+跟齐 P31（模块地图改现存文件、配置表按 config.py 全集、删 --mode classic
+必败命令）+ 05/07/08 小修（嵌套外壳开头段/state.py 引用/CORS_ORIGINS 笔误/
+§0.9→§0.10）；PARITY 补 §0.10（七项行为面变化）+ §14 重写（删 CORPUS_DIR/
+INDEX_PATH/MAX_QUESTION_CHARS，RATE_LIMIT 缺省 600，补 ~20 现行变量）+ §3
+注记 tool 字段 flow_id 语义（P33 尾巴）；roadmap 补 P34/P35/P36 + 修 M4
+用户体系勾选矛盾 + 新增「挂账与已知限制」节；docs/README 索引补到 P36；
+.env.example 对照 config.py 全集重写；DESIGN.md version P35 + compare 三处
+留档化；AGENTS.md 核心域表述更新为 P31 后形态 + 失效开关示例换 RERANK_MODE/
+STREAM_ANSWER/IQS_API_KEY。
+
+### 部署与线上验证（2026-10-03）
+
+- push：03e1409..10b17d5（P36 四 commit 一并上远端）。
+- 部署沿 P34 流程：服务器备份 `backup-gewu-pre-p36-20261003-0924.tar.gz`
+  → rsync server（uv sync 幂等）+ rsync web（含本地新构建 .next）→ 服务器
+  侧 rm 6 个已删组件文件与 2 个状态文件 → `systemctl restart gewu-api` +
+  `pm2 restart gewu-web`。
+- **nginx XFF 核对结论**：两处（/api→8000、web→3001）均为
+  `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for` 追加式——
+  末段=连上 nginx 的真实来源，**client_ip 末段语义成立，nginx 零改动**。
+- **COOKIE_SECURE 实况**：服务器 .env 已有 `COOKIE_SECURE=true`（:27）——
+  审计中危#2 的真实缺口在仓库文档侧（.env.example 未记载、README 无部署
+  注记）而非生产配置；本票文档补齐后闭环。
+- 线上验证（https://gewu.mrpwn.top）：首页 200；/api/health ok（llm+
+  embeddings true、15 docs/60 chunks）；/docs 与 /openapi.json 404；
+  /api/docs 未登录 401；login 连续失败 10×401 + 第 11 次 429（经 nginx
+  XFF 链路，IP 键=真实来源）；**Set-Cookie 实测 `HttpOnly; SameSite=lax;
+  Secure` 三标志齐全**（邀请码注册探针账号验证后已从 users/auth_sessions
+  清除）。
+
+### 遗留确认
+
+§5 挂账全部原样移交 roadmap「挂账与已知限制」节（print→logging 建议 P37）。
