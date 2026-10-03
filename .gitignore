@@ -10,6 +10,7 @@ bin/
 # Node
 node_modules/
 .next/
+.next-dev/
 *.tsbuildinfo
 
 # 运行产物（语料在 data/corpus 下是受版本管理的）

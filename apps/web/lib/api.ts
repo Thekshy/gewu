@@ -94,7 +94,7 @@ export interface User {
 }
 
 /** chat 请求 mode：auto（agent-first 主循环）/react（=auto 语义；P31 起枚举收窄，classic/direct/research 退役）。 */
-export type ChatMode = "auto" | "react";
+export type ChatMode = "auto";  // P37：react 别名无调用点（P31 起 classic/compare 全退），收窄为唯一取值
 
 /**
  * P21：默认同源相对路径——浏览器请求发给 next 自身，经 next.config rewrites
@@ -281,7 +281,6 @@ export async function sendFeedback(
 
 export interface AdminStats {
   users: number;
-  sessions: number;
   invites: number;
   chat_sessions: number;
   today_tokens: number;

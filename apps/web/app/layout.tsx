@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono, Noto_Serif_SC } from "next/font/google";
 import AppHeader from "@/components/app-header";
+import RouteFade from "@/components/route-fade";
 import { ThemeProvider } from "@/components/theme-provider";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
@@ -37,7 +38,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
             {/* P35 app-shell：顶栏条件渲染——chat 页 chrome-less（导航在 page 侧栏），
                 工具页 44px 细顶栏。旧 52px 全站厚顶栏退役（DESIGN.md app-shell）。 */}
             <AppHeader />
-            <div className="min-h-0 flex-1">{children}</div>
+            <RouteFade>{children}</RouteFade>
           </TooltipProvider>
         </ThemeProvider>
       </body>

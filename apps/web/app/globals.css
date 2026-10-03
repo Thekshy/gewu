@@ -45,6 +45,9 @@
     --color-primary: var(--primary);
     /* P25：link 蓝（行内链接/来源条目）——独立于 primary 的 america.gov 签名 */
     --color-link: var(--link);
+    /* P37：强调色与更强表面档——「动作色 primary / 强调色 seal」职责分离 */
+    --color-seal: var(--seal);
+    --color-surface-strong: var(--surface-strong);
     --color-popover-foreground: var(--popover-foreground);
     --color-popover: var(--popover);
     --color-card-foreground: var(--card-foreground);
@@ -65,91 +68,179 @@
    P18/P20 暖陶土/米白两轮已退役不回走；P20 craft 地板条款照旧。 */
 /* 亮色 = america.gov 式纯白（P35 用户拍板：原冷调近白 #fafbfd 显闷，改纯白；
    表面层次整体提浅一档适配纯白画布）。暗色不动。 */
+/* ── P37 三个候选方向（同一套结构，只换材质/色/字）──────────────────
+   用户拍板（10-03）：**A 墨白**。印刷精度的近黑白 + 印章朱作强调色；
+   与 --primary（动作色）职责分离——这是"颜色太平"的直接解药。
+   落选方向 B 深空 / C 瑞士 已删除，对比截图留档 docs/runbooks/assets/p37/。 */
+
 :root {
     --background: #ffffff;
-    --foreground: #1c2430;
-    --card: #f6f7f9;
-    --card-foreground: #1c2430;
+    --foreground: #0d1117;
+    --card: #f7f8f9;
+    --card-foreground: #0d1117;
     --popover: #ffffff;
-    --popover-foreground: #1c2430;
-    --primary: #1a3a5c;
+    --popover-foreground: #0d1117;
+    --primary: #131a24;
     --primary-foreground: #ffffff;
-    --secondary: #f2f3f5;
-    --secondary-foreground: #2e3746;
-    --muted: #f2f3f5;
-    --muted-foreground: #5a6572;
-    --accent: #edeff3;
-    --accent-foreground: #1c2430;
-    --destructive: #c03434;
-    --border: #e4e7ec;
-    --input: #d8dde6;
-    --ring: #3d6b9e;
-    --link: #1157d0;
-    --chart-1: #1a3a5c;
-    --chart-2: #1157d0;
+    --secondary: #f1f2f4;
+    --secondary-foreground: #232b36;
+    --muted: #f1f2f4;
+    --muted-foreground: #5a6474;
+    --accent: #eceef1;
+    --accent-foreground: #0d1117;
+    --destructive: #b3261e;
+    --border: #e3e6ea;
+    --input: #d5dae0;
+    --ring: #131a24;
+    --link: #1a46c8;
+    --seal: #b3261e;
+    --surface-strong: #eceef1;
+    --chart-1: #131a24;
+    --chart-2: #1a46c8;
     --chart-3: #2e7d4f;
-    --chart-4: #5a6572;
-    --chart-5: #7c8590;
-    --radius: 0.75rem;
-    --sidebar: #f4f5f7;
-    --sidebar-foreground: #1c2430;
-    --sidebar-primary: #1a3a5c;
+    --chart-4: #5a6474;
+    --chart-5: #8b93a1;
+    --radius: 0.5rem;
+    --sidebar: #fbfbfc;
+    --sidebar-foreground: #0d1117;
+    --sidebar-primary: #131a24;
     --sidebar-primary-foreground: #ffffff;
-    --sidebar-accent: #edeff3;
-    --sidebar-accent-foreground: #1c2430;
-    --sidebar-border: #e4e7ec;
-    --sidebar-ring: #3d6b9e;
+    --sidebar-accent: #eceef1;
+    --sidebar-accent-foreground: #0d1117;
+    --sidebar-border: #e3e6ea;
+    --sidebar-ring: #131a24;
 }
 
 .dark {
-    --background: #10161f;
-    --foreground: #e8ecf2;
-    --card: #17202b;
-    --card-foreground: #e8ecf2;
-    --popover: #1a2432;
-    --popover-foreground: #e8ecf2;
-    --primary: #8ab0dd;
-    --primary-foreground: #0c1826;
-    --secondary: #1c2734;
-    --secondary-foreground: #d5dce6;
-    --muted: #1c2734;
-    --muted-foreground: #98a3b0;
-    --accent: #223040;
-    --accent-foreground: #e8ecf2;
-    --destructive: #e08585;
-    --border: oklch(1 0 0 / 9%);
-    --input: oklch(1 0 0 / 14%);
-    --ring: #8ab0dd;
-    --link: #8ab0dd;
-    --chart-1: #8ab0dd;
-    --chart-2: #b7cdec;
+    --background: #0a0c10;
+    --foreground: #e9edf2;
+    --card: #12151b;
+    --card-foreground: #e9edf2;
+    --popover: #14181f;
+    --popover-foreground: #e9edf2;
+    --primary: #edf1f6;
+    --primary-foreground: #0a0c10;
+    --secondary: #171b22;
+    --secondary-foreground: #d7dde5;
+    --muted: #171b22;
+    --muted-foreground: #9aa5b4;
+    --accent: #1e232b;
+    --accent-foreground: #e9edf2;
+    --destructive: #f0806b;
+    --border: oklch(1 0 0 / 10%);
+    --input: oklch(1 0 0 / 16%);
+    --ring: #8fa6c4;
+    --link: #8fb6ff;
+    --seal: #f0806b;
+    --surface-strong: #1e232b;
+    --chart-1: #edf1f6;
+    --chart-2: #8fb6ff;
     --chart-3: #7fb894;
-    --chart-4: #98a3b0;
+    --chart-4: #9aa5b4;
     --chart-5: #6d7f93;
-    --sidebar: #17202b;
-    --sidebar-foreground: #e8ecf2;
-    --sidebar-primary: #8ab0dd;
-    --sidebar-primary-foreground: #0c1826;
-    --sidebar-accent: #223040;
-    --sidebar-accent-foreground: #e8ecf2;
-    --sidebar-border: oklch(1 0 0 / 9%);
-    --sidebar-ring: #8ab0dd;
+    --sidebar: #0d1015;
+    --sidebar-foreground: #e9edf2;
+    --sidebar-primary: #edf1f6;
+    --sidebar-primary-foreground: #0a0c10;
+    --sidebar-accent: #1a1f27;
+    --sidebar-accent-foreground: #e9edf2;
+    --sidebar-border: oklch(1 0 0 / 10%);
+    --sidebar-ring: #8fa6c4;
 }
 
-@layer base {
-  * {
-    @apply border-border outline-ring/50;
-    }
-  body {
-    @apply bg-background text-foreground;
-    }
-  html {
-    @apply font-sans;
-    }
-  ::selection {
-    background: color-mix(in oklab, var(--primary) 22%, transparent);
+/* ── P37 转场 ────────────────────────────────────────────────
+   主题切换用「墨染」圆形揭示（View Transitions）：关掉默认的整页交叉淡入，
+   改由 theme-toggle.tsx 驱动 clip-path，从按钮位置铺开新主题。
+   路由切换只做一次廉价上浮淡入（page-in）——原因见 components/route-fade.tsx。 */
+::view-transition-old(root),
+::view-transition-new(root) {
+  animation: none;
+  mix-blend-mode: normal;
+}
+
+@keyframes page-in {
+  from {
+    opacity: 0;
+    transform: translateY(3px);
+  }
+  to {
+    opacity: 1;
+    transform: none;
   }
 }
+.page-in {
+  animation: page-in 200ms var(--ease-out-expo) both;
+}
+@media (prefers-reduced-motion: reduce) {
+  .page-in {
+    animation: none;
+  }
+}
+
+/* ── P37 排版尺度层 ──────────────────────────────────────────
+   旧契约是「display 48 断崖 + chrome 11~16 紧档」两级字阶，二级以上就是
+   空白——这是页面读起来普通的直接原因。新契约给 6 档，且中段（20/16）
+   必须真的出现在内容里（区块标题、来源名、任务卡标题）。 */
+@layer utilities {
+  .t-display {
+    /* CJK 警戒：上限 48px（再大在 5 栏里必断词），下限 30px 保移动端不成行 */
+    font-size: clamp(1.875rem, 3.4vw, 3rem);
+    line-height: 1.04;
+    letter-spacing: -0.022em;
+    font-weight: 600;
+  }
+  /* 区块标题：中段尺度的主要消费者 */
+  .t-h1 {
+    font-size: 1.75rem;
+    line-height: 1.15;
+    letter-spacing: -0.02em;
+    font-weight: 600;
+  }
+  .t-h2 {
+    font-size: 1.25rem;
+    line-height: 1.3;
+    letter-spacing: -0.014em;
+    font-weight: 600;
+  }
+  .t-h3 {
+    font-size: 0.9375rem;
+    line-height: 1.4;
+    letter-spacing: -0.006em;
+    font-weight: 600;
+  }
+  .t-lead {
+    font-size: 0.9688rem;
+    line-height: 1.65;
+    letter-spacing: -0.004em;
+  }
+  .t-body {
+    font-size: 0.9063rem;
+    line-height: 1.72;
+  }
+  .t-small {
+    font-size: 0.8125rem;
+    line-height: 1.55;
+  }
+  .t-meta {
+    font-size: 0.7188rem;
+    line-height: 1.45;
+    letter-spacing: 0.005em;
+  }
+  /* 机器产生的标识符/数字：等宽 + 表格数字（结构即信息，非装饰） */
+  .t-num {
+    font-family: var(--font-mono);
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.01em;
+  }
+  /* 发丝线分栏：用线分组，不用小卡容器（craft-floor：cards are the lazy container） */
+  .rule-t {
+    border-top: 1px solid var(--border);
+  }
+  .rule-b {
+    border-bottom: 1px solid var(--border);
+  }
+}
+
 /* ── AI 原生交互动效层（2026-10-01）────────────────────────── */
 
 /* 流式回答末尾的闪烁光标：挂在 streaming 容器最后一个块元素上，纯 CSS 无需 JS 定位 */

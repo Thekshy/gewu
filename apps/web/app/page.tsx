@@ -12,7 +12,6 @@ import {
   Loader2,
   PanelLeft,
   Send,
-  Sparkles,
   TriangleAlert,
   X,
 } from "lucide-react";
@@ -39,11 +38,11 @@ import {
 } from "@/lib/api";
 import { useRequireUser } from "@/lib/auth";
 import { ROLE_LABEL } from "@/lib/labels";
+import { cn } from "@/lib/utils";
 import { NavColumn } from "@/components/nav";
 import ThemeToggle from "@/components/theme-toggle";
 import UserMenu from "@/components/user-menu";
 import Answer from "@/components/answer";
-import BlurText from "@/components/BlurText";
 import SessionList from "@/components/session-list";
 import {
   CitationsRow,
@@ -406,13 +405,9 @@ export default function Home() {
       >
         跳到输入框
       </a>
-      {/* 环境光：画布顶部的冷色氛围（navy 光斑 + 微点阵，token 化随 P25 换肤自动呈蓝）。
-          P34-2 修复：原块被重复渲染两次、且混入契约外 amber 光斑（视觉评审判黄光偏强）——
-          收敛为契约内单份 primary 冷光。 */}
-      <div aria-hidden className="pointer-events-none absolute inset-x-0 top-0 -z-10 h-96 overflow-hidden">
-        <div className="absolute -top-24 left-1/4 size-96 rounded-full bg-primary/[0.07] blur-3xl dark:bg-primary/10" />
-        <div className="absolute inset-0 bg-[radial-gradient(circle_at_1px_1px,var(--color-foreground)_1px,transparent_0)] bg-[size:22px_22px] opacity-[0.05] [mask-image:radial-gradient(70%_60%_at_50%_0%,black,transparent)] dark:opacity-[0.07]" />
-      </div>
+      {/* P37：原「环境光雾 + 微点阵」退役——在墨白/印刷方向里它读起来是
+          一团灰脏点，而不是光（P34 视觉评审也曾判它偏强）。结构感改由发丝线
+          与留白层级承担，不靠模糊光斑。 */}
 
       {/* P35 app-shell：chat 页 chrome-less——品牌/视图导航/登录态全部并入左侧栏
           （Claude.ai/ChatGPT 形态），内容区顶天立地；工具页顶栏由 AppHeader 条件渲染 */}
@@ -498,51 +493,84 @@ export default function Home() {
                 <PanelLeft className="size-4" aria-hidden />
               </Button>
             </div>
-            <div className="mx-auto w-full max-w-3xl space-y-5 px-4 pb-6 pt-10">
+            <div
+              className={cn(
+                "mx-auto w-full px-4 pb-6 pt-10",
+                messages.length === 0
+                  ? "max-w-5xl"
+                  : "flex min-h-full max-w-3xl flex-col justify-end space-y-5",
+              )}
+            >
               {messages.length === 0 && (
-                <div className="relative flex min-h-[65vh] flex-col items-center justify-center gap-5 text-center">
-                  {/* 空态：编辑式排版——衬线大标语直接铺在画布上，无卡片（DESIGN.md empty-state） */}
-                  <motion.div
-                    initial={{ opacity: 0, scale: 0.85 }}
-                    animate={{ opacity: 1, scale: 1 }}
-                    transition={{ duration: 0.4, ease: [0.16, 1, 0.3, 1] }}
-                    className="flex size-20 items-center justify-center rounded-xl bg-primary font-display text-4xl font-semibold text-primary-foreground shadow-md"
-                    aria-hidden
-                  >
-                    格
-                  </motion.div>
-                  {/* 48px 断崖下 CJK 断词不可控（BlurText 逐字 span + flex-wrap，
-                      text-balance 无效）——手动两行分行，断点落在短语边界 */}
-                  <div>
-                    <BlurText
-                      text="问校园政策，或者直接办事——"
-                      animateBy="letters"
-                      delay={45}
-                      stepDuration={0.25}
-                      className="justify-center font-display text-[34px] font-semibold leading-[1.15] tracking-[-0.01em] sm:text-5xl"
-                    />
-                    <BlurText
-                      text="预约场馆、提交请假。"
-                      animateBy="letters"
-                      delay={45}
-                      stepDuration={0.25}
-                      className="justify-center font-display text-[34px] font-semibold leading-[1.15] tracking-[-0.01em] sm:text-5xl"
-                    />
-                  </div>
-                  {/* 说明行不做延迟入场（operate.md：产品页不排加载序列，
-                      1.2s delay 会被检测器采样成低对比）；入场时刻只留 BlurText */}
-                  <div className="mt-1 space-y-2">
-                    <p className="max-w-md text-sm text-muted-foreground">
-                      办理类请求会经过：槽位收集 → 确认摘要 → 执行 → 回执；写操作必须确认后才会执行。
+                <div className="grid min-h-[58vh] content-center gap-10 lg:grid-cols-12 lg:gap-12">
+                  {/* P37 空态重构：原来是「居中方印 + 标语 + 两行小字」悬浮在大片死白里
+                      （死白无结构 = 廉价感第一来源）。改为左栏主张、右栏可执行任务的
+                      两栏工作台：左对齐、有层级、右侧是真实任务形态而非装饰。 */}
+                  <div className="lg:col-span-5">
+                    <div className="flex items-center gap-3">
+                      <span
+                        className="flex size-9 items-center justify-center rounded-md bg-primary font-display text-base font-semibold text-primary-foreground"
+                        aria-hidden
+                      >
+                        格
+                      </span>
+                      <span className="t-meta text-muted-foreground">
+                        <span className="t-num">{health?.docs ?? "—"}</span> 篇制度文档 ·{" "}
+                        <span className="t-num">{health?.chunks ?? "—"}</span> 段索引
+                      </span>
+                    </div>
+                    <h1 className="t-display mt-7 font-display">
+                      问校园政策，
+                      <br />
+                      或者直接办事。
+                    </h1>
+                    <p className="t-lead mt-5 max-w-sm text-muted-foreground">
+                      办理类请求会经过槽位收集 → 确认摘要 → 执行 → 回执，写操作必须确认后才会执行。
                     </p>
-                    {/* 信任行（P25，america.gov 信任声明同款姿态） */}
-                    <p className="max-w-md text-xs text-muted-foreground">
+                    <p className="t-small mt-3 max-w-sm text-muted-foreground/75">
                       回答仅基于钱塘大学官方制度文档生成，全部引用可溯源到发文部门。
                     </p>
                   </div>
+                  {/* 右栏用发丝线分行，不用三张同形圆角卡——「同形卡 + 统一阴影 + 渐变洗」
+                      是 DESIGN.md 负参照里点名的模板感来源 */}
+                  <div className="lg:col-span-7">
+                    <p className="t-meta rule-b flex items-center gap-2 pb-2 font-semibold text-muted-foreground">
+                      <span className="size-2 bg-seal" aria-hidden />
+                      可以直接办的事
+                    </p>
+                    <ul className="divide-y divide-border/70">
+                      {TASK_CARDS.map((t) => (
+                        <li key={t.title}>
+                          <button
+                            type="button"
+                            onClick={() => send(t.q)}
+                            disabled={sending || !currentSession}
+                            className="group relative flex w-full items-center gap-4 py-4 text-left disabled:pointer-events-none disabled:opacity-50"
+                          >
+                            {/* P37「落笔」：hover 时发丝线从左画出，给出「可点」的书写感 */}
+                            <span
+                              aria-hidden
+                              className="pointer-events-none absolute inset-x-0 bottom-0 h-px origin-left scale-x-0 bg-seal/40 transition-transform duration-200 ease-out-expo group-hover:scale-x-100"
+                            />
+                            <t.icon
+                              className="size-4 shrink-0 text-muted-foreground transition-colors group-hover:text-seal"
+                              aria-hidden
+                            />
+                            <span className="min-w-0 flex-1">
+                              <span className="t-h3 block">{t.title}</span>
+                              <span className="t-small block text-muted-foreground">{t.desc}</span>
+                            </span>
+                            <ChevronRight
+                              className="size-4 shrink-0 text-muted-foreground/50 transition-transform duration-150 ease-out-expo group-hover:translate-x-0.5 group-hover:text-foreground"
+                              aria-hidden
+                            />
+                          </button>
+                        </li>
+                      ))}
+                    </ul>
+                  </div>
                 </div>
               )}
-
               {messages.map((msg, i) =>
                 msg.role === "user" ? (
                   <motion.div
@@ -550,6 +578,7 @@ export default function Home() {
                     initial={{ opacity: 0, y: 8 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
+                    layout="position"
                     className="flex justify-end"
                   >
                     {/* 用户消息：primary 实底气泡（P25 起，america.gov 同款；DESIGN.md user-message） */}
@@ -563,13 +592,25 @@ export default function Home() {
                     initial={{ opacity: 0, y: 8 }}
                     animate={{ opacity: 1, y: 0 }}
                     transition={{ duration: 0.18, ease: [0.16, 1, 0.3, 1] }}
+                    layout="position"
                     className="flex items-start gap-2.5"
                   >
-                    <div
-                      className="mt-1 flex size-7 shrink-0 items-center justify-center rounded-md bg-primary/10 text-primary"
-                      aria-hidden
-                    >
-                      <Sparkles className="size-4" />
+{/* 页边标记（P37）：生成中呼吸、完成时落定——替代转圈，
+                        也给「正在思考」一点生命感 */}
+                    <div className="mt-2 flex w-2 shrink-0 justify-center" aria-hidden>
+                      <motion.span
+                        className="size-1.5 rounded-full bg-seal"
+                        animate={
+                          msg.done
+                            ? { scale: 1, opacity: 1 }
+                            : { scale: [1, 1.45, 1], opacity: [0.55, 1, 0.55] }
+                        }
+                        transition={
+                          msg.done
+                            ? { duration: 0.2 }
+                            : { duration: 1.4, repeat: Infinity, ease: "easeInOut" }
+                        }
+                      />
                     </div>
                     {/* assistant 回答无气泡无卡片，直接铺在画布上（DESIGN.md assistant-message）；
                         层级交给 RouteBadge/trace/引用行与 ConfirmCard 唯一高亮块 */}
@@ -577,7 +618,7 @@ export default function Home() {
                       <div className="flex flex-wrap items-center gap-2">
                         {msg.route && <RouteBadge route={msg.route} reason={msg.reason} />}
                       </div>
-                      <ResearchTrace steps={msg.steps} defaultOpen={!msg.done} />
+                      <ResearchTrace steps={msg.steps} live={!msg.done} />
                       {msg.status && <StatusLine text={msg.status} />}
                       {msg.slotQ && <SlotCard slot={msg.slotQ.slot} />}
                       {msg.text && <Answer text={msg.text} streaming={!msg.done} />}
@@ -673,26 +714,8 @@ export default function Home() {
 
           {/* 底部操作带：hairline 分隔即可。bg-background 是画布同色的冗余，
               且 border-t + bg 组合会被 impeccable 判成 card-like 嵌套（P20 基线） */}
-          <div className="shrink-0 border-t">
-            <div className="mx-auto w-full max-w-3xl space-y-4 px-4 py-4">
-              <div className="flex flex-wrap gap-2">
-                {TASK_CARDS.map((t) => (
-                  <button
-                    key={t.title}
-                    onClick={() => send(t.q)}
-                    disabled={sending || !currentSession}
-                    className="flex items-center gap-2.5 rounded-xl border border-input bg-card px-3.5 py-2.5 text-left transition-[border-color,box-shadow] duration-150 ease-out-expo hover:border-primary/40 hover:shadow-sm disabled:pointer-events-none disabled:opacity-50"
-                  >
-                    <span className="flex size-8 shrink-0 items-center justify-center rounded-lg bg-primary/10 text-primary">
-                      <t.icon className="size-4" aria-hidden />
-                    </span>
-                    <span className="min-w-0">
-                      <span className="block text-sm font-medium text-foreground">{t.title}</span>
-                      <span className="block text-xs text-muted-foreground">{t.desc}</span>
-                    </span>
-                  </button>
-                ))}
-              </div>
+          <div className="rule-t shrink-0">
+            <div className="mx-auto w-full max-w-3xl px-4 py-4">
               {/* composer：hairline 卡 + 主色 focus 环，实心主色发送钮（DESIGN.md composer）。
                   身份为只读徽章——P21 起 role 服务端权威（users.role），不可在客户端切换 */}
               <div className="flex items-end gap-2 rounded-2xl border bg-card p-2 shadow-sm transition-[border-color,box-shadow] duration-150 ease-out-expo focus-within:border-primary/60 focus-within:shadow-md focus-within:ring-4 focus-within:ring-primary/10">
@@ -711,7 +734,7 @@ export default function Home() {
                 currentSession ? `试试：${ROTATING_EXAMPLES[exampleIdx]}` : "正在准备会话…"
               }
                   rows={1}
-                  className="max-h-40 min-h-9 flex-1 resize-none border-0 bg-transparent px-1 py-2 text-sm outline-none placeholder:text-muted-foreground"
+                  className="t-body max-h-40 min-h-9 flex-1 resize-none border-0 bg-transparent px-1 py-2 outline-none placeholder:text-muted-foreground"
                   onChange={(e) => setInput(e.target.value)}
                   onKeyDown={(e) => {
                     if (e.key === "Enter" && !e.shiftKey && !e.nativeEvent.isComposing) {
@@ -734,7 +757,7 @@ export default function Home() {
             </div>
           </div>
 
-          <footer className="shrink-0 px-4 pb-2 text-center text-[11px] text-muted-foreground">
+          <footer className="t-meta shrink-0 px-4 pb-2.5 text-center text-muted-foreground/80">
             {health ? `${health.docs} 篇文档 / ${health.chunks} chunks · ` : ""}
             演示语料与业务系统均为虚构的「钱塘大学」合成数据 · 格物 Gewu 是开源的个人求职展示项目
           </footer>

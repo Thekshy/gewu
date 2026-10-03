@@ -1,55 +1,52 @@
 ---
-version: P35
+version: P37（方向 A 墨白，已拍板）
 name: Gewu-design-system
 description: >
-  格物 Gewu 的界面设计系统：机构蓝官方风（对标 america.gov/chat——同构产品，
-  官方信息 AI 问答助手）× Operate 工具型纪律。P25 依据用户拍板换肤：情绪层
-  从 P20 的「陶土暖纸」切换为「机构蓝冷静纸」——navy 主色 + 冷调近白画布 +
-  link 蓝行内链接（官方、可信、冷静，与「官方制度问答」的产品语义同构）；
-  P20 的 craft 地板全部继承（可扫读、一致性、原生预期优先、无嵌套卡、
-  熟悉感是特性、「工具消失在任务里」）。P34（10-02）拍板高级感转向
-  「权威而灵敏」：拨盘 VARIANCE 6 / MOTION 5 / DENSITY 4——尺度断崖
-  （display 48px + 负字距）、动效提速（120-180ms + expo-out）、
-  hover 微光；参照与依据见文件末 referencing 节。
+  格物 Gewu 的界面设计系统：**墨白印刷精度**（近黑白 + 印章朱强调色）×
+  Operate 工具型纪律。P37（10-03）用户拍板：判词从 P16「太普通」到 P35
+  「整体还是差不多」，五轮换肤未解——真因被定位为两条：**（工程）** dev/prod
+  共用 .next 致客户端 chunk 404、零 hydration、动效全停首帧（"改动根本没上屏"）；
+  **（设计）** 旧契约只有两级字阶（display 48 断崖 + chrome 11~16 紧档）+
+  单一 primary 主色 + 纯白铺满，结构上不可能高级。P37 的解法：六档字阶、
+  动作色 primary 与强调色 seal 分离、空态改左右两栏工作台、引用升格为
+  发丝线溯源块。P25 机构蓝（america.gov 对标）退役；P20 craft 地板全部继承
+  （可扫读、一致性、原生预期优先、无嵌套卡、「工具消失在任务里」）。
+  三候选方向对比与落选理由见文末 P37 一节（截图 docs/runbooks/assets/p37/）。
 
 mode: operate
-dials: { variance: 6, motion: 5, density: 4 }  # P34 拍板(10-02):高级感转向——variance 4→6/motion 4→5/density 5→4
+dials: { variance: 7, motion: 5, density: 4 }  # P37: variance 6→7（墨白方向靠对比与尺度出设计感，不靠元素堆叠）
 
 colors:
-  primary: "#1a3a5c"            # 机构深蓝（白字对比 11.6 ≥ AAA，勿改浅）
-  primary-strong: "#142d46"     # 按压/激活
-  on-primary: "#ffffff"
-  link: "#1157d0"               # 行内链接蓝（对画布 6.2 ≥ AA）——独立于 primary
-                               # 的 america.gov 签名：回答内链接/来源条目
-  ink: "#1c2430"                # 冷墨（标题/正文强）
-  body: "#2e3746"               # 正文
-  muted: "#5a6572"              # 次级文本
-  muted-soft: "#7c8590"         # 说明/脚注
-  hairline: "#e4e7ec"           # 1px 边线（P35 提浅一档适配纯白画布）
-  canvas: "#ffffff"             # 画布（P35 america.gov 式纯白——原冷调近白 #fafbfd
-                               # 显闷退役；暗色不动）
-  surface-card: "#f6f7f9"       # 卡片（比画布深一档）
-  surface-strong: "#edeff3"     # 更强一档（选中 tab / 强调带）
-  surface-user: "#1a3a5c"       # 用户消息 = primary 实底（P25 起，america.gov 同款）
-  accent-amber: "#c08a2d"       # 警示/高亮小面积（冷化琥珀）
-  success: "#2e7d4f"            # 回执成功（冷调绿）
-  error: "#c03434"
+  primary: "#131a24"            # 近黑墨（动作色：按钮/用户消息实底；白字对比 17:1）
+  primary-foreground: "#ffffff"
+  seal: "#b3261e"               # 强调色（印章朱）：引用编号/区块记号/激活态——与 primary 职责分离
+  link: "#1a46c8"               # 行内链接蓝（对白画布 ≥7:1）
+  ink: "#0d1117"                # 墨（标题/正文强）
+  muted: "#5a6474"              # 次级文本（对白 ≥5.6:1）
+  hairline: "#e3e6ea"           # 1px 发丝线（结构靠线，不靠卡片）
+  canvas: "#ffffff"             # 画布
+  surface-card: "#f7f8f9"       # 卡片/输入面（比画布深一档）
+  surface-strong: "#eceef1"     # 更强一档（选中/强调带）
+  surface-user: "#131a24"       # 用户消息 = primary 实底
+  success: "#2e7d4f"            # 回执成功
+  error: "#b3261e"
 
   dark:
-    canvas: "#10161f"           # 近黑海军蓝画布
-    surface-card: "#17202b"
-    surface-strong: "#1f2a37"
-    hairline: "oklch(1 0 0 / 9%)"
-    on-canvas: "#e8ecf2"
-    on-canvas-muted: "#98a3b0"
-    primary: "#8ab0dd"          # 暗色下的提亮冰蓝（on-primary #0c1826 对比 7.6 达标）
-    on-primary: "#0c1826"
-    link: "#8ab0dd"             # 暗色下链接与提亮 primary 同值（复用对比结论）
+    canvas: "#0a0c10"           # 近黑画布（不带蓝调）
+    surface-card: "#12151b"
+    surface-strong: "#1e232b"
+    hairline: "oklch(1 0 0 / 10%)"
+    on-canvas: "#e9edf2"
+    on-canvas-muted: "#9aa5b4"
+    primary: "#edf1f6"          # 暗色反转：动作色用亮墨（白气泡深字，高对比）
+    on-primary: "#0a0c10"
+    seal: "#f0806b"
+    link: "#8fb6ff"
 
 typography:
   衬线域（font-display / Noto Serif SC，全站仅此四处）:
   - 品牌方印「格」与「格物」字标（layout.tsx，品牌资产）
-  - 空态大标语（page.tsx + BlurText）——对应 america.gov "Hello, America" 衬线 hero
+  - 空态大标语（page.tsx，t-display）
   - 政策条文/引用块（answer.tsx prose-blockquote）
   - 回答内文档标题（answer.tsx prose-headings）
   chrome（全 sans）: 页面 h1、导航、按钮、标签、CardTitle、表格、消息正文
@@ -57,24 +54,26 @@ typography:
     fontFamily: "Geist + PingFang SC / HarmonyOS Sans / Microsoft YaHei, sans-serif"  # --font-sans
   mono:
     fontFamily: "Geist Mono, ui-monospace"  # --font-mono
-    usage: 单号/凭证号/doc_id/延迟 ms/版本号
-  scale: # 固定 rem；P34 起层级二元化——display 断崖 + chrome 紧档（标杆比率 ≈4:1）
-    title: 16px / 1.4 / 500-600
-    body: 14px / 1.6
-    caption: 12px / 1.4
-    meta: 11px / 1.4（页脚、DoneMeta）
-    display-lg: 48px / 1.15 / -0.01em（仅空态标语，衬线，600；移动 34px——
-      CJK 警戒：汉字负字距不小于 -0.01em，大字号不用 400 字重）
-    subhead: 24px / 1.3 / 500（品牌时刻副标题档——首答完成/回执时刻消费，
-      P34-2 第二批；UI chrome 不用此档）
+    usage: 单号/凭证号/doc_id/延迟 ms/文档计数
+  scale: # P37：六档（旧契约只有 display + chrome 两级，二级以上是空白）
+    t-display: clamp(30px, 3.4vw, 48px) / 1.04 / -0.022em / 600（衬线；CJK 上限 48px，
+      再大在 5 栏里必断词）
+    t-h1: 28px / 1.15 / -0.02em / 600
+    t-h2: 20px / 1.3 / -0.014em / 600
+    t-h3: 15px / 1.4 / -0.006em / 600
+    t-lead: 15.5px / 1.65 / -0.004em
+    t-body: 14.5px / 1.72
+    t-small: 13px / 1.55
+    t-meta: 11.5px / 1.45 / 0.005em
+    t-num: mono + tabular-nums（数字列/耗时/计数/单号）
   data: 数字列一律 tabular-nums（表格计数/耗时/百分比），单号走 mono
-  links: 回答内行内链接 = link 蓝 + underline underline-offset-2（america.gov
-    签名；不用 primary、不用默认无下划线）
+  links: 回答内行内链接 = link 蓝 + underline underline-offset-2
 
 rounded:
-  sm: 6px      # chip / 徽章内
-  md: 10px     # 按钮 / 输入
-  lg: 16px     # 浮层契约档（Dialog/composer；实现=--radius 0.75rem 阶梯的 xl 档 ≈16.8px）
+  sm: 3px      # 记号/chip 内（--radius 0.5rem 阶梯）
+  md: 6.4px    # 按钮/输入（md 档）
+  lg: 8px      # --radius 基准（卡片/输入面）
+  xl: 11.2px   # 浮层（Dialog/composer）
   pill: 9999px # 建议 chips / 徽章
 
 spacing:
@@ -314,3 +313,105 @@ workflow（P34-3 落库：前端任务标准动作，六步回路）:
   1. 空态（BlurText 逐字 + 氛围光——全站唯一光斑位）。
   2. 首答完成（操作条收束浮现 + 追问 chips stagger，一次性节奏）。
   3. 办理成功回执（图标 spring 落定 + 凭证号 mono 升格「签收章」）。
+
+---
+
+## P37 结构重构与方向拍板（2026-10-03）
+
+### 起因：五轮换肤仍「普通」的两个真因
+
+用户判词从 P16 的「太普通」到 P35 的「整体还是差不多」——P16→P18→P20→P25→P34
+五轮，每轮都换了一次情绪层（AI 青 → Claude 暖编辑 → 陶土 operate →
+机构蓝 america.gov → 纯白骨架），判词没变。P37 定位到两条真因，一条工程、
+一条设计：
+
+1. **工程（观察链断了）**：dev server 与 prod build 共用 `.next`，`next build`
+   会把 dev 的客户端 chunk 覆盖成 404 → 浏览器零 hydration → 所有动效停在
+   首帧（实测方印 `opacity:0;transform:scale(.85)`、标语 24 个 span 全
+   `blur(10px);opacity:0`）。**P34 里最花代价的「高级感三件套」在用户屏幕上
+   渲染出来是一片空白。** 该坑 P19/P20 已记过两次，本次第三次复发。
+   修法：`distDir` 按 `NEXT_DIST_DIR` 分流，dev 走 `.next-dev`（已落地）。
+2. **设计（结构而非皮肤）**：旧契约的 scale 是「display 48 断崖 + chrome 11~16
+   紧档」——**只有两级**，二级以上全是空白；加一个 primary 主色、纯白铺满、
+   默认圆角卡，产出必然是「干净但普通」。再叠加 `mode: operate` 的
+   「工具消失在任务里」，**契约本身在系统性压制惊艳**（P34 已识别此矛盾，
+   但只把 variance 4→6，内容密度一点没动）。
+
+### 已落地的结构改动（三方向共享，不属于候选）
+
+- **空态**：居中方印 + 标语 + 大片死白的「LLM 聊天默认脸」→ **左右两栏工作台**。
+  左栏=身份行（方印 + `15 篇制度文档 · 60 段索引`，数字走 mono）+ 左对齐 48px
+  衬线主张 + 办理链路说明 + 信任行；右栏=「可以直接办的事」+ 三行真实任务形态
+  （**发丝线分行，不用三张同形圆角卡**——同形卡+统一阴影是负参照点名的模板感）。
+  空态容器放宽到 `max-w-5xl`（对话态仍 768px），否则 5 栏装不下 48px 中文。
+- **字阶 2 档 → 6 档**：`.t-display / t-h1 / t-h2 / t-h3 / t-lead / t-body /
+  t-small / t-meta / t-num`，中段（20px h2 / 15px h3）必须真的出现在内容里。
+  CJK 警戒：display 上限 48px、负字距不小于 -0.022em（再大在 5 栏里必断词）。
+- **引用升格为溯源块**：一排灰药丸 → 「出处 N」+ 发丝线分行 + `[n]` 用强调色 +
+  发文部门右对齐 + `doc_id` mono。**这是 gewu 真正独有的内容件**（P34 判词
+  「内容驱动是主战场」），不该继续以三行小灰块出现。
+- **两侧收口**：路由徽章从灰药丸降为安静的语义标签；助手消息去掉「AI 头像方块」，
+  改页边小圆点（编辑式处理）；对话态消息 `justify-end` 贴着 composer 堆叠，
+  消灭答案与输入框之间的中段死白；环境光雾退役（在墨白方向里读作灰脏点）。
+- **动作色 / 强调色分离**：`--primary`（动作）与 `--seal`（强调：引用编号、
+  区块记号、激活态）职责分开——这是「颜色太平」的直接解药。
+
+### 三个候选方向（同一结构，只换材质与色）
+
+| | A 墨白 | B 深空 | C 瑞士 |
+|---|---|---|---|
+| 气质 | 印刷精度、档案馆 | 暗色优先、科技 | 包豪斯、最大对比 |
+| 画布 / 墨 | `#ffffff` / `#0d1117` | `#05070b`(暗) / `#e8eefb` | `#ffffff` / `#000000` |
+| primary | `#131a24` 近黑 | `#5b8cff` 电蓝 | `#000000` |
+| seal | `#b3261e` 印章朱 | `#37d6c0` 青 | `#e8480d` 橙 |
+| 圆角 | 0.5rem | 0.875rem | 0 |
+| 大标题 | 衬线（Noto Serif SC） | 衬线 | **sans**（瑞士式，字距 -0.032em） |
+
+截图存档 `docs/runbooks/assets/p37/`（亮暗 × 三方向 + 改造前对照）。
+
+### 拍板结果与收尾（10-03 用户拍板 A 墨白）
+
+- [x] 拍板 **A 墨白**；`colors` / `typography` / `rounded` 三段已回写为真值
+- [x] 删除落选方向（B 深空 / C 瑞士）token 块 + `components/design-direction.tsx`
+      + layout 引用；对比截图留在 `docs/runbooks/assets/p37/`
+- [ ] 工具页（console/memory/admin）与 login 按墨白过一遍（**待产品讨论**：
+      这些页面哪些该留、哪些是开发者调试面，见下）
+- [ ] 提示词/演示材料里的旧截图更新
+
+### 待讨论：其他页面的产品定位
+
+chat 页已完成墨白改造；`/console`、`/memory`、`/admin`、`/login` 仍是旧 token
+（会随 token 自动变色，但未按新方向精修）。在精修之前需要先回答产品问题：
+这些页面各自服务谁（终端用户 / 评审演示 / 开发者调试）、哪些是必需的。
+
+### P37 动效语言（10-03 追加，用户反馈「墨白太单调，要特效和动画」）
+
+**诊断修正**：清掉色彩噪音后页面读起来是「单调」而非「精致」——因为没有任何东西
+接管注意力。解药不是把颜色加回来，而是**给状态变化配上可见的演出**。判据沿用
+P34 Q6 三问（为什么动 / 注意力在哪 / 多久），但补一条更硬的门槛：
+
+> **动效必须长在语义上。** 这套墨白方向的本体是「公文 · 印章 · 纸」，所以动效
+> 从这三样里长出来（落章 / 落笔 / 墨点 / 墨染），而不是撒一层通用发光粒子。
+> P16 的预制动效组件库路线（Aurora/BorderBeam/ClickSpark）仍然不回潮。
+
+| 名称 | 触发 | 参数 | 语义 |
+|---|---|---|---|
+| **落章** | 办理成功回执 | 420ms expo-out，scale 1.9→1、blur 6→0、rotate −18°→−8°；压痕环 550ms | 印章 = 业务闭环的签收 |
+| **溯源逐条落定** | 答案完成、出处块出现 | 行入场 360ms + 发丝线 scaleX 0→1，70ms 错峰 | 引用可溯源，一行一行落定 |
+| **活体轨迹** | 检索/研究进行中 | 轨迹常开；步骤 320ms 入场，最新一步的圆点 1.3s 呼吸；完成收拢成一行 | gewu 独有的「看得见的 agent」 |
+| **墨点呼吸** | 任意等待态（状态行/页边标记） | 1.3–1.4s 循环，scale 1→1.5→1、opacity 0.5→1→0.5 | 思考有生命感，替代转圈 |
+| **落笔** | 任务行 hover | 发丝线 scaleX 0→1，200ms expo-out，origin-left | 可点性的书写感 |
+| **墨染** | 主题切换 | View Transitions `clip-path: circle()` 从按钮扩散，480ms expo-out | 墨滴落纸 |
+| **推挤** | 新消息入场 | `layout="position"`，旧消息平滑让位 | 空间连续性 |
+
+**两条工程纪律**：
+1. 全部接 `prefers-reduced-motion` 降级（`useReducedMotion` / `@media`），开启减弱动效即静默——动效是增强，不是信息载体。
+2. **动效必须可评审**：`make design-review` 只能出静态图，动效在时间维度上，
+   截图天然评不了。P37 补上 `scripts/record-motion.mjs`（CDP `Page.startScreencast`
+   抓帧）+ `scripts/motion-gif.py`（合成 GIF 与逐帧带），并提供 `app/motion-lab`
+   （临时评审页：真实组件挂上去可反复重播）。留档见 `docs/runbooks/assets/p37/`。
+
+**未做（明确挂账）**：路由级 View Transitions。App Router 的路由更新是异步的，
+直接包 `startViewTransition` 会先闪一帧旧内容；框架级集成要开 React 实验特性，
+成本与风险不成比例。当前路由只做 200ms 上浮淡入（`components/route-fade.tsx`），
+等 Next/React 稳定支持后升级。

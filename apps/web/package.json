@@ -3,7 +3,7 @@
   "private": true,
   "version": "0.1.0",
   "scripts": {
-    "dev": "NODE_OPTIONS=--localstorage-file=/tmp/gewu-web-ls.json next dev -p 3100",
+    "dev": "NEXT_DIST_DIR=.next-dev NODE_OPTIONS=--localstorage-file=/tmp/gewu-web-ls.json next dev -p 3100",
     "build": "next build",
     "start": "next start -p 3100"
   },

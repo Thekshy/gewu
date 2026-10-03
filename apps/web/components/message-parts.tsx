@@ -1,14 +1,15 @@
 "use client";
 
 import { useState } from "react";
-import { motion } from "motion/react";
+import { motion, useReducedMotion } from "motion/react";
+
+/** P34 起标杆实测的交互曲线（DESIGN.md motion）：120-180ms 档配陡 ease-out。 */
+const EASE_OUT_EXPO = [0.16, 1, 0.3, 1] as const;
 import {
-  BookMarked,
   Check,
   CheckCircle2,
   ChevronRight,
   Copy,
-  Loader2,
   ThumbsDown,
   ThumbsUp,
   XCircle,
@@ -16,6 +17,7 @@ import {
 import type { ActionResult, Citation, DoneReason, PendingAction, Step } from "@/lib/api";
 import { DONE_BADGE, ROUTE_LABEL, SLOT_LABEL } from "@/lib/labels";
 import { cn } from "@/lib/utils";
+import ReceiptStamp from "@/components/receipt-stamp";
 import SourcesDialog from "@/components/sources-dialog";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -32,37 +34,40 @@ import {
   CollapsibleContent,
   CollapsibleTrigger,
 } from "@/components/ui/collapsible";
-import {
-  Tooltip,
-  TooltipContent,
-  TooltipTrigger,
-} from "@/components/ui/tooltip";
 
 /** 聊天主页的消息积木：路由徽章 / 研究过程 / 槽位卡 /
  * 确认卡 / 回执 / 引用 / 消息操作条 / 结束元信息。纯展示不含数据流——
  * 反馈上报由页面层经 onFeedback 回调注入（P25）。 */
 
-const ROUTE_VARIANT: Record<string, "default" | "secondary" | "outline" | "destructive"> = {
-  factual: "secondary",
-  research: "default",
-  refusal: "outline",
-  transaction: "secondary",
-  hybrid: "default",
-};
-
 export function RouteBadge({ route, reason }: { route: string; reason?: string }) {
+  // P37：路由徽章从「灰药丸」降为安静的语义标记（seal 圆点 + 小字）——
+  // 药丸形状是模板感的主要来源之一（DESIGN.md 负参照 tell#4/#5）。
   return (
-    <Badge variant={ROUTE_VARIANT[route] ?? "secondary"} title={reason}>
+    <span title={reason} className="t-meta font-medium text-muted-foreground">
       {ROUTE_LABEL[route] ?? route}
-    </Badge>
+    </span>
   );
 }
 
 export function StatusLine({ text }: { text: string }) {
+  // P37 活体轨迹之一：状态行不再转圈，而是一枚呼吸墨点 + 文案切换淡入——
+  // 「正在检索知识库…」这类中间态本身是 agent 工作的可见证据，值得有生命感。
   return (
-    <p className="flex items-center gap-2 text-sm text-muted-foreground">
-      <Loader2 className="size-3.5 animate-spin" aria-hidden />
-      {text}
+    <p className="t-small flex items-center gap-2 text-muted-foreground" role="status">
+      <motion.span
+        aria-hidden
+        className="size-1.5 shrink-0 rounded-full bg-seal"
+        animate={{ scale: [1, 1.5, 1], opacity: [0.5, 1, 0.5] }}
+        transition={{ duration: 1.3, repeat: Infinity, ease: "easeInOut" }}
+      />
+      <motion.span
+        key={text}
+        initial={{ opacity: 0, y: 2 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ duration: 0.22, ease: EASE_OUT_EXPO }}
+      >
+        {text}
+      </motion.span>
     </p>
   );
 }
@@ -86,28 +91,81 @@ export function TypingDots({ label = "思考中" }: { label?: string }) {
   );
 }
 
-export function ResearchTrace({ steps, defaultOpen }: { steps: Step[]; defaultOpen: boolean }) {
-  if (steps.length === 0) return null;
+/** 轨迹步骤列表：逐步点亮的圆点 + 发丝线；进行中最后一条呼吸。 */
+function StepList({ steps, live, reduce }: { steps: Step[]; live: boolean; reduce: boolean }) {
   return (
-    <Collapsible defaultOpen={defaultOpen}>
-      <CollapsibleTrigger className="group/trace flex items-center gap-1 rounded-md text-xs font-medium text-muted-foreground transition-colors hover:text-foreground">
-        <ChevronRight className="size-3.5 transition-transform group-data-[panel-open]/trace:rotate-90" aria-hidden />
-        研究过程 · {steps.length} 个子问题
-      </CollapsibleTrigger>
-      <CollapsibleContent>
-        <ol className="mt-1.5 space-y-1 border-l pl-4 text-sm">
-          {steps.map((s) => (
-            <li key={s.index} className="relative">
-              <span className="absolute top-[0.55em] -left-[21px] size-1.5 rounded-full bg-muted-foreground/40" aria-hidden />
-              <span className="font-medium">{s.subquestion}</span>
-              {s.sources.length > 0 && (
-                <span className="block text-xs text-muted-foreground">↳ {s.sources.join("、")}</span>
-              )}
-            </li>
-          ))}
-        </ol>
-      </CollapsibleContent>
-    </Collapsible>
+    <ol className="mt-2 space-y-1.5 border-l border-border pl-4">
+      {steps.map((s, i) => {
+        const isLast = i === steps.length - 1;
+        return (
+          <motion.li
+            key={s.index}
+            initial={reduce ? false : { opacity: 0, y: 4 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.32, ease: EASE_OUT_EXPO, delay: reduce ? 0 : 0.04 }}
+            className="relative"
+          >
+            {live && isLast ? (
+              <motion.span
+                aria-hidden
+                className="absolute top-[0.5em] -left-[21px] size-1.5 rounded-full bg-seal"
+                animate={{ scale: [1, 1.5, 1], opacity: [0.5, 1, 0.5] }}
+                transition={{ duration: 1.3, repeat: Infinity, ease: "easeInOut" }}
+              />
+            ) : (
+              <motion.span
+                aria-hidden
+                initial={reduce ? false : { scale: 0.4, backgroundColor: "rgba(0,0,0,0)" }}
+                animate={{ scale: 1, backgroundColor: "var(--seal)" }}
+                transition={{ duration: 0.3, ease: EASE_OUT_EXPO }}
+                className="absolute top-[0.55em] -left-[21px] size-1.5 rounded-full"
+              />
+            )}
+            <span className="t-small font-medium">{s.subquestion}</span>
+            {s.sources.length > 0 && (
+              <span className="t-meta block text-muted-foreground">↳ {s.sources.join("、")}</span>
+            )}
+          </motion.li>
+        );
+      })}
+    </ol>
+  );
+}
+
+export function ResearchTrace({ steps, live }: { steps: Step[]; live: boolean }) {
+  const reduce = !!useReducedMotion();
+  if (steps.length === 0) return null;
+  // 完成态：收拢成一行摘要，需要复核时再展开（信息不丢，平时不占位）
+  if (!live) {
+    return (
+      <Collapsible>
+        <CollapsibleTrigger className="group/trace t-meta flex items-center gap-1.5 font-medium text-muted-foreground transition-colors hover:text-foreground">
+          <ChevronRight
+            className="size-3.5 transition-transform group-data-[panel-open]/trace:rotate-90"
+            aria-hidden
+          />
+          研究过程 · {steps.length} 个子问题
+        </CollapsibleTrigger>
+        <CollapsibleContent>
+          <StepList steps={steps} live={false} reduce={reduce} />
+        </CollapsibleContent>
+      </Collapsible>
+    );
+  }
+  // 进行中：轨迹常开、逐步点亮——这是 gewu 独有的「看得见的 agent」
+  return (
+    <div className="rule-t pt-2.5">
+      <p className="t-meta flex items-center gap-2 font-semibold text-muted-foreground">
+        <motion.span
+          aria-hidden
+          className="size-1.5 rounded-full bg-seal"
+          animate={{ scale: [1, 1.5, 1], opacity: [0.5, 1, 0.5] }}
+          transition={{ duration: 1.3, repeat: Infinity, ease: "easeInOut" }}
+        />
+        正在研究
+      </p>
+      <StepList steps={steps} live reduce={reduce} />
+    </div>
   );
 }
 
@@ -168,6 +226,7 @@ export function ConfirmCard({
 
 export function ReceiptAlert({ result }: { result: ActionResult }) {
   const ok = result.success;
+  const reduce = useReducedMotion();
   if (!ok) {
     return (
       <Alert variant="destructive" className="items-center py-2">
@@ -180,7 +239,7 @@ export function ReceiptAlert({ result }: { result: ActionResult }) {
   // 情绪峰值——图标 spring 落定 + 凭证号 mono 独立行升格（数字政务「签收章」）；
   // 仍是单层 Alert，不嵌套卡。
   return (
-    <Alert className="items-center gap-3 py-2.5">
+    <Alert className="relative items-center gap-3 overflow-hidden py-2.5">
       <motion.span
         initial={{ scale: 0.4, opacity: 0 }}
         animate={{ scale: 1, opacity: 1 }}
@@ -191,33 +250,64 @@ export function ReceiptAlert({ result }: { result: ActionResult }) {
       <div className="min-w-0 flex-1">
         <span className="text-sm text-foreground">{result.message}</span>
         {result.receipt && (
-          <span className="mt-0.5 block font-mono text-xs tracking-wide text-primary">
+          <motion.span
+            initial={reduce ? false : { opacity: 0, y: 4 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.34, ease: EASE_OUT_EXPO, delay: 0.26 }}
+            className="t-num mt-0.5 block text-xs tracking-wide text-primary"
+          >
             凭证号 {result.receipt}
-          </span>
+          </motion.span>
         )}
       </div>
+      {result.receipt && <ReceiptStamp />}
     </Alert>
   );
 }
 
 export function CitationsRow({ citations, withSource }: { citations: Citation[]; withSource?: boolean }) {
+  const reduce = useReducedMotion(); // 必须在提前返回之前调用（hooks 规则）
   if (citations.length === 0) return null;
+  // P37：引用从「一排灰药丸」升格为溯源块——编号用强调色、条目用发丝线
+  // 分行、发文部门与 doc_id 各占一列。这是 gewu 真正独有的内容件，
+  // 不该是三行小灰块（P34 判词：内容驱动是主战场）。
   return (
-    <div className="flex flex-wrap items-center gap-1.5">
-      <span className="mr-1 inline-flex items-center gap-1 text-xs text-muted-foreground">
-        <BookMarked className="size-3.5" aria-hidden />
-        引用来源
-      </span>
-      {citations.map((c) => (
-        <Tooltip key={c.n}>
-          <TooltipTrigger render={
-            <Badge variant="secondary" className="max-w-72 truncate font-normal">
-              [{c.n}] {c.title}{withSource ? ` · ${c.source}` : ""}
-            </Badge>
-          } />
-          <TooltipContent className="font-mono text-xs">{c.doc_id}</TooltipContent>
-        </Tooltip>
-      ))}
+    <div className="rule-t mt-1.5 pt-3">
+      <div className="mb-1.5 flex items-baseline gap-2">
+        <span className="t-meta font-semibold text-muted-foreground">出处</span>
+        <span className="t-num text-[0.6875rem] text-muted-foreground/70">
+          {citations.length}
+        </span>
+      </div>
+      <ol>
+        {citations.map((c, i) => (
+          // P37「溯源逐条落定」：答案给出后，出处一行一行落定，分隔线从左画出——
+          // 让「引用可溯源」这个主张有自己的节奏，而不是一次性铺满。
+          <motion.li
+            key={c.n}
+            initial={reduce ? false : { opacity: 0, y: 5 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ duration: 0.36, ease: EASE_OUT_EXPO, delay: i * 0.07 }}
+            className="relative flex items-baseline gap-2.5 py-1.5"
+          >
+            <span className="t-num shrink-0 text-[0.6875rem] font-semibold text-seal">[{c.n}]</span>
+            <span className="t-small min-w-0 flex-1 text-foreground">{c.title}</span>
+            {withSource && (
+              <span className="t-meta hidden shrink-0 text-muted-foreground sm:inline">{c.source}</span>
+            )}
+            <span className="t-num hidden shrink-0 text-[0.625rem] text-muted-foreground/60 lg:inline">
+              {c.doc_id}
+            </span>
+            <motion.span
+              aria-hidden
+              initial={reduce ? false : { scaleX: 0 }}
+              animate={{ scaleX: 1 }}
+              transition={{ duration: 0.42, ease: EASE_OUT_EXPO, delay: i * 0.07 }}
+              className="absolute inset-x-0 bottom-0 h-px origin-left bg-border"
+            />
+          </motion.li>
+        ))}
+      </ol>
     </div>
   );
 }

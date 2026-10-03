@@ -46,11 +46,11 @@ if ! curl -sf --noproxy '*' -o /dev/null "$BASE"; then
   fi
 fi
 
-# --- impeccable detect 五页（exit 0=clean / 2=有 finding / 1=扫描失败）---
+# --- impeccable detect 六页（exit 0=clean / 2=有 finding / 1=扫描失败）---
 # 必须在 apps/web 下执行：检测器从 cwd 读取 .impeccable/config.json 白名单
 # P21 起 /login 入检测清单（登录/注册表单页）；P22 起 /memory、P23 起 /admin 入清单
-# P31-2 起 /compare 随 compare 页退役出清单
-for path in "" "/console" "/login" "/memory" "/admin"; do
+# P31-2 起 /compare 随 compare 页退役出清单；P37 起 /records 入清单
+for path in "" "/records" "/console" "/login" "/memory" "/admin"; do
   name=${path:-/}
   if (cd "$WEB" && npx -y impeccable detect "$BASE$path" >/tmp/gewu-design-lint-detect.log 2>&1); then
     echo "[design-lint] PASS detect $name"
@@ -65,9 +65,9 @@ done
 echo "[design-lint] grep 规则：衬线域 / h-screen / 冷色"
 
 serif_bad=$(grep -rl "font-display" "$WEB/app" "$WEB/components" --include="*.tsx" --include="*.ts" 2>/dev/null \
-  | grep -vE "app/layout\.tsx$|app/page\.tsx$|components/answer\.tsx$|components/app-header\.tsx$")
+  | grep -vE "app/layout\.tsx$|app/page\.tsx$|components/answer\.tsx$|components/app-header\.tsx$|components/receipt-stamp\.tsx$")
 if [ -n "$serif_bad" ]; then
-  echo "FAIL 衬线域泄漏：font-display 只允许 layout.tsx(品牌)/page.tsx(空态+侧栏品牌)/answer.tsx(内容时刻)/app-header.tsx(工具页顶栏品牌,P35 载体搬家)"
+  echo "FAIL 衬线域泄漏：font-display 只允许 layout.tsx(品牌)/page.tsx(空态+侧栏品牌)/answer.tsx(内容时刻)/app-header.tsx(工具页顶栏品牌,P35)/receipt-stamp.tsx(P37 印章,单独成文件以精确白名单)"
   echo "$serif_bad"
   fail=1
 fi
