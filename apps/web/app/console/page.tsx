@@ -38,6 +38,8 @@ import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@
 // 演示控制台：业务台账（交易真实落库的证据 + 演示重置）/ 检索调试（不经 LLM 直接看
 // 混合检索命中）/ 语料列表 / 服务健康与预算。全部只读既有 API，零后端改动。
 
+type TabKey = "evidence" | "runtime";
+
 function Panel({
   title,
   note,
@@ -356,39 +358,108 @@ function Corpus() {
 export default function Console() {
   const { user } = useRequireUser(); // P21：登录守卫；台账本人视图，admin 全量+重置
   const [health, setHealth] = useState<HealthInfo | null>(null);
+  const [tab, setTab] = useState<TabKey>("evidence");
+
   useEffect(() => {
     fetchHealth().then(setHealth);
   }, []);
 
+  // P37 受众拆分：这一页原来把「给人看的证据」和「给开发看的运行指标」平铺在
+  // 同一个网格里，于是第一次点进来的人分不清该看什么。按意图分两栏：
+  //   证据 = 办理真落库 + 检索命中（求职展示最该被看到的东西）
+  //   运行 = 服务健康 + 语料清单（引擎指标与数据口径）
+  const tabs: { key: TabKey; label: string; hint: string }[] = [
+    { key: "evidence", label: "证据", hint: "办理真实落库 · 检索命中" },
+    { key: "runtime", label: "运行", hint: "服务健康 · 语料清单" },
+  ];
+  const activeIndex = tabs.findIndex((t) => t.key === tab);
+
+  function onTabKeyDown(e: React.KeyboardEvent) {
+    if (e.key !== "ArrowLeft" && e.key !== "ArrowRight") return;
+    e.preventDefault();
+    const dir = e.key === "ArrowRight" ? 1 : -1;
+    const next = tabs[(activeIndex + dir + tabs.length) % tabs.length];
+    setTab(next.key);
+  }
+
   return (
     <main className="h-full overflow-y-auto">
-      <div className="mx-auto w-full max-w-6xl space-y-5 px-4 py-6">
+      <div className="mx-auto w-full max-w-5xl px-4 py-10">
         <header>
-          <h1 className="text-xl font-semibold">演示控制台</h1>
-          <p className="text-sm text-muted-foreground">
-            业务台账 · 检索调试 · 语料 · 服务健康——对话页之外的全部调试入口
+          <h1 className="t-h1">演示控制台</h1>
+          <p className="t-lead mt-2.5 max-w-lg text-muted-foreground">
+            对话页之外的两类入口：证据给人看，运行给开发看。
           </p>
         </header>
 
-        <div className="grid items-start gap-4 md:grid-cols-2">
-          <Panel title="服务健康">
-            <Health health={health} />
-          </Panel>
-          <Panel
-            title="业务台账"
-            note="办理确认后真实落库（PG）；登录者本人视图，管理员可看全部并重置"
-          >
-            <Ledger admin={user?.role === "admin"} />
-          </Panel>
-          <Panel title="检索调试" note="直接调 /api/search：BM25 + 向量 RRF 混合命中，不经 LLM">
-            <SearchBench />
-          </Panel>
-          <Panel title="语料" note="GET /api/docs：已入库的虚构「钱塘大学」政策文档">
-            <Corpus />
-          </Panel>
+        <div
+          role="tablist"
+          aria-label="控制台分区"
+          onKeyDown={onTabKeyDown}
+          className="rule-b mt-8 flex gap-6"
+        >
+          {tabs.map((t) => {
+            const active = t.key === tab;
+            return (
+              <button
+                key={t.key}
+                role="tab"
+                id={`console-tab-${t.key}`}
+                aria-selected={active}
+                aria-controls={`console-panel-${t.key}`}
+                tabIndex={active ? 0 : -1}
+                onClick={() => setTab(t.key)}
+                className={
+                  "group relative flex items-baseline gap-2 pb-2.5 text-left transition-colors " +
+                  (active ? "text-foreground" : "text-muted-foreground hover:text-foreground")
+                }
+              >
+                <span className="t-h3">{t.label}</span>
+                <span className="t-meta text-muted-foreground/80">{t.hint}</span>
+                {/* 激活态的墨线；hover 时也画出来（落笔） */}
+                <span
+                  aria-hidden
+                  className={
+                    "pointer-events-none absolute inset-x-0 -bottom-px h-0.5 origin-left bg-seal transition-transform duration-200 ease-out-expo " +
+                    (active ? "scale-x-100" : "scale-x-0 group-hover:scale-x-100")
+                  }
+                />
+              </button>
+            );
+          })}
         </div>
 
-        <footer className="pb-4 text-center text-[11px] text-muted-foreground">
+        <div
+          role="tabpanel"
+          id={`console-panel-${tab}`}
+          aria-labelledby={`console-tab-${tab}`}
+          className="mt-6 grid items-start gap-4 md:grid-cols-2"
+        >
+          {tab === "evidence" ? (
+            <>
+              <Panel
+                title="业务台账"
+                note="办理确认后真实落库（PG）；登录者本人视图，管理员可看全部并重置"
+              >
+                <Ledger admin={user?.role === "admin"} />
+              </Panel>
+              <Panel title="检索命中" note="直接调 /api/search：BM25 + 向量 RRF 混合命中，不经 LLM">
+                <SearchBench />
+              </Panel>
+            </>
+          ) : (
+            <>
+              <Panel title="服务健康">
+                <Health health={health} />
+              </Panel>
+              <Panel title="语料" note="GET /api/docs：已入库的虚构「钱塘大学」政策文档">
+                <Corpus />
+              </Panel>
+            </>
+          )}
+        </div>
+
+        <footer className="t-meta pb-4 pt-10 text-center text-muted-foreground/80">
           全部数据来自只读/调试 API · 格物 Gewu 求职展示项目
         </footer>
       </div>

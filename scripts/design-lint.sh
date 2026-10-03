@@ -50,8 +50,32 @@ fi
 # 必须在 apps/web 下执行：检测器从 cwd 读取 .impeccable/config.json 白名单
 # P21 起 /login 入检测清单（登录/注册表单页）；P22 起 /memory、P23 起 /admin 入清单
 # P31-2 起 /compare 随 compare 页退役出清单；P37 起 /records 入清单
+#
+# P37 补：**内容标记断言**。detect 是不可带登录态的（CLI 无 cookie 选项），若某页
+# 在无会话下只渲染骨架，它照样 exit 0 —— 那就是「空过」而不是「通过」，会把没评审
+# 当成评审过。故每页配一个只属于该页正文的标记，抓 SSR HTML 验一次：缺失即明确
+# 标为 SKIP（不改退出码，但计入骨架数并在末尾显式提示，避免谎报覆盖）。
+marker_for() {
+  case "$1" in
+    "") echo "问校园政策" ;;
+    "/login") echo "登录格物" ;;
+    "/records") echo "这里是你确认过的办理结果" ;;
+    "/memory") echo "格物记住的事" ;;
+    "/console") echo "演示控制台" ;;
+    "/admin") echo "管理后台" ;;
+    *) echo "" ;;
+  esac
+}
+
+skeleton=0
 for path in "" "/records" "/console" "/login" "/memory" "/admin"; do
   name=${path:-/}
+  marker="$(marker_for "$path")"
+  if ! curl -s --noproxy '*' "$BASE$path" | grep -qF "$marker"; then
+    echo "[design-lint] SKIP detect ${name}：未登录态只拿到骨架，本次未真正评审（标记「${marker}」缺失）"
+    skeleton=$((skeleton + 1))
+    continue
+  fi
   if (cd "$WEB" && npx -y impeccable detect "$BASE$path" >/tmp/gewu-design-lint-detect.log 2>&1); then
     echo "[design-lint] PASS detect $name"
   else
@@ -60,6 +84,10 @@ for path in "" "/records" "/console" "/login" "/memory" "/admin"; do
     fail=1
   fi
 done
+
+if [ "$skeleton" != "0" ]; then
+  echo "[design-lint] 注意：${skeleton} 页只扫到骨架（见上 SKIP）——需要覆盖时给检测器带登录态，或把该页守卫改成不早退"
+fi
 
 # --- grep 规则 ---
 echo "[design-lint] grep 规则：衬线域 / h-screen / 冷色"

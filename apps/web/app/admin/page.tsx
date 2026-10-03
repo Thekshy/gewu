@@ -59,7 +59,6 @@ export default function AdminPage() {
   const [editingLimit, setEditingLimit] = useState<string | null>(null);
   const [limitDraft, setLimitDraft] = useState("");
   // 会话巡查过滤
-  const [sessKind, setSessKind] = useState<string>("all");
   const [sessQ, setSessQ] = useState("");
   // 邀请码发放
   const [inviteUses, setInviteUses] = useState("1");
@@ -93,11 +92,11 @@ export default function AdminPage() {
 
   const refreshSessions = useCallback(async () => {
     try {
-      setSessions(await listAdminSessions(sessKind === "all" ? undefined : sessKind, sessQ || undefined));
+      setSessions(await listAdminSessions(undefined, sessQ || undefined));
     } catch (e) {
       setErr(e instanceof Error ? e.message : String(e));
     }
-  }, [sessKind, sessQ]);
+  }, [sessQ]);
 
   useEffect(() => {
     if (user?.role === "admin") void refreshSessions();
@@ -158,10 +157,23 @@ export default function AdminPage() {
   }
 
   if (!user || user.role !== "admin") {
+    // P37：守卫早退也要保留页面身份（标题 + 版心），而不是把整页换成一个居中转圈——
+    // 一来等待态有上下文，二来无会话渲染时 SSR 仍带得出页面正文标记，design-lint
+    // 的内容断言才认得出这是「管理后台」而不是骨架（否则该页 detect 会空过）。
     return (
-      <main className="flex h-full items-center justify-center text-sm text-muted-foreground" role="status">
-        <Loader2 className="mr-2 size-4 animate-spin" aria-hidden />
-        正在校验管理员身份…
+      <main className="h-full overflow-y-auto">
+        <div className="mx-auto w-full max-w-5xl px-4 py-10">
+          <header>
+            <h1 className="t-h1">管理后台</h1>
+            <p className="t-lead mt-2.5 text-muted-foreground">
+              用户与邀请码、会话巡查、token 用量与限额——内测管理一页承载
+            </p>
+          </header>
+          <p className="t-small mt-8 flex items-center gap-2 text-muted-foreground" role="status">
+            <Loader2 className="size-3.5 animate-spin" aria-hidden />
+            正在校验管理员身份…
+          </p>
+        </div>
       </main>
     );
   }
@@ -438,15 +450,6 @@ export default function AdminPage() {
             <h2 className="text-sm font-semibold">会话巡查</h2>
             <span className="text-xs text-muted-foreground">列表级巡查（内容级不开放）；删除连带清历史</span>
             <span className="ml-auto flex items-center gap-2">
-              <Select value={sessKind} onValueChange={(v) => setSessKind(v ?? "all")}>
-                <SelectTrigger className="h-8 w-28 text-xs" aria-label="会话类型过滤">
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="all">全部类型</SelectItem>
-                  <SelectItem value="chat">对话</SelectItem>
-                </SelectContent>
-              </Select>
               <Input
                 value={sessQ}
                 onChange={(e) => setSessQ(e.target.value)}
@@ -467,7 +470,6 @@ export default function AdminPage() {
                 <TableRow>
                   <TableHead>用户</TableHead>
                   <TableHead>标题</TableHead>
-                  <TableHead className="w-24">类型</TableHead>
                   <TableHead className="w-36">最近活动</TableHead>
                   <TableHead className="w-20 text-right">操作</TableHead>
                 </TableRow>
@@ -478,9 +480,6 @@ export default function AdminPage() {
                     <TableCell className="text-xs">{s.user}</TableCell>
                     <TableCell className="max-w-60 truncate text-sm">
                       {s.title || "（未命名）"}
-                    </TableCell>
-                    <TableCell className="text-xs text-muted-foreground">
-                      {s.kind === "chat" ? "对话" : "对比"}
                     </TableCell>
                     <TableCell className="text-xs tabular-nums">
                       {s.updated_at.slice(0, 16).replace("T", " ")}
