@@ -18,10 +18,13 @@
 | `RETRIEVAL_K` / `RETRIEVAL_POOL_N` | 6 / 20 | 检索返回数 / 双路候选池（P15 进 Settings） |
 | `RRF_K` / `RRF_VECTOR_WEIGHT` / `RRF_KEYWORD_WEIGHT` | 60 / 0.7 / 0.3 | 加权 RRF（P15） |
 | `RERANK_MODE` / `RERANK_THRESHOLD` | on / 2.0 | LLM 精排与阈值（全滤空自动退化） |
-| `QUERY_REWRITE` | on | 多轮指代消解补全 |
 | `CHUNK_STRATEGY` / `CHUNK_PARENT_LIMIT` / `CHUNK_CHILD_LIMIT` / `CHUNK_OVERLAP` | auto / 800 / 200 / 40 | 入库切片策略链（[04](04-rag-retrieval.md)） |
 | `RATE_LIMIT_PER_MINUTE` | 600 | 限流 |
-| `COOKIE_SECURE` / `CORS_ALLOW_ORIGINS` | false / 空 | https 部署开启 cookie Secure；跨域白名单（空=仅同源，P21 收紧） |
+| `COOKIE_SECURE` / `CORS_ORIGINS` | false / 空 | https 部署开启 cookie Secure；跨域白名单（空=仅同源，P21 收紧） |
+| `IQS_API_KEY` / `WEB_SEARCH_DAILY_LIMIT` | 空 / 200 | 联网检索（P26）：key 空=整链关闭；按次计费配每日上限闸 |
+| `STREAM_ANSWER` | 1 | agent 主循环答案流式（P30；=0 紧急回退单帧全文） |
+| `MEMORY_CONSOLIDATE` | on | 记忆固化后台抽取（评测时 off 隔离，[10](10-evaluation.md)） |
+| `API_DOCS` | false | FastAPI 框架文档面 `/docs` 等（P36：缺省关闭收敛暴露面，本地调试开） |
 
 **历史教训**（P14-1 撞出）：配置回填链必须「进程环境变量 > .env 已读入值 > 缺省」三段齐全——只查进程变量会把 .env 值静默盖回缺省。
 
@@ -29,7 +32,7 @@
 
 四道，从外到内：
 
-1. **限流**（`gewu/middleware.py`）：按 IP 固定窗口（缺省 600/分钟；`X-Forwarded-For` 首段为键，反代场景可用），超限 429；健康检查豁免（探活语义）。中间件顺序（外→内）：限流 → trace-id → CORS 白名单。
+1. **限流**（`gewu/middleware.py`）：按 IP 固定窗口（缺省 600/分钟；`X-Forwarded-For` **末段**为键——追加式反代拓扑下即真实来源，首段可被客户端伪造，P36 修正），超限 429；健康检查豁免（探活语义）。中间件顺序（外→内）：限流 → trace-id → CORS 白名单。另：login 端点叠加账号/IP 双键限速（10/30 次每分，P36 防凭证暴力破解）。
 2. **全局 token 预算**（`gewu/budget.py`）：chat 入口全局闸（耗尽 429，usage.json 文件制，跨重启有效），LLMService 统一入账（见 [07](07-state-persistence.md)）。
 3. **per-user token 预算**（P23，`gewu/usage.py`）：按用户逐日落 PG（`token_usage` 表）+ chat 入口个人闸（`users.daily_token_limit ?? DAILY_USER_BUDGET`，文案与全局闸区分）。记账归属经 `usage.current_user` ContextVar 从 chat 入口传播到 LLMService 记账口（双写：全局闸 + 个人账）；装配用 `make_usage_store` 探测式软降级——PG 不可达退 None 禁用个人功能，全局闸仍兜底。admin 可在 /admin 页按用户调限额（[11](11-auth.md)）。
 4. **观测**：X-Trace-Id 中间件（uuid v4，入站头有则沿用，响应头透出）+ 四层排障日志（见下节）。
@@ -40,8 +43,8 @@
 
 | 模型 | 承担的调用 | 特征 |
 | --- | --- | --- |
-| glm-5.3-flash（小） | guard 判定、路由 L1、查询改写、精排、槽位抽取、工具识别兜底、续轮意图分类、记忆固化、指代补全、深研拆解、上下文压缩摘要、追问生成（follow_ups） | 小输入小输出，单次约 1s |
-| glm-5.3（主） | 最终答案（直答/深研综合）、agent 主循环、路由 L2 复核 | 只花在「值得花」的生成上 |
+| glm-5.3-flash（小） | guard 判定、精排、深研拆解、上下文压缩摘要、追问生成（follow_ups）、记忆固化、续轮意图分类 | 小输入小输出，单次约 1s（P31 起路由/槽位抽取已随级联退役，意图由主循环自决） |
+| glm-5.3（主） | agent 主循环（工具决策与最终答案生成） | 只花在「值得花」的生成上 |
 
 换供应商改 `LLM_BASE_URL/LLM_MODEL/…` 即可（OpenAI 兼容）。
 
@@ -51,8 +54,7 @@
 
 | 层 | 格式 | 内容 |
 | --- | --- | --- |
-| routing | `[routing]` 一行 | 判定结果（route/layer/reason），classic 链路 |
-| chat | `[chat]` JSON 一行 | 整轮汇总：session/mode/问题前 60 字/route/步数/工具数/answer 概要/耗时/结局（completed/max_tokens/aborted/error 四出口都打，`turn_log` 单点） |
+| chat | `[chat]` JSON 一行 | 整轮汇总：session/mode/问题前 60 字/route/步数/工具数/answer 概要/耗时/结局（completed/max_tokens/aborted/error 四出口都打，`turn_log` 单点；route 为观测标签非路由决策） |
 | llm | `[llm]` 一行 | 上下文概况（条数/字符量/角色分布）；P24-1 起 agent 主循环 per-call 埋点（ms + ctx_profile，由 UsageRecordMiddleware 兼任——补 create_agent 内部 model.invoke 不经 LLMService 封装的盲区，格式含 `chars=` 使 `make log-report` 的聚合自动吃到主循环数据） |
 | rag | `[rag]` 一行 | 命中清单（doc_id#seq 或空命中提示）、改写/降级/硬防线触发记录 |
 
@@ -73,8 +75,8 @@
 - **三接缝系统性采集**（新工具零观测成本）：chat.py 轮首 `Tracer.start` /
   轮末 finish（print 行与 DB 行同源产出）；**ToolTraceMiddleware 放栈最外层**
   ——所有工具含被拦截调用自动落 span；UsageRecordMiddleware 与
-  LLMService.chat/chat_stream 双接缝记 llm span（agent 主循环 + classic
-  直答 + guard/routing/槽位/followups 小模型全族）。
+  LLMService.chat/chat_stream 双接缝记 llm span（agent 主循环 + guard/
+  followups/压缩/固化小模型全族）。
 - **写入纪律**：contextvar 作用域（SSE 流式迭代每 next 前 re-set，P23
   教训）；轮末一次 batch INSERT；`make_trace_store` 探测式软降级（PG 不可达
   →no-op，观测永不杀业务）。
@@ -118,8 +120,8 @@ apps/server/
   main.py            # 装配入口（只 import gewu.api/gewu.config）
   ingest_main.py     # 入库 CLI（make ingest）
   gewu/api/          # routes/chat/auth/sessions/memory/admin/feedback + 装配工厂 app.py
-  gewu/agent/        # graph/agent/mw/guardrails/agenttools/resume/followups
-                     # + routing/tx/research/tools/prompts/events/state/emitter
+  gewu/agent/        # agent/mw/guardrails/agenttools/resume/followups
+                     # + txmeta/research/tools/prompts/events/emitter
   gewu/rag/          # retrieve/store/schema/chunker/ingest
   gewu/llm/          # chat（工厂与解析）/embed/service（门面 + agent_model）
   gewu/business/     # db.py（mock 业务全量）
@@ -127,8 +129,8 @@ apps/server/
   gewu/session/      # store.py（chat_sessions + message_feedback）
   gewu/              # config/budget/usage/memory/middleware/dates/jsonx
   scripts/           # smoke_chat.py（冒烟）/ auth_tool.py（make invite/admin CLI）
-  tests/             # 240 例（单测 + PG 集成 + 契约）
-eval/                # 数据集×4 + run_eval/run_retrieval_eval/run_search_parity + reports/
+  tests/             # 289 例（单测 + PG 集成 + 契约）
+eval/                # 数据集×5 + run_eval/run_retrieval_eval/run_search_parity + reports/
 ```
 
 ## 相关文件

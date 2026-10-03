@@ -27,19 +27,17 @@
 ## 运行口径
 
 ```bash
-RATE_LIMIT_PER_MINUTE=600 make run          # 服务端
-python3 eval/run_eval.py --mode classic --tag classic    # classic 基线轨（P17）
-python3 eval/run_eval.py --tag agent-first               # agent-first 轨（mode=auto 默认）
+RATE_LIMIT_PER_MINUTE=600 make run          # 服务端（全量评测加 MEMORY_CONSOLIDATE=off）
+python3 eval/run_eval.py --tag agent-first               # 主集（mode=auto，P31 起唯一形态）
 python3 eval/run_eval.py --dataset eval/dataset-chitchat.jsonl --tag chitchat
-python3 eval/run_eval.py --dataset eval/dataset-agent.jsonl --mode react --tag agent
-MEMORY_CONSOLIDATE=off …                     # 全量评测隔离记忆固化（见 07）
+python3 eval/run_eval.py --dataset eval/dataset-agent.jsonl --mode react --tag agent  # react=auto 别名
 ```
 
-**双轨口径（P17）**：classic 与 agent-first 跑同一 28 题主集——前者是「前置路由+手写图」对照基线，后者是默认链路；`asked_slot` 断言语义等价（classic 的 slot_question 事件 或 agent 的问号收尾轮，任一命中）。两流派延迟/token/正确率对照见 eval/reports/orchestration-20261001.md（token 6.5× 代价如实记录）。
+**口径（P31 起 agent-only）**：主集跑 `mode=auto` 单循环。P17~P30 时代的 classic/agent 双轨对照已完成使命，classic 轨随级联退役删除（`--mode classic` 选项不复存在），两流派延迟/token/正确率对照（token 6.5× 代价如实记录）留档 eval/reports/orchestration-20261001.md。全量评测须 `MEMORY_CONSOLIDATE=off` 隔离记忆固化（P32 起）。
 
 **检索层独立评测（P15，`make retrieval-eval`）**：绕开端到端直接打 `Retriever`，指标为 doc 级 **Recall@k / MRR / NDCG**；`--no-rewrite` / `--no-rerank` 两开关分离改写与精排的方差（GLM 温度 0 仍非确定，P14-1 结论的工程化承接）。变体集再生走 `make variants`（flash 生成，口径见 `eval/gen_query_variants.py`）。
 
-报告（Markdown 指标表 + 逐题明细）落 `eval/reports/`，P 系列基线与 A/B 对照全部留档（P8-retire-baseline、P14-search-parity-* 系列、orchestration-20261001、agent-first-ab 等 30+ 份）；业务库断言前先 reset（残留预约会占「每人每天 2 时段」配额）。
+报告（Markdown 指标表 + 逐题明细）落 `eval/reports/`，P 系列基线与 A/B 对照全部留档（P8-retire-baseline、P14-search-parity-* 系列、orchestration-20261001、agent-first-ab 等 30+ 份）；业务库断言前先 reset（残留预约会占「每人每天 2 时段」配额——P21 起 reset 需 admin 会话，评测客户端认证适配为挂账项，见 [roadmap](../roadmap.md)）。
 
 ## flaky 判定（无回归 ≠ 满分）
 
@@ -47,7 +45,7 @@ GLM 温度 0 仍非确定（flash 尤甚），评测失败集会漂移。仓库�
 
 | 已知 flaky | 归因 |
 | --- | --- |
-| mtfact-002 | flash 路由漂移 |
+| mtfact-002 | flash 路由漂移（级联时代归因，P31 后关注检索/精排漂移） |
 | ag-know-002 / ag-tx-001~002 | ReAct 偶发不落工具 |
 | tx-002 / tx-003（agent 轨） | P17：多轮办理对话式收集的 GLM 非确定（同代码多轮通过/失败交替，tx-003 六轮完整重放全对） |
 

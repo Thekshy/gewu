@@ -32,7 +32,7 @@
 - [x] 写操作确认流：确认摘要 → 用户确认 → 执行 → 回执；读操作直接执行
 - [x] 失败恢复：时段冲突给可选项重问、字段非法重新收集；切话题自动放弃流程
 - [x] 交易型评测：多轮用例断言业务库真实状态（预约/请假单、冲突恢复、权限拦截）
-- [x] 会话状态持久化（P8-1：SESSION_STORE=sqlite，data/sessions.db，重启续办到确认已真跑验证）
+- [x] 会话状态持久化（P8-1：SESSION_STORE=sqlite，data/sessions.db，重启续办到确认已真跑验证；现 PG PostgresSaver，P14 起）
 - [ ] 更多业务域（报修、活动报名）与辅导员审批闭环体验
 
 ## M3 · 评测体系
@@ -46,13 +46,15 @@
 
 ## M4 · 部署与展示
 
-- [ ] 用户体系（P21~P23）：邀请码封闭注册 / 会话管理 / 记忆可见化 / 管理后台——
-      公网部署前置（防配额滥用、role 权限坐实、台账归属）
-- [x] 可演示前端（P11）：对话 / 对比实验台 / 控制台三视图——同题 A/B 双流
-      （cascade workflow ↔ ReAct agent）、业务台账、检索调试；验收记录见
+- [x] 用户体系（P21~P23）：邀请码封闭注册 / 会话管理 / 记忆可见化 / 管理后台——
+      公网部署前置达成（防配额滥用、role 权限坐实、台账归属）
+- [x] 可演示前端（P11，P25/P34/P35 持续演进）：登录 / 对话 / 控制台 / 记忆 / 管理
+      五页面（对比实验台已完成使命随 P31 退役）——验收记录见
       [runbooks/P11-web-demo.md §5](runbooks/P11-web-demo.md)
-- [ ] Docker Compose 部署到公网 ECS（Nginx + SSE 配置）
-- [ ] 5 分钟演示录屏：事实题 / 多跳题 / 拒答三条路径（三页面已就绪可开录）
+- [x] 公网部署（Nginx + TLS + SSE 配置）：京东云 ECS + mrpwn.top，形态为
+      rsync 直推 + systemd（api）+ pm2（web）+ nginx/Certbot（P34 §6 留档，
+      入口 gewu.mrpwn.top；P36 补 COOKIE_SECURE 与 XFF 核对）
+- [ ] 5 分钟演示录屏：事实题 / 多跳题 / 拒答三条路径（页面已就绪可开录）
 - [ ] 技术报告：设计决策、评测数据、badcase 复盘
 - [ ] GitHub Actions 部署流水线（push main → 构建 → 上线）
 
@@ -77,7 +79,7 @@
       chitchat 新集 8/8 + 双轨对照报告 eval/reports/orchestration-20261001.md——
       [P17 任务书](runbooks/P17-agent-first-orchestration.md)
 - [ ] agent 轨多轮办理稳定化：tx-002/tx-003 对话式收集的 GLM 非确定（P17 已知 flaky，重放全对）；
-      classic 轨论文完成后按退役模式收口（tag+留档+删码）
+      classic 轨已随 P31 退役收口（tag `classic-pre-retirement`）
 - [x] 长期记忆消亡与用户侧可见性（当前仅注入不可管理）——P22 承接并闭线：
       /memory 面板 + /api/memory/facts 三端点（查看/编辑/删除/新增，upsert 语义）、
       会话删除连带清 episodic
@@ -189,3 +191,29 @@
       O(1) 扩展主张实证（仅加注册表行全链生效）；检索台阶三级（查表→FTS→
       向量）数据就位不实现——
       [P33 任务书](runbooks/P33-flow-registry.md)（2026-10-02 执行）
+- [x] P34 前端设计工作流：六步回路+高级感转向——参照提炼（chrome-devtools MCP
+      实测四站：Linear/Vercel/motion.dev/stripe，america.gov 被 Cloudflare 拦截
+      留档跳过）+ 概念「权威而灵敏的数字政务窗口」+ 拨盘 6/5/4 + 三批落地
+      （排版尺度断崖/动效提速/独有内容件）+ design-review 视觉评审回路固化 +
+      DESIGN.md 新增 referencing/workflow 节——
+      [P34 任务书](runbooks/P34-frontend-design-workflow.md)（2026-10-02 执行
+      完毕并部署上线）
+- [x] P35 骨架重构+纯白画布（会话内直改未立票）：chat 页 chrome-less（侧栏并
+      入导航抽屉）+ 工具页细顶栏 + america.gov 式纯白画布（commit 03e1409）
+- [x] P36 仓库加固与文档同步：安全修复七项（500/SSE 错误收口、XFF 末段限流键、
+      login 双键限速、/api/docs 收紧、API_DOCS 开关、trace-query.sh 参数化、
+      compose 端口绑回环）+ 死代码清理（前端 6 死文件、compare 枚举退役、
+      REACT_MODE 删除、pyproject 幽灵项、AGENTS.md 入库）+ 文档对齐 P35
+      （根 README 重写、architecture/01/09/10、PARITY §0.10/§14、.env.example
+      全集）+ 线上 COOKIE_SECURE 与 XFF 核对——
+      [P36 任务书](runbooks/P36-repo-hardening.md)（2026-10-03 执行）
+
+## 挂账与已知限制（P36 盘点）
+
+- print → 标准库 logging 迁移（约 40 处，集中在 mw/memory/retrieve 降级路径；
+  P36 拍板挂账，建议 P37）
+- trace TTL 30 天清理、admin trace 可视化页、feedback join（P27 B 期清单）
+- run_eval 认证适配（P21 起全站需登录，评测客户端未带会话；P28 发现）
+- 危险词黑名单丰富化（guardrails.py 首版核心词，P28/P31 延续挂账）
+- 会话创建配额（登录用户可批量建会话，限流内低危）
+- web_search 全文抓取二期须带 SSRF 校验（拦内网地址）

@@ -1,6 +1,6 @@
 # 08 · 接口契约（API 与 SSE 事件流）
 
-接口层的唯一行为规格是 **[PARITY.md](../PARITY.md)**——它是这个项目跨实现迁移（python-final → go-final → P14 LangGraph 版）三次仍保持前端/评测零改动的关键，P21~P25 的契约演进以 §0.5~§0.8 注记追加。本文做导读：27 端点全景、十一类 SSE 事件、interrupt/resume 桥与行为开关；字段级细节以 PARITY 为准。
+接口层的唯一行为规格是 **[PARITY.md](../PARITY.md)**——它是这个项目跨实现迁移（python-final → go-final → P14 LangGraph 版）三次仍保持前端/评测零改动的关键，P21~P36 的契约演进以 §0.5~§0.10 注记追加。本文做导读：27 端点全景、十一类 SSE 事件、interrupt/resume 桥与行为开关；字段级细节以 PARITY 为准。
 
 ## 端点全景（7 路由文件 · 27 端点）
 
@@ -9,7 +9,7 @@
 | 方法 | 路径 | 守卫 | 职责 |
 | --- | --- | --- | --- |
 | GET | `/api/health` | 无（限流豁免） | 健康：docs/chunks 计数、llm/embeddings 就绪、全局预算用量 |
-| GET | `/api/docs` | 无 | 已入库文档列表（doc_id 升序，含每篇 chunk 数） |
+| GET | `/api/docs` | 登录（P36 收紧） | 已入库文档列表（doc_id 升序，含每篇 chunk 数） |
 | POST | `/api/search` | 登录 | 调试用混合检索（`{"query","k"}`，k 1~20；text 截 300 字） |
 | POST | `/api/chat` | 登录 + 会话归属 | **SSE 流式问答**（主入口） |
 | POST | `/api/business/reset` | admin | 清空业务运行数据（评测/演示前置） |
@@ -25,7 +25,7 @@
 
 **反馈（`feedback.py`，P25）**：`POST /api/feedback`（204；`message_feedback` 表 upsert，登录 + 归属 404 防枚举 + 探测式软降级 503）。
 
-错误体统一 `{"detail": "<中文原因>"}`；类型不符统一「请求体不是合法 JSON」（`RequestValidationError` 全局 handler 收口，**不用 pydantic 默认校验体**——PARITY §2.3 的差异决定）。chat 请求校验序列（`_parse_chat_body`）：
+错误体统一 `{"detail": "<中文原因>"}`；类型不符统一「请求体不是合法 JSON」（`RequestValidationError` 全局 handler 收口，**不用 pydantic 默认校验体**——PARITY §2.3 的差异决定）；未捕获异常 500/SSE error 统一笼统文案「服务内部错误，请稍后再试」，原文只进日志（P36 收口，防 SQL/DSN 片段外泄）。chat 请求校验序列（`_parse_chat_body`）：
 
 | 字段 | 约束 | 越界 detail |
 | --- | --- | --- |
@@ -55,7 +55,7 @@ route（可两段） → [status|step]* → answer_delta* → [截断 status] �
 | `slot_question` | slot, question | 办理追问（slot 为槽位名） |
 | `pending_action` | tool, label, args{} | 确认卡（args 为中文 label → 值的有序表） |
 | `action_result` | tool, success, message, [receipt] | 执行回执（receipt: VE-XXXX/LV-XXXX） |
-| `error` | message | 链路错误（随后必有 done(error)） |
+| `error` | message | 链路错误（随后必有 done(error)；message 为笼统文案，原文只进 [chat]/trace 日志——P36） |
 | `done` | latency_ms, [reason] | 一次 chat 恰一个；SSE 端点单点发射 |
 | `follow_ups` | items[] | P25 追问 pills（恰好 ≤3 条，≥2 条才发）；Q5 门=知识型路由（factual/research/hybrid）+ completed + 无 HITL 悬停 |
 
@@ -103,9 +103,10 @@ done 单点也在这个 `generate()` 里：流正常结束 `reason = "max_tokens
 | `MEMORY_CONSOLIDATE` | on / off | 记忆固化线程（评测隔离用） |
 | `RATE_LIMIT_PER_MINUTE` | 600 | 限流（评测建议 600） |
 | `DAILY_TOKEN_BUDGET` / `DAILY_USER_BUDGET` | 200 万 / 20 万 | 全局闸 / 个人闸缺省 |
-| `COOKIE_SECURE` / `CORS_ALLOW_ORIGINS` | false / 空 | https 部署开启 / 跨域白名单（空=仅同源） |
+| `COOKIE_SECURE` / `CORS_ORIGINS` | false / 空 | https 部署开启 / 跨域白名单（空=仅同源） |
+| `API_DOCS` | false | FastAPI 框架文档面 `/docs`/`/redoc`/`/openapi.json`（P36：缺省关闭收敛暴露面，本地调试开） |
 
-已退役：ROUTER_MODE、SESSION_STORE（checkpointer 接管）、CHUNK_MODE（hierarchical 唯一，`CHUNK_STRATEGY` 面向入库侧）、REACT_MODE（P17：react 与 auto 同路）、QUERY_REWRITE（P31-2：resolve_query 节点随 classic 退役，指代消解交主循环 messages 历史）。检索与切片参数全量见 [04](04-rag-retrieval.md)/[09](09-cross-cutting.md)。
+已退役：ROUTER_MODE、SESSION_STORE（checkpointer 接管）、CHUNK_MODE（hierarchical 唯一，`CHUNK_STRATEGY` 面向入库侧）、REACT_MODE（P17 react 与 auto 同路；P36 配置面删除，`mode=react` 保留为评测兼容别名）、QUERY_REWRITE（P31-2：resolve_query 节点随 classic 退役，指代消解交主循环 messages 历史）。检索与切片参数全量见 [04](04-rag-retrieval.md)/[09](09-cross-cutting.md)。
 
 ## 相关文件
 
@@ -115,7 +116,7 @@ done 单点也在这个 `generate()` 里：流正常结束 `reason = "max_tokens
 | `gewu/api/auth.py` / `sessions.py` / `memory.py` / `admin.py` / `feedback.py` | 认证/会话/记忆面板/管理/反馈五组端点 |
 | `gewu/agent/events.py` | 事件构造器（items/args 空时必须 []/{} 而非 null） |
 | `gewu/agent/resume.py` / `followups.py` | HITL resume 翻译 / 追问生成与三层守卫 |
-| [PARITY.md](../PARITY.md) | 行为规格（字段级权威；§0.5~§0.8 为 P21~P25 契约演进注记） |
+| [PARITY.md](../PARITY.md) | 行为规格（字段级权威；§0.5~§0.10 为 P21~P36 契约演进注记） |
 | `tests/test_chat_api.py` / `test_search_api.py` / followups/feedback 专项 | 契约测试 |
 
 ---

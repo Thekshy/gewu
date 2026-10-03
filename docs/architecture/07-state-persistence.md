@@ -18,7 +18,8 @@
 
 P22 起 session_id 不再是客户端自报的裸 uuid，而是 `chat_sessions` 表登记发放的
 服务端资源（`secrets.token_urlsafe(16)` 主键、`"user"`=email 保留字双引号、
-`kind ∈ chat|compare`、title 首问前 20 字条件回填——`UPDATE ... WHERE title=''`
+`kind ∈ chat`（P36 起 compare 随 classic 退役，存量行 SELECT 不受影响）、
+title 首问前 20 字条件回填——`UPDATE ... WHERE title=''`
 语义防并发覆盖用户改名）。`/api/chat` 装配点一条 SELECT 做归属校验（本人外
 统一 404 防枚举），`"default"` 缺省值废弃（未传 422 给指引文案）。
 
@@ -30,10 +31,9 @@ P22 起 session_id 不再是客户端自报的裸 uuid，而是 `chat_sessions` 
 
 历史恢复（`GET /api/sessions/{id}/messages`）：优先从 checkpointer state 的
 `messages` 提取对话级序列（HumanMessage 文本 + AIMessage 非空 text；工具调用轮
-与 ToolMessage 跳过、system 跳过）——覆盖 agent 链路（mode=auto/react）；
-classic 链路（classic/direct/research）不写 messages，提取为空时退
-`memory_episodic` 兜底（每轮 user/assistant 双条、链路无关）。对话级纯文本渲染，
-事件级细节（citations/steps 卡片）不恢复。
+与 ToolMessage 跳过、system 跳过）——覆盖全链路（P31 起单循环唯一形态）；提取
+为空时退 `memory_episodic` 兜底（每轮 user/assistant 双条、链路无关）。对话级
+纯文本渲染，事件级细节（citations/steps 卡片）不恢复。
 
 ## PostgresSaver（P14 Q4 原生机制）
 
@@ -54,9 +54,9 @@ def _make_checkpointer(settings: Settings):
 装配后每一轮 invoke 都写两份语义：
 
 - **每步落盘**：节点执行后的 state 增量写 PG（`checkpoints`/`checkpoint_blobs`/`checkpoint_writes` 表族，`cp.setup()` 幂等建表）；
-- **interrupt 恢复**：tx_gate 暂停时状态完整落盘——**服务重启后用户发「确认」仍能续办**（P14-6 G3 真跑验证：办到确认门 → kill 服务 → 重启 → resume 执行成功落库）。
+- **interrupt 恢复**：HITL 确认门中断时状态完整落盘——**服务重启后用户发「确认」仍能续办**（P14-6 G3 真跑验证：办到确认门 → kill 服务 → 重启 → resume 执行成功落库）。
 
-办理流程状态从 Go 时代的自研「进程内 map + SQLite 镜像」（P8-1 sessions.db）变为框架原生能力，代码量近乎归零。`entry_gate` 判定 `tx_phase=collect` 走续轮、`tx_phase=confirm` 由 resume 桥接管（见 [02](02-orchestration-graph.md)/[06](06-transaction.md)）——续办语义完全建立在「state 在 PG 里活着」这一事实之上。
+办理流程状态从 Go 时代的自研「进程内 map + SQLite 镜像」（P8-1 sessions.db）变为框架原生能力，代码量近乎归零。续轮槽位收集由 `WriteSlotGateMiddleware` 引导模型发问（[05](05-react-agent.md)）、确认门中断由 resume 桥接管（[06](06-transaction.md)）——续办语义完全建立在「state 在 PG 里活着」这一事实之上。
 
 ## 长期记忆（`gewu/memory.py`）
 
@@ -116,7 +116,7 @@ sequenceDiagram
 | 文件 | 职责 |
 | --- | --- |
 | `gewu/api/app.py` | checkpointer 装配（autocommit 坑在此）与各存储域注入 |
-| `gewu/agent/state.py` | ChatState 字段全景（哪些进 checkpoint） |
+| `gewu/agent/mw.py` | GewuAgentState 字段全景（哪些进 checkpoint） |
 | `gewu/memory.py` | 双表 schema、memory_block 装配、consolidate 固化 |
 | `gewu/budget.py` / `gewu/usage.py` | 全局预算闸（usage.json）与 per-user 用量账（PG） |
 | `gewu/session/store.py` | chat_sessions 登记与 message_feedback 表 |
@@ -124,4 +124,4 @@ sequenceDiagram
 
 ---
 
-下一篇《08 · 接口契约》对齐外部视角：六端点、SSE 十类事件与 interrupt/resume 桥的字段级约定。
+下一篇《08 · 接口契约》对齐外部视角：27 端点、SSE 十一类事件与 interrupt/resume 桥的字段级约定。

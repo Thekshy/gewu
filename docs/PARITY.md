@@ -142,6 +142,31 @@ classic 28 题历史报告见 eval/reports/orchestration-*.md；tag
   构造器 `events.py` 零改动。§4 classic 链路行为规格随本节收口为历史
   （mode=classic 不再可达）。
 
+## 0.10 P36 仓库加固契约（错误收口 + 限流键修正 + 端点收紧 + classic 枚举收尾）
+
+2026-10-03 三路审计（安全漏洞/文档时效/死代码）后的收口票，任务书
+[runbooks/P36-repo-hardening.md](runbooks/P36-repo-hardening.md)。行为面变化：
+
+- **500/SSE error 笼统文案**：未捕获异常的 HTTP 500 detail 与 SSE `error`
+  事件 message 统一为「服务内部错误，请稍后再试」，异常原文只进日志与
+  trace 表（防 SQL/DSN 片段外泄）。§18-2「内部异常文案差异」随之收口。
+- **限流键取 X-Forwarded-For 末段**：追加式反代拓扑下末段=连上 nginx 的
+  真实来源（首段是浏览器可携带的伪造值，取首段可绕过限流）。前置代理
+  拓扑变化（加 CDN/二层反代）时须回头调整。
+- **login 双键限速**：`POST /api/auth/login` 叠加账号键（10 次/分钟）+
+  IP 键（30 次/分钟）固定窗口，超限 429
+  `{"detail":"登录尝试过于频繁，请稍后再试"}`；register 不限（邀请码
+  门槛已封批量面）。与全局限流独立计数、进程内重启清零。
+- **`/api/docs` 需登录**：与 `/api/search` 口径统一（401「未登录或会话
+  已过期」）。`/api/health` 保持公开（探活语义）。
+- **框架文档面缺省关闭**：`/docs`、`/redoc`、`/openapi.json` 缺省 404，
+  `API_DOCS=1` 打开（本地调试用）。
+- **kind=compare 退役**：`POST /api/sessions {"kind":"compare"}` → 422
+  （与非法 kind 同文案「kind 必须为 chat」）；`GET /api/sessions?kind=compare`
+  同 422。存量 compare 会话行的读取/删除不受影响（CHECK 仅约束 insert）。
+- **REACT_MODE 开关删除**：全仓零消费点（P17 起 react=auto 同路）；请求
+  `mode=react` 值保留（评测兼容别名）。
+
 ## 1. 服务总览
 
 - 监听端口 `:8000`(HTTP)。
@@ -245,9 +270,9 @@ k/query 越界返回 422。【差异决定】FastAPI 的 pydantic 校验错误�
 | `answer_delta` | `text` | 答案增量,前端拼接 |
 | `citations` | `items: [{n, doc_id, title, source}]` | 引用列表,直答/深研最后必发(无数据时 items=[]) |
 | `slot_question` | `slot`, `question` | 办理流程追问 |
-| `pending_action` | `tool`, `label`, `args`(中文标签→值) | 待确认动作摘要 |
-| `action_result` | `tool`, `success`, `message`, `receipt`(可 null) | 工具执行结果 |
-| `error` | `message` | 兜底错误(含预算超限),后跟 done |
+| `pending_action` | `tool`, `label`, `args`(中文标签→值) | 待确认动作摘要;P33 起 `tool` 经 run_flow 统一入口发起时为 flow_id(如 `book_venue`),专属名工具不变——同形异源,消费方按 opaque 字符串处理 |
+| `action_result` | `tool`, `success`, `message`, `receipt`(可 null) | 工具执行结果;`tool` 同上可为 flow_id(P33) |
+| `error` | `message` | 兜底错误(含预算超限),后跟 done;P36 起未捕获异常的 message 为笼统文案「服务内部错误，请稍后再试」,原文只进日志/trace(§0.10) |
 | `done` | `latency_ms`(整型,本轮耗时), `reason`(可选,见 §4) | 每轮最后一个事件 |
 | `follow_ups` | `items: [str,…]`(2~3 条追问) | P25:done **之后**追发(渐进增强);生成门=知识型路由+completed+无 HITL 悬停,失败/超时静默不发(§0.8) |
 
@@ -624,21 +649,37 @@ tool_descriptions(role) 只列该角色工具:`- {name}：{description}` 换行�
 
 ## 14. 配置(环境变量,仓库根 .env 提供缺省,进程环境优先)
 
+全集以 `apps/server/gewu/config.py` 的 `Settings.load` 为权威（P15 起检索
+参数、P21 起认证参数、P26 联网、P30 流式、P32 记忆隔离、P36 文档面陆续入
+Settings）；下表为契约面摘要：
+
 | 变量 | 默认 | 说明 |
 | --- | --- | --- |
-| LLM_API_KEY | 空 | 空=零 key 演示模式 |
-| LLM_BASE_URL | `https://open.bigmodel.cn/api/paas/v4/` | OpenAI 兼容 |
-| LLM_MODEL | `glm-5.3` | 主答案模型 |
-| LLM_SMALL_MODEL | `glm-5.3-flash` | 辅助调用模型 |
-| EMBED_MODEL | `embedding-3` | 向量模型 |
-| LLM_DISABLE_THINKING | false | 关闭 glm 推理模式 |
-| DATA_DIR | `<仓库根>/data` | 数据目录 |
-| CORPUS_DIR | `{DATA_DIR}/corpus` | 语料目录 |
-| INDEX_PATH | `{DATA_DIR}/index.db` | 索引库 |
-| RATE_LIMIT_PER_MINUTE | 20 | 限流 |
-| DAILY_TOKEN_BUDGET | 2000000 | 每日 token 上限 |
-| RETRIEVAL_K | 6 | 默认检索条数 |
-| MAX_QUESTION_CHARS | 500 | 问题长度上限 |
+| LLM_API_KEY / LLM_BASE_URL | 空 / 智谱 paas v4 | OpenAI 兼容端点；空=零 key 演示模式 |
+| LLM_MODEL / LLM_SMALL_MODEL | `glm-5.3` / `glm-5.3-flash` | 主答案 / 辅助调用模型 |
+| LLM_DISABLE_THINKING | false | 关闭 glm 推理模式（智谱私有参数） |
+| EMBED_API_KEY / EMBED_BASE_URL | 空 | 向量端点（可与 LLM 不同供应商） |
+| EMBED_MODEL / EMBED_MODE | `embedding-3` / `text` | 向量模型；`ark_multimodal`=火山多模态逐条并发 |
+| PG_DSN | `postgres://gewu:gewu@127.0.0.1:5433/gewu?sslmode=disable` | 全部存储域共用（检索/checkpoint/业务/记忆/认证/会话/用量/trace） |
+| DATA_DIR | `<仓库根>/data` | usage.json 落点 |
+| DAILY_TOKEN_BUDGET / DAILY_USER_BUDGET | 2000000 / 200000 | 全局闸 / 个人闸（P23） |
+| RETRIEVAL_K / RETRIEVAL_POOL_N | 6 / 20 | 检索返回数 / 双路候选池（P15） |
+| RRF_K / RRF_VECTOR_WEIGHT / RRF_KEYWORD_WEIGHT | 60 / 0.7 / 0.3 | 加权 RRF 融合（P15） |
+| RERANK_MODE / RERANK_THRESHOLD | on / 2.0 | LLM 精排与模型分阈值（全滤空自动退化） |
+| CHUNK_STRATEGY / CHUNK_PARENT_LIMIT / CHUNK_CHILD_LIMIT / CHUNK_OVERLAP | auto / 800 / 200 / 40 | 入库切片策略链（P15；换策略须 REBUILD=1 重建） |
+| RATE_LIMIT_PER_MINUTE | 600 | 全局限流（XFF 末段为键，§0.10） |
+| COOKIE_SECURE / CORS_ORIGINS | false / 空 | https 部署开 cookie Secure；跨域白名单（空=仅同源，P21） |
+| IQS_API_KEY / WEB_SEARCH_DAILY_LIMIT | 空 / 200 | 联网检索（P26）：key 空=整链关闭（工具不注册） |
+| STREAM_ANSWER | 1 | 主循环答案流式（P30；=0 紧急回退单帧全文） |
+| MEMORY_CONSOLIDATE | on | 记忆固化线程（P32；评测隔离 off） |
+| API_DOCS | false | FastAPI 框架文档面 `/docs` 等（P36；本地调试 =1 打开） |
+
+已退役开关：ROUTER_MODE、SESSION_STORE（checkpointer 接管）、CHUNK_MODE
+（`CHUNK_STRATEGY` 面向入库侧）、QUERY_REWRITE（P31-2 随 classic 退役）、
+REACT_MODE（P36 删配置面，`mode=react` 请求值保留为别名）、CORPUS_DIR /
+INDEX_PATH（P12 存储迁 PG 后索引不再文件化）、MAX_QUESTION_CHARS（500 上限
+硬编码于 chat.py 校验）。运行参数（SERVER_ADDR 等）与测试专用（PG_TEST_DSN）
+不入契约表。
 
 ## 15. 入库 CLI(ingest)
 

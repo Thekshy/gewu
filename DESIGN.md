@@ -1,5 +1,5 @@
 ---
-version: P25
+version: P35
 name: Gewu-design-system
 description: >
   格物 Gewu 的界面设计系统：机构蓝官方风（对标 america.gov/chat——同构产品，
@@ -169,9 +169,8 @@ components:
   console-panel:
     素 Card：面板即容器，面板内列表/表格用 divide-y 与 hairline 分组，
     不再套卡；健康点 success 色；预算条实心 primary。
-  track-panel:
-    compare 双轨卡片；轨内用户问题平铺（「问：」前缀 + 600 字重）；时间线
-    tool chip = surface-card pill。
+  track-panel:（P36 注：compare 双轨卡片随 /compare 页退役，本条为历史契约
+    留档；时间线 tool chip = surface-card pill 的形态仍被消息区引用）
 
 motion（P34-2 提速：快=灵敏=工具感，标杆交互档 120-180ms）:
   曲线: 全站 expo-out cubic-bezier(0.16,1,0.3,1)——CSS 走 globals.css
@@ -216,15 +215,16 @@ dont:
 - em-dash 门禁对 CJK 文案不适用：中文破折号「——」是规范标点，非英文 AI tell。
 - 空态氛围光（chat 页顶部 primary 光斑 + 点阵）：空态是全站唯一编辑式时刻，
   token 化后自动呈 navy，检测器未命中，作为 deliberate choice 保留于此一处，
-  不得扩散到 console/compare/memory/admin。
+  不得扩散到 console/memory/admin。
 
 换肤迁移注记（P25-0 执行口径，token 值对照本文件 colors）:
 - token 层 = globals.css `:root`/`.dark` 值替换（shadcn 变量名与 Tailwind
   类零改）；新增 `--link`/`--color-link` 一枚（answer prose 链接用）。
 - 组件契约改动仅两处：user-message `bg-secondary` → `bg-primary`（page.tsx
   类名一行）；answer.tsx prose 链接色挂 link token。
-- compare/console/memory/admin/login 随 token 自动换肤，逐页目检亮暗双主题
-  + design-lint 六页零 finding（design-lint 无色值断言，已核实零风险）。
+- console/memory/admin/login 随 token 自动换肤，逐页目检亮暗双主题
+  + design-lint 六页零 finding（design-lint 无色值断言，已核实零风险；
+  compare 页当时在列，P31 退役）。
 - P20 的 craft 地板条款（无嵌套卡/熟悉感/density/七态）原样继承，本文件
   只换情绪层——工程纪律不随皮肤漂移。
 

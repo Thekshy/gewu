@@ -4,7 +4,7 @@
 
 ## 装配
 
-`gewu/agent/agent.py` 的 `build_agent`：create_agent 编译产物直接 `add_node` 嵌套进外壳图（checkpointer 只挂顶层，子图 interrupt 冒泡暂停，[02](02-orchestration-graph.md)）。模型经 `llm.agent_model()` 工厂构造（温度/max_tokens 固化在实例，不经 LLMService 的 bind 链；压缩摘要用小档 `agent_model(small=True)`）；工具集 `agenttools.py` 全量 `@tool` 化（12 个基线：检索/日期/deep_research + query_flows/run_flow 统一办理入口 + 7 业务工具，P33 起 leave_status 收编进注册表由 run_flow 承载；P26 联网开启时 +1=web_search）。装配常量：`AGENT_MAX_TURNS=8`（轮次上限，react.py 同值平移）、`AGENT_MAX_TOKENS=1200`（单次模型调用上限）、`SUMMARY_TRIGGER_TOKENS=30_000` / `SUMMARY_KEEP_MESSAGES=20`（上下文压缩）。
+`gewu/agent/agent.py` 的 `build_agent`：create_agent 编译产物即顶层图（P31-3 外壳塌缩——端点直调、checkpointer 直挂、无嵌套图，[02](02-orchestration-graph.md)）。模型经 `llm.agent_model()` 工厂构造（温度/max_tokens 固化在实例，不经 LLMService 的 bind 链；压缩摘要用小档 `agent_model(small=True)`）；工具集 `agenttools.py` 全量 `@tool` 化（12 个基线：检索/日期/deep_research + query_flows/run_flow 统一办理入口 + 7 业务工具，P33 起 leave_status 收编进注册表由 run_flow 承载；P26 联网开启时 +1=web_search）。装配常量：`AGENT_MAX_TURNS=8`（轮次上限，react.py 同值平移）、`AGENT_MAX_TOKENS=1200`（单次模型调用上限）、`SUMMARY_TRIGGER_TOKENS=30_000` / `SUMMARY_KEEP_MESSAGES=20`（上下文压缩）。
 
 联网检索（P26，条件装配）：`settings.iqs_api_key` 非空时整链开启——web_search 工具注册、AGENT_SYSTEM 拼联网准则、WebSearchBudgetMiddleware 入栈；key 空=三处全部缺席（能力注入：配置里没有的工具，模型看不见）。适配层 `gewu/websearch.py` 走阿里 IQS（POST `/search/unified`，Bearer 鉴权；实测口径以 2026-10-01 真调为准——`contents` 字段勿传、`publishedTime` 为 ISO 串）。AGENT_SYSTEM 第 9 条同步通用化：校外问题尽力答（联网/通用知识+口径声明），仅危险违法才拒——原「引导回校园话题」废止。
 
@@ -33,12 +33,12 @@
 | --- | --- |
 | ① 唯一终止判据（无 tool_calls 即终答） | create_agent 原生循环（`model_to_tools` 条件边） |
 | ② 指纹去重 | 随引擎退役——repeat 场景由 ModelCallLimit 兜底（平移裁剪决策：flash 场景指纹误伤率高于死循环率） |
-| ③ 轮次上限 + 到顶收敛 | ModelCallLimit（exit_behavior=end 注入人工收尾消息）+ agent_done 的 partial_answer 兜底 |
+| ③ 轮次上限 + 到顶收敛 | ModelCallLimit（exit_behavior=end 注入人工收尾消息，官方 end 语义兜底到顶收敛） |
 | ④ 截断防御（P10 铁律） | TruncationDefenseMiddleware（落点从图条件边改为 wrap_model_call 的 handler 重调——after_model 链上与 HITL 顺序纠缠，包裹层更干净） |
 
 ## 运行时环境传递
 
-运行时对象不能进 state（checkpointer msgpack 序列化拒绝，P14 硬约束）。P17 的解法比 P14 更彻底：**工具以闭包持有 business/tools/retriever**（`build_agent_tools` 装配期捕获），role/user/mem_block 经 `GewuAgentState` 的普通字段随外壳图 state 流入子图（自定义 TypedDict 字段天然过 input schema）——`config.configurable` 通道只剩 checkpointer 自己用。工具内取 state 经 `ToolRuntime`（langgraph 原生注入：`runtime.state`/`runtime.tool_call_id`）。
+运行时对象不能进 state（checkpointer msgpack 序列化拒绝，P14 硬约束）。P17 的解法比 P14 更彻底：**工具以闭包持有 business/tools/retriever**（`build_agent_tools` 装配期捕获），role/user/mem_block 经 `GewuAgentState`（mw.py 内 TypedDict）的普通字段随 state 流入（自定义字段天然过 input schema）——`config.configurable` 通道只剩 checkpointer 自己用。工具内取 state 经 `ToolRuntime`（langgraph 原生注入：`runtime.state`/`runtime.tool_call_id`）。
 
 ## 工具表（agenttools.py）
 
