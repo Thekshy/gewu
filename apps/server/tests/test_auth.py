@@ -173,6 +173,38 @@ def test_auth_api_flow(tmp_path, biz, mem, auth, sess):
     assert c.get("/api/auth/me").status_code == 200
 
 
+def test_login_throttle_429_per_account(tmp_path, biz, mem, auth, sess):
+    """P36：login 账号键限速——同账号第 11 次尝试 429（连正确密码也拦），register 不计次。"""
+    from gewu.api.auth import _LOGIN_EMAIL_LIMITER, _LOGIN_IP_LIMITER
+
+    _LOGIN_EMAIL_LIMITER.reset()
+    _LOGIN_IP_LIMITER.reset()
+    try:
+        app = make_client(tmp_path, biz, mem, auth, sess).app
+        make_logged_client(app, auth, email="victim@qtu.edu.cn")
+        c = TestClient(app)
+        for _ in range(10):
+            r = c.post("/api/auth/login", json={"email": "victim@qtu.edu.cn", "password": "x" * 12})
+            assert r.status_code == 401
+        # 第 11 次：密码正确也 429（固定窗口内账号键耗尽）
+        r = c.post("/api/auth/login", json={"email": "victim@qtu.edu.cn", "password": PWD})
+        assert r.status_code == 429
+        assert r.json()["detail"] == "登录尝试过于频繁，请稍后再试"
+        # 别的账号不受牵连（register + 登录正常走通）
+        c2 = TestClient(app)
+        code = auth.create_invite()
+        assert (
+            c2.post(
+                "/api/auth/register",
+                json={"email": "bystander@qtu.edu.cn", "password": PWD, "invite_code": code},
+            ).status_code
+            == 200
+        )
+    finally:
+        _LOGIN_EMAIL_LIMITER.reset()
+        _LOGIN_IP_LIMITER.reset()
+
+
 def test_register_duplicate_email_409(tmp_path, biz, mem, auth, sess):
     app = make_client(tmp_path, biz, mem, auth, sess).app
     make_logged_client(app, auth, email="dup@qtu.edu.cn")

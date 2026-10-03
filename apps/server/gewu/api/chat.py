@@ -256,8 +256,8 @@ def chat(request: Request, payload: Annotated[dict, Body(...)]):
             turn_log("aborted")
             raise  # 客户端断开：done 已无法送达（语义上记 aborted）
         except Exception as e:  # noqa: BLE001 - 链路错误 → error 事件 + done(error)
-            turn_log("error", err=str(e))
-            yield _sse(ev.error_evt(str(e)))
+            turn_log("error", err=str(e))  # 原文只进日志/trace，SSE 对外笼统文案（P36）
+            yield _sse(ev.error_evt("服务内部错误，请稍后再试"))
             yield _sse(ev.done_evt(int((time.monotonic() - t0) * 1000), "error"))
             return
         reason = "max_tokens" if truncated else "completed"

@@ -89,7 +89,11 @@ def create_app(
     trace=_UNSET,
     checkpointer=None,
 ) -> FastAPI:
-    app = FastAPI(title="gewu", version=VERSION)
+    # P36：框架文档面（/docs /redoc /openapi.json）缺省关闭，API_DOCS=1 本地可开
+    framework_docs = (
+        {} if settings.api_docs else {"docs_url": None, "redoc_url": None, "openapi_url": None}
+    )
+    app = FastAPI(title="gewu", version=VERSION, **framework_docs)
     # 中间件顺序（外→内）：限流 → trace-id → CORS（对齐 Go：TraceID → 限流 → CORS）。
     # P21 起 CORS 收白名单（空=仅同源；前端经 next rewrite 同源代理）+ credentials。
     app.add_middleware(

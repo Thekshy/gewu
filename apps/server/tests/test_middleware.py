@@ -70,14 +70,83 @@ def test_trace_id_header_present(tmp_path: Path, biz, mem, auth, sess):
 
 
 def test_rate_limit_429_after_threshold(tmp_path: Path, biz, mem, auth, sess):
+    """限流键对未登录端点同样生效（/api/auth/me 401 也计次），健康检查豁免。"""
     c = _client(tmp_path, biz, mem, auth, sess, limit=3)
     for _ in range(3):
-        assert c.get("/api/docs").status_code == 200
-    r = c.get("/api/docs")
+        assert c.get("/api/auth/me").status_code == 401
+    r = c.get("/api/auth/me")
     assert r.status_code == 429
     assert r.json()["detail"] == "请求过于频繁，请稍后再试"
     # 健康检查不受限流影响
     assert c.get("/api/health").status_code == 200
+
+
+def test_client_ip_uses_last_xff_segment(tmp_path: Path, biz, mem, auth, sess):
+    """P36：XFF 取末段——伪造首段轮换不能绕限流，末段不同才是不同桶。"""
+    c = _client(tmp_path, biz, mem, auth, sess, limit=3)
+    for fake in ("fake-1", "fake-2", "fake-3"):  # 首段随便换，末段同源 → 同桶
+        r = c.get("/api/auth/me", headers={"X-Forwarded-For": f"{fake}, 203.0.113.7"})
+        assert r.status_code == 401
+    r = c.get("/api/auth/me", headers={"X-Forwarded-For": "fake-9, 203.0.113.7"})
+    assert r.status_code == 429
+    # 末段不同 → 独立桶（不受上面 429 影响）
+    assert c.get("/api/auth/me", headers={"X-Forwarded-For": "a, 198.51.100.9"}).status_code == 401
+
+
+def test_api_docs_disabled_by_default(tmp_path: Path, biz, mem, auth, sess):
+    """P36：框架文档面缺省关闭；API_DOCS=1 时本地可开。"""
+    c = _client(tmp_path, biz, mem, auth, sess)
+    assert c.get("/docs").status_code == 404
+    assert c.get("/redoc").status_code == 404
+    assert c.get("/openapi.json").status_code == 404
+
+    (tmp_path / "usage.json").write_text("{}", encoding="utf-8")
+    settings = Settings(
+        llm_api_key="lk",
+        data_dir=tmp_path,
+        api_docs=True,
+    )
+    on = TestClient(
+        create_app(
+            settings,
+            store=FakeStore(Stats(1, 1, False), [DocInfo("d", "t", "s", "u", 1)]),
+            business=biz,
+            memory=mem,
+            auth=auth,
+            sessions=sess,
+            retriever=FakeRetriever(),
+            llm=FakeChatLLM(["答"]),
+        )
+    )
+    assert on.get("/docs").status_code == 200
+    assert on.get("/openapi.json").status_code == 200
+
+
+def test_internal_error_detail_is_generic(tmp_path: Path, biz, mem, auth, sess):
+    """P36：500 detail 收口为笼统文案，异常原文不外泄（仅日志）。"""
+
+    class BoomStore(FakeStore):
+        def get_stats(self):  # health 端点的存储读崩
+            raise RuntimeError("psycopg SQL 泄密: SELECT * FROM secret -- dsn=h:j/w")
+
+    (tmp_path / "usage.json").write_text("{}", encoding="utf-8")
+    settings = Settings(llm_api_key="lk", data_dir=tmp_path)
+    c = TestClient(
+        create_app(
+            settings,
+            store=BoomStore(Stats(1, 1, False), [DocInfo("d", "t", "s", "u", 1)]),
+            business=biz,
+            memory=mem,
+            auth=auth,
+            sessions=sess,
+            retriever=FakeRetriever(),
+            llm=FakeChatLLM(["答"]),
+        )
+    )
+    r = c.get("/api/health")
+    assert r.status_code == 500
+    assert r.json()["detail"] == "服务内部错误，请稍后再试"
+    assert "SELECT" not in r.text
 
 
 def test_chat_budget_429(tmp_path: Path, biz, mem, auth, sess):

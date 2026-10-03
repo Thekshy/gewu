@@ -123,7 +123,9 @@ def test_health_llm_false_without_key(tmp_path: Path, biz, mem, auth, sess):
 
 
 def test_docs_contract(tmp_path: Path, biz, mem, auth, sess):
-    c = make_client(tmp_path, biz, mem, auth, sess)
+    anon = make_client(tmp_path, biz, mem, auth, sess)
+    assert anon.get("/api/docs").status_code == 401  # P36：与 search 同口径需登录
+    c = make_logged_client(anon.app, auth)
     r = c.get("/api/docs")
     assert r.status_code == 200
     docs = r.json()

@@ -14,10 +14,16 @@ RATE_LIMIT_DEFAULT = 600  # 缺省与 Go/.env 演示口径一致
 
 
 def client_ip(request: Request) -> str:
-    """限流键：X-Forwarded-For 首段（反代场景）或直连 IP。"""
+    """限流键：X-Forwarded-For 末段（反代场景）或直连 IP。
+
+    nginx $proxy_add_x_forwarded_for 是「请求带入值 + $remote_addr」追加式，
+    末段=连上 nginx 的真实来源；首段是浏览器可携带的伪造值（P36 安全审计：
+    取首段时每请求换一个伪造 XFF 即可绕过限流）。拓扑前提=单层可信反代，
+    前面再加 CDN/二层代理时须回头调整。
+    """
     fwd = request.headers.get("x-forwarded-for", "")
     if fwd:
-        return fwd.split(",")[0].strip()
+        return fwd.split(",")[-1].strip()
     return request.client.host if request.client else "unknown"
 
 
@@ -51,6 +57,12 @@ class RateLimiter:
                 return False
             self._counts[key] = n + 1
             return True
+
+    def reset(self) -> None:
+        """清空计数（测试隔离：模块级 login 限速器跨用例复位）。"""
+        with self._lock:
+            self._counts = {}
+            self._window_start = 0.0
 
 
 class RateLimitMiddleware(BaseHTTPMiddleware):

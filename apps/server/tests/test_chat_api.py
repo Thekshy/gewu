@@ -249,6 +249,8 @@ def test_chat_error_path_emits_error_and_done(tmp_path: Path, biz, mem, auth, se
     r = c.post("/api/chat", json={"question": "q", "mode": "auto", "session_id": "e"})
     events = _parse_sse(r.text)
     assert events[-2]["type"] == "error"
+    assert events[-2]["message"] == "服务内部错误，请稍后再试"  # P36：原文只进日志不外泄
+    assert "链路炸了" not in r.text
     assert events[-1]["type"] == "done"
     assert events[-1]["reason"] == "error"
 

@@ -5,12 +5,14 @@ exception handler 收口），语义越界→各端点中文 detail。不用 pyd
 错误体（PARITY §2.3 差异决定）。
 
 P21-3 认证范围：search 需登录；business/overview 登录者本人视图（admin 可
-?all=1）；business/reset 仅 admin。health/docs 保持公开（无敏感信息）。
+?all=1）；business/reset 仅 admin。health 保持公开（探活）；docs 需登录
+（P36 与 search 口径统一）。
 """
 
 from __future__ import annotations
 
 import json
+import traceback
 from datetime import date
 from typing import Annotated
 
@@ -19,6 +21,13 @@ from fastapi import APIRouter, Body, HTTPException, Request
 from gewu.api.auth import require_admin, require_user
 
 router = APIRouter()
+
+
+def _internal(e: Exception) -> HTTPException:
+    """500 收口（P36）：异常原文可能含 SQL/DSN 片段，仅进日志，对外统一笼统文案。"""
+    print(f"[routes] 500 {type(e).__name__}: {e}", flush=True)
+    traceback.print_exc()
+    return HTTPException(status_code=500, detail="服务内部错误，请稍后再试")
 
 
 def truncate_runes(text: str, limit: int) -> str:
@@ -51,7 +60,7 @@ def health(request: Request):
     try:
         stats = request.app.state.store.get_stats()
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise _internal(e) from e
     used, limit = _budget_usage(settings)
     return {
         "status": "ok",
@@ -66,10 +75,11 @@ def health(request: Request):
 
 @router.get("/api/docs")
 def list_docs(request: Request):
+    require_user(request)  # P36 收紧：语料清单枚举与 search 同口径
     try:
         docs = request.app.state.store.list_docs()
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise _internal(e) from e
     return [
         {
             "doc_id": d.doc_id,
@@ -99,7 +109,7 @@ def search(request: Request, payload: Annotated[dict, Body(...)]):
     try:
         hits = request.app.state.retriever.search(query, k)
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise _internal(e) from e
     return [
         {
             "doc_id": h.doc_id,
@@ -118,7 +128,7 @@ def business_reset(request: Request):
     try:
         request.app.state.business.reset()
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise _internal(e) from e
     return {"status": "ok"}
 
 
@@ -131,7 +141,7 @@ def business_overview(request: Request, all: str | None = None):
         bookings = biz.all_bookings()
         tickets = biz.all_tickets()
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e)) from e
+        raise _internal(e) from e
     if not admin_all:  # 本人视图：台账按登录 email 过滤（admin ?all=1 看全量）
         bookings = [b for b in bookings if b.user == user.email]
         tickets = [t for t in tickets if t.user == user.email]

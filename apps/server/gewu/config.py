@@ -76,7 +76,6 @@ class Settings:
     rrf_keyword_weight: float = 0.3
     rerank_threshold: float = 2.0  # LLM 精排模型分阈值（0~10）；全滤空自动退化
     rerank_mode: str = "on"  # on（默认，LLM 精排）| off
-    react_mode: str = "off"  # off（默认，纯 workflow）| on（路径不定的办理问题转 ReAct）
     rate_limit_per_minute: int = 600
     # 切片策略链（P15：入库侧，make ingest 生效；换策略/参数后须 REBUILD=1 重建）
     chunk_strategy: str = "auto"  # auto（画像选型）| heading（父子双层）| recursive（扁平兜底）
@@ -93,6 +92,9 @@ class Settings:
     web_search_daily_limit: int = 200
     # P30 agent 主循环答案流式（STREAM_ANSWER=0 紧急回退：单帧全文=改前行为）
     stream_answer: bool = True
+    # P36 框架文档面（/docs /redoc /openapi.json）：缺省关闭收敛公网侦察面，
+    # 本地调试 .env 加 API_DOCS=1 打开
+    api_docs: bool = False
 
     @classmethod
     def load(cls, env: Mapping[str, str] | None = None) -> Settings:
@@ -122,7 +124,6 @@ class Settings:
             rrf_keyword_weight=float(env.get("RRF_KEYWORD_WEIGHT", "0.3")),
             rerank_threshold=float(env.get("RERANK_THRESHOLD", "2.0")),
             rerank_mode=env.get("RERANK_MODE", "on"),
-            react_mode=env.get("REACT_MODE", "off"),
             rate_limit_per_minute=int(env.get("RATE_LIMIT_PER_MINUTE", "600")),
             chunk_strategy=env.get("CHUNK_STRATEGY", "auto"),
             chunk_parent_limit=int(env.get("CHUNK_PARENT_LIMIT", "800")),
@@ -135,4 +136,5 @@ class Settings:
             iqs_api_key=env.get("IQS_API_KEY", ""),
             web_search_daily_limit=int(env.get("WEB_SEARCH_DAILY_LIMIT", "200")),
             stream_answer=env.get("STREAM_ANSWER", "1").lower() not in ("0", "false", "no", "off"),
+            api_docs=env.get("API_DOCS", "").lower() in ("1", "true", "yes", "on"),
         )

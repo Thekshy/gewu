@@ -2,7 +2,8 @@
 
 契约（PARITY「认证契约」节）：
 - 422 请求体格式/长度校验；400 邀请码无效；409 邮箱已注册；
-  401 未登录或凭证错（login 失败统一「邮箱或密码错误」不区分原因）。
+  401 未登录或凭证错（login 失败统一「邮箱或密码错误」不区分原因）；
+  429 登录尝试过于频繁（P36 账号/IP 双键限速）。
 - cookie：gewu_session，httpOnly + SameSite=Lax，30d；Secure 由
   COOKIE_SECURE 控制（M4 https 部署后开启）。前端经 next 同源代理访问，
   无跨域 cookie 依赖。
@@ -24,11 +25,25 @@ from gewu.auth.store import (
     InviteInvalid,
     User,
 )
+from gewu.middleware import RateLimiter, client_ip
 
 router = APIRouter()
 
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 _SESSION_COOKIE_MAX_AGE = 30 * 24 * 3600
+
+# P36 登录暴力破解防线：账号键 10 次/分（单账号爆破）+ IP 键 30 次/分
+# （单 IP 多账号喷洒）。进程内固定窗口与全局限流同语义（重启清零）；
+# register 不设（邀请码门槛已封批量注册面）。
+_LOGIN_EMAIL_LIMITER = RateLimiter(per_minute=10)
+_LOGIN_IP_LIMITER = RateLimiter(per_minute=30)
+
+
+def _login_throttle(request: Request, email: str) -> None:
+    if not _LOGIN_IP_LIMITER.allow(f"ip:{client_ip(request)}") or not (
+        _LOGIN_EMAIL_LIMITER.allow(f"email:{email.lower()}")
+    ):
+        raise HTTPException(status_code=429, detail="登录尝试过于频繁，请稍后再试")
 
 
 def _auth(request: Request) -> AuthStore:
@@ -100,6 +115,7 @@ def register(request: Request, response: Response, payload: Annotated[dict, Body
 @router.post("/api/auth/login")
 def login(request: Request, response: Response, payload: Annotated[dict, Body(...)]):
     email, password = _parse_credentials(payload)
+    _login_throttle(request, email)
     try:
         user, token = _auth(request).login(email, password)
     except InvalidCredentials as e:

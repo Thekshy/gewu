@@ -33,7 +33,7 @@ services:
         # 浏览器直连 API 时的地址：单体 :8000
         NEXT_PUBLIC_API_BASE: ${NEXT_PUBLIC_API_BASE:-http://localhost:8000}
     ports:
-      - "3100:3100"
+      - "127.0.0.1:3100:3100" # P36：绑回环，公网须经反代/TLS 进（生产实际走 pm2:3001）
 
 volumes:
   pgdata:
