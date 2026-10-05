@@ -29,7 +29,7 @@
 | 08 | [存储选型：git、数据库与内存的边界](08-storage-choices.md) | 三种真相源规则、向量库表结构与读写路径、高可用论证修正 |
 | 09 | [任务中断与恢复](09-durable-execution.md) | 三档方案：回合边界 checkpoint / 步进 journal / 任务连接解耦 |
 | 10 | [语料从哪来：md 之前的解决方案](10-corpus-ingestion.md) | 统一中间表示契约、四类格式的打法、微型实验实测、成熟方案（MarkItDown/Docling 等）选型 |
-| 11 | [思考：长程任务的三层缺口与扩展路径](11-long-horizon-tasks.md) | 设计推演（未立项）：复合 flow / skill 引导 / 任务状态；锚当前 P31+ 形态 |
+| 11 | [思考：长程任务的三层缺口与扩展路径](11-long-horizon-tasks.md) | 设计推演（未立项）：复合 flow / skill 引导 / 任务状态 + 执行层三问（依赖·并行·速度）；锚当前 P31+ 形态 |
 
 ## 阅读顺序建议
 
