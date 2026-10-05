@@ -217,3 +217,6 @@
 - 危险词黑名单丰富化（guardrails.py 首版核心词，P28/P31 延续挂账）
 - 会话创建配额（登录用户可批量建会话，限流内低危）
 - web_search 全文抓取二期须带 SSRF 校验（拦内网地址）
+- 长程复杂任务支撑（复合 flow / skill 引导 / 任务状态）已推演成文、未立项：
+  三缺口诊断、方案与使用场景、立项评测门禁见
+  [walkthrough/11](walkthrough/11-long-horizon-tasks.md)（2026-10）
