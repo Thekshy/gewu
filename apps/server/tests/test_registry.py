@@ -124,11 +124,13 @@ def test_admin_is_role_superset():
     assert has_role(student_only, "student")
     assert not has_role(counselor_only, "student")
     assert not has_role(student_only, "counselor")
-    # 注册表口径：预约是 student/counselor 工具、审批是 counselor 工具；
-    # admin 经 has_role 超集拿到两者（上面两行已断言），注册表本身不含 admin 字样
+    # 注册表口径：预约是 student/counselor/guest 工具、审批是 counselor 工具
+    # （P39 游客=学生同集）；admin 经 has_role 超集拿到两者（上面两行已断言），
+    # 注册表本身不含 admin 字样
     reg = tools_for()
-    assert reg["book_venue"].roles == ["student", "counselor"]
+    assert reg["book_venue"].roles == ["student", "counselor", "guest"]
     assert reg["approve_leave"].roles == ["counselor"]
     assert has_role(reg["book_venue"].roles, "admin")
     assert has_role(reg["approve_leave"].roles, "admin")
     assert not has_role(reg["approve_leave"].roles, "student")
+    assert not has_role(reg["approve_leave"].roles, "guest")

@@ -435,6 +435,20 @@ export default function Home() {
           </div>
         </aside>
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
+          {user?.role === "guest" && (
+            <div className="mx-auto w-full max-w-3xl space-y-2 px-4 pt-3">
+              <Alert className="py-2.5">
+                <Info className="size-4" aria-hidden />
+                <AlertDescription>
+                  游客模式：免登录直接体验，数据短期保留；部分功能（长期记忆、控制台）需
+                  <Link href="/login" className="mx-1 underline underline-offset-2">
+                    登录
+                  </Link>
+                  后使用。
+                </AlertDescription>
+              </Alert>
+            </div>
+          )}
           {health && !health.llm && (
             <div className="mx-auto w-full max-w-3xl space-y-2 px-4 pt-3">
               <Alert className="py-2.5">

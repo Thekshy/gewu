@@ -38,10 +38,11 @@ class TraceIDMiddleware(BaseHTTPMiddleware):
 
 
 class RateLimiter:
-    """固定窗口每分钟限流（进程内；Go 版同语义）。"""
+    """固定窗口限流（进程内；Go 版同语义）。缺省每分钟；window_sec 可调（如 P39 游客签发日闸）。"""
 
-    def __init__(self, per_minute: int = RATE_LIMIT_DEFAULT) -> None:
+    def __init__(self, per_minute: int = RATE_LIMIT_DEFAULT, window_sec: float = 60.0) -> None:
         self._limit = max(1, per_minute)
+        self._window = float(window_sec)
         self._window_start = 0.0
         self._counts: dict[str, int] = {}
         self._lock = threading.Lock()
@@ -49,7 +50,7 @@ class RateLimiter:
     def allow(self, key: str) -> bool:
         now = time.monotonic()
         with self._lock:
-            if now - self._window_start >= 60.0:
+            if now - self._window_start >= self._window:
                 self._window_start = now
                 self._counts = {}
             n = self._counts.get(key, 0)

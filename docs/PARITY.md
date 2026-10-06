@@ -167,6 +167,34 @@ classic 28 题历史报告见 eval/reports/orchestration-*.md；tag
 - **REACT_MODE 开关删除**：全仓零消费点（P17 起 react=auto 同路）；请求
   `mode=react` 值保留（评测兼容别名）。
 
+## 0.11 P39 游客开放通道契约（免登影子用户 + 能力闸）
+
+2026-10-06 论文展示需要免登录体验，任务书
+[runbooks/P39-guest-access.md](runbooks/P39-guest-access.md)。行为面变化：
+
+- **新增 `POST /api/auth/guest`**：免登签发受限影子用户（`role=guest`、
+  `email=guest-<hex>@guest.local`、`display_name=游客`）。`GUEST_MODE`
+  缺省关 → 404（与未开通道不可区分）；开启时 IP 双闸 5 次/分 + 20 次/天
+  （`client_ip` XFF 末段，进程内固定窗口），超限 429。响应体同 `/api/auth/me`。
+- **游客会话短 TTL 硬过期**：`GUEST_SESSION_TTL_DAYS`（缺省 7 天），
+  cookie max_age 对齐；**不滑动续期**（对比正式用户 30d 滑动）。配额
+  `GUEST_DAILY_TOKEN_LIMIT`（缺省 50k）落 `users.daily_token_limit`，
+  per-user 限额闸照常生效。
+- **能力面=学生同集**（§10 矩阵加 guest 列）：chat/深研/联网检索/业务办理
+  （含 HITL 确认）全开；`pending_leaves`/`approve_leave` 仍仅 counselor。
+  admin 面天然 403。
+- **「登录后解锁」面 403**：`/api/docs`、`/api/search`、`/api/memory/*`
+  对 guest 返回 403 `{"detail":"该功能需登录后使用"}`（`require_member`
+  守卫）；`/api/sessions`、`/api/chat`、`/api/feedback`、
+  `/api/business/overview` 游客照常（email 锚点隔离）。
+- **游客不写记忆**：chat 尾部 consolidate 对 `role=guest` 跳过（无
+  `/api/memory` 管理面，短 TTL 数据不值得固化成本）；读侧注入为空。
+- **角色可设面不变**：`VALID_ROLES` 不含 guest——admin 改角色不可设
+  guest；admin 仍可 `status=disabled` 停用游客（踢全部会话）。
+- **过期清理**：`make guest-prune [DAYS=N]` 按 sessions 删除端点同序
+  （checkpointer → episodic → 业务行 → 会话行）批量回收游客全部数据
+  （`gewu/maintenance.py`）；`users.role` CHECK 幂等重建加 `guest`。
+
 ## 1. 服务总览
 
 - 监听端口 `:8000`(HTTP)。
@@ -583,17 +611,21 @@ tools.call(全部已收槽位) → 成功:清 session,`action_result{success:tru
 
 | 工具 | label | 角色可见 | 写 |
 | --- | --- | --- | --- |
-| query_venues | 查询场馆 | student,counselor | 否 |
-| my_bookings | 我的预约 | student,counselor | 否 |
-| leave_status | 请假单查询 | student,counselor | 否 |
+| query_venues | 查询场馆 | student,counselor,guest | 否 |
+| my_bookings | 我的预约 | student,counselor,guest | 否 |
+| leave_status | 请假单查询 | student,counselor,guest | 否 |
 | pending_leaves | 待审批请假 | **仅 counselor** | 否 |
-| book_venue | 预约场馆 | student,counselor | 是 |
-| cancel_booking | 取消预约 | student,counselor | 是 |
-| submit_leave | 请假申请 | student,counselor | 是 |
+| book_venue | 预约场馆 | student,counselor,guest | 是 |
+| cancel_booking | 取消预约 | student,counselor,guest | 是 |
+| submit_leave | 请假申请 | student,counselor,guest | 是 |
 | approve_leave | 批准请假 | **仅 counselor** | 是 |
 
+admin 是超集（P37 拍板：代学生办理也可审批）；guest=免登游客影子用户，
+学生同集（P39 §0.11）。检索族工具（search_knowledge/web_search/
+parse_date/deep_research/query_flows/run_flow）无角色门、全角色可用。
+
 tools.call 返回:未知工具 → `{ok:false,error:"unknown_tool",message:"未知工具：{name}"}`;
-越权 → `{ok:false,error:"permission",message:"当前身份（学生|辅导员）无权执行「{label}」"}`;
+越权 → `{ok:false,error:"permission",message:"当前身份（学生|辅导员|管理员|游客）无权执行「{label}」"}`;
 缺参数(KeyError)→ `{ok:false,error:"missing_arg",message:"缺少参数：{字段名}"}`。
 tool_descriptions(role) 只列该角色工具:`- {name}：{description}` 换行连接(给 LLM)。
 
@@ -673,6 +705,8 @@ Settings）；下表为契约面摘要：
 | STREAM_ANSWER | 1 | 主循环答案流式（P30；=0 紧急回退单帧全文） |
 | MEMORY_CONSOLIDATE | on | 记忆固化线程（P32；评测隔离 off） |
 | API_DOCS | false | FastAPI 框架文档面 `/docs` 等（P36；本地调试 =1 打开） |
+| GUEST_MODE | false | 游客开放通道（P39 §0.11）：=1 开 `POST /api/auth/guest` 免登签发；关=现状 |
+| GUEST_DAILY_TOKEN_LIMIT / GUEST_SESSION_TTL_DAYS | 50000 / 7 | 游客日 token 限额 / 会话硬过期天数（不滑动续期） |
 
 已退役开关：ROUTER_MODE、SESSION_STORE（checkpointer 接管）、CHUNK_MODE
 （`CHUNK_STRATEGY` 面向入库侧）、QUERY_REWRITE（P31-2 随 classic 退役）、

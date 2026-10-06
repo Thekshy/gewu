@@ -7,17 +7,21 @@
 - cookie：gewu_session，httpOnly + SameSite=Lax，30d；Secure 由
   COOKIE_SECURE 控制（M4 https 部署后开启）。前端经 next 同源代理访问，
   无跨域 cookie 依赖。
+- P39 游客开放通道：POST /api/auth/guest 免登签发受限影子用户
+  （GUEST_MODE 缺省关=现状；开时 IP 双闸 5/min + 20/天防刷行）。
 """
 
 from __future__ import annotations
 
 import re
+from datetime import timedelta
 from typing import Annotated
 
 from fastapi import APIRouter, Body, HTTPException, Request, Response
 
 from gewu.auth.store import (
     COOKIE_NAME,
+    GUEST_ROLE,
     AuthError,
     AuthStore,
     EmailTaken,
@@ -38,6 +42,17 @@ _SESSION_COOKIE_MAX_AGE = 30 * 24 * 3600
 _LOGIN_EMAIL_LIMITER = RateLimiter(per_minute=10)
 _LOGIN_IP_LIMITER = RateLimiter(per_minute=30)
 
+# P39 游客签发双闸：分钟闸防瞬时刷行，日闸（window_sec 扩展）封顶单 IP 每日
+# 产生的影子用户行数；游客行由 make guest-prune 定期回收。
+_GUEST_MINUTE_LIMITER = RateLimiter(per_minute=5)
+_GUEST_DAY_LIMITER = RateLimiter(per_minute=20, window_sec=86400)
+
+
+def _guest_throttle(request: Request) -> None:
+    key = f"ip:{client_ip(request)}"
+    if not _GUEST_MINUTE_LIMITER.allow(key) or not _GUEST_DAY_LIMITER.allow(key):
+        raise HTTPException(status_code=429, detail="游客身份领取过于频繁，请稍后再试")
+
 
 def _login_throttle(request: Request, email: str) -> None:
     if not _LOGIN_IP_LIMITER.allow(f"ip:{client_ip(request)}") or not (
@@ -50,11 +65,13 @@ def _auth(request: Request) -> AuthStore:
     return request.app.state.auth
 
 
-def _set_session_cookie(response: Response, request: Request, token: str) -> None:
+def _set_session_cookie(
+    response: Response, request: Request, token: str, max_age: int = _SESSION_COOKIE_MAX_AGE
+) -> None:
     response.set_cookie(
         COOKIE_NAME,
         token,
-        max_age=_SESSION_COOKIE_MAX_AGE,
+        max_age=max_age,
         httponly=True,
         samesite="lax",
         secure=request.app.state.settings.cookie_secure,
@@ -67,6 +84,14 @@ def require_user(request: Request) -> User:
     user = _auth(request).user_for_token(token) if token else None
     if user is None:
         raise HTTPException(status_code=401, detail="未登录或会话已过期")
+    return user
+
+
+def require_member(request: Request) -> User:
+    """正式成员守卫（P39）：游客（role=guest）403——记忆/控制台等登录后解锁的面。"""
+    user = require_user(request)
+    if user.role == GUEST_ROLE:
+        raise HTTPException(status_code=403, detail="该功能需登录后使用")
     return user
 
 
@@ -132,6 +157,25 @@ def logout(request: Request, response: Response):
     _auth(request).delete_session(token)
     response.delete_cookie(COOKIE_NAME, samesite="lax")
     return {"status": "ok"}
+
+
+@router.post("/api/auth/guest")
+def guest_sign_in(request: Request, response: Response):
+    """P39 游客签发：免登领取受限影子用户（能力面=学生同集，见 PARITY §10）。
+
+    GUEST_MODE 缺省关——关闭时 404 与未开通道不可区分（不暴露开关存在）。
+    游客会话短 TTL 硬过期（不滑动续期），cookie max_age 对齐；响应体同 me。
+    """
+    settings = request.app.state.settings
+    if not settings.guest_mode:
+        raise HTTPException(status_code=404, detail="Not Found")
+    _guest_throttle(request)
+    ttl = timedelta(days=settings.guest_session_ttl_days)
+    user, token = _auth(request).create_guest(
+        ttl=ttl, daily_token_limit=settings.guest_daily_token_limit
+    )
+    _set_session_cookie(response, request, token, max_age=int(ttl.total_seconds()))
+    return _user_payload(user)
 
 
 @router.get("/api/auth/me")

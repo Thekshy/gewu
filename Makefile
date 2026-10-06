@@ -1,7 +1,7 @@
 SERVER_DIR := apps/server
 WEB_DIR := apps/web
 
-.PHONY: install-web run test lint eval ingest retrieval-eval variants demo clean lint-arch design-lint design-review pg-up pg-down invite admin log-report trace-query trace-query-remote
+.PHONY: install-web run test lint eval ingest retrieval-eval variants demo clean lint-arch design-lint design-review pg-up pg-down invite admin guest-prune log-report trace-query trace-query-remote
 
 # ---------- 检索存储（P12：PostgreSQL + pgvector） ----------
 
@@ -46,6 +46,10 @@ invite: pg-up
 
 admin: pg-up
 	cd $(SERVER_DIR) && uv run python scripts/auth_tool.py admin --email $(EMAIL)
+
+# P39 游客清理：过期游客影子用户及下游数据回收；DAYS 显式指定保留天数
+guest-prune: pg-up
+	cd $(SERVER_DIR) && uv run python scripts/guest_prune.py $(if $(DAYS),--days $(DAYS))
 
 # 全绿门禁口径：前置 pg-up，PG 依赖用例真跑；
 # 裸跑 pytest 时无 PG 的用例会 Skip（醒目日志）。

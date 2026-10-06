@@ -95,6 +95,11 @@ class Settings:
     # P36 框架文档面（/docs /redoc /openapi.json）：缺省关闭收敛公网侦察面，
     # 本地调试 .env 加 API_DOCS=1 打开
     api_docs: bool = False
+    # P39 游客开放通道：免登录影子用户（短 TTL + 低配额 + 学生同集工具面）；
+    # 缺省关=现状（未登录一律 401），线上 .env 加 GUEST_MODE=1 开放
+    guest_mode: bool = False
+    guest_daily_token_limit: int = 50_000  # 游客日 token 限额（≈ 全局 per-user 的 1/4）
+    guest_session_ttl_days: int = 7  # 游客会话硬过期（不滑动续期）
 
     @classmethod
     def load(cls, env: Mapping[str, str] | None = None) -> Settings:
@@ -137,4 +142,7 @@ class Settings:
             web_search_daily_limit=int(env.get("WEB_SEARCH_DAILY_LIMIT", "200")),
             stream_answer=env.get("STREAM_ANSWER", "1").lower() not in ("0", "false", "no", "off"),
             api_docs=env.get("API_DOCS", "").lower() in ("1", "true", "yes", "on"),
+            guest_mode=env.get("GUEST_MODE", "").lower() in ("1", "true", "yes", "on"),
+            guest_daily_token_limit=int(env.get("GUEST_DAILY_TOKEN_LIMIT", "50000")),
+            guest_session_ttl_days=int(env.get("GUEST_SESSION_TTL_DAYS", "7")),
         )

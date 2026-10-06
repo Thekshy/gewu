@@ -272,7 +272,8 @@ def chat(request: Request, payload: Annotated[dict, Body(...)]):
             )
             if items:
                 yield _sse(ev.follow_ups_evt(items))
-        if os.environ.get("MEMORY_CONSOLIDATE", "on") == "on":
+        # P39 游客不写记忆（无 /memory 管理面，短 TTL 数据不值得固化成本）
+        if req["role"] != "guest" and os.environ.get("MEMORY_CONSOLIDATE", "on") == "on":
             _consolidate_async(request, req, req["question"], answer)
 
     return StreamingResponse(

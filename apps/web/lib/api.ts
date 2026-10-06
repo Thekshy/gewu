@@ -90,7 +90,7 @@ export interface BusinessOverview {
 export interface User {
   email: string;
   display_name: string;
-  role: "student" | "counselor" | "admin";
+  role: "student" | "counselor" | "admin" | "guest"; // guest=P39 免登游客
 }
 
 /** chat 请求 mode：auto（agent-first 主循环）/react（=auto 语义；P31 起枚举收窄，classic/direct/research 退役）。 */
@@ -169,6 +169,15 @@ export async function register(
 
 export async function logout(): Promise<void> {
   await fetch(`${API_BASE}/api/auth/logout`, { method: "POST" }).catch(() => {});
+}
+
+/** P39 游客签发：免登领取受限身份（学生同集工具面 + 低配额 + 短 TTL cookie）。
+ *  GUEST_MODE 关闭时后端 404——调用方据此回退到「跳登录」的现状行为。 */
+export async function guestSignIn(): Promise<User> {
+  const res = await fetch(`${API_BASE}/api/auth/guest`, { method: "POST" });
+  if (!res.ok) throw new Error(await detailOf(res));
+  broadcastAuthChanged();
+  return (await res.json()) as User;
 }
 
 // ---------- 会话（P22：会话为服务端资源，CRUD + 历史恢复） ----------
@@ -290,7 +299,7 @@ export interface AdminStats {
 export interface AdminUser {
   email: string;
   display_name: string;
-  role: "student" | "counselor" | "admin";
+  role: "student" | "counselor" | "admin" | "guest"; // 巡查列表含游客影子用户（P39）
   status: "active" | "disabled";
   daily_token_limit: number | null;
   today_tokens: number;

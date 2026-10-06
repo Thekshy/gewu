@@ -153,7 +153,7 @@ def tools_for() -> dict[str, ToolSpec]:
             "query_venues",
             "查询场馆",
             "查询某天可预约的场馆与余量",
-            ["student", "counselor"],
+            ["student", "counselor", "guest"],
             True,
             _fmt_venues,
             triggers=["场馆", "可预约", "余量", "场地", "空场"],
@@ -163,7 +163,7 @@ def tools_for() -> dict[str, ToolSpec]:
             "my_bookings",
             "我的预约",
             "查询本人当前有效预约",
-            ["student", "counselor"],
+            ["student", "counselor", "guest"],
             True,
             _my_bookings,
             triggers=["我的预约", "预约记录", "订了什么"],
@@ -173,7 +173,7 @@ def tools_for() -> dict[str, ToolSpec]:
             "leave_status",
             "请假单查询",
             "按请假单号查询审批状态",
-            ["student", "counselor"],
+            ["student", "counselor", "guest"],
             True,
             _leave_status,
             slots_required=["ticket_id"],
@@ -194,7 +194,7 @@ def tools_for() -> dict[str, ToolSpec]:
             "book_venue",
             "预约场馆",
             "预约场馆的某个时段（写操作，需确认）",
-            ["student", "counselor"],
+            ["student", "counselor", "guest"],
             False,
             _book,
             slots_required=["venue", "date", "slot"],
@@ -206,7 +206,7 @@ def tools_for() -> dict[str, ToolSpec]:
             "cancel_booking",
             "取消预约",
             "取消本人的预约（写操作，需确认）",
-            ["student", "counselor"],
+            ["student", "counselor", "guest"],
             False,
             _cancel,
             slots_required=["booking_id"],
@@ -217,7 +217,7 @@ def tools_for() -> dict[str, ToolSpec]:
             "submit_leave",
             "请假申请",
             "提交请假申请（写操作，需确认）",
-            ["student", "counselor"],
+            ["student", "counselor", "guest"],
             False,
             _submit_leave,
             slots_required=["leave_type", "start_date", "end_date", "reason"],
@@ -304,7 +304,7 @@ def role_label(role: str) -> str:
     标成「辅导员」，于是管理员演示办理时会收到自相矛盾的回执（右上角写着管理员，
     回执说你是辅导员且无权预约）。
     """
-    labels = {"student": "学生", "counselor": "辅导员", "admin": "管理员"}
+    labels = {"student": "学生", "counselor": "辅导员", "admin": "管理员", "guest": "游客"}
     return labels.get(role) or role or "未知身份"
 
 

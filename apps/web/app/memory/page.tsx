@@ -9,7 +9,7 @@ import {
   type Fact,
   type FactKind,
 } from "@/lib/api";
-import { useRequireUser } from "@/lib/auth";
+import { useRequireMember } from "@/lib/auth";
 import { cn } from "@/lib/utils";
 import {
   AlertDialog,
@@ -57,7 +57,7 @@ const KIND_LABEL: Record<string, string> = Object.fromEntries(
 );
 
 export default function MemoryPage() {
-  const { user } = useRequireUser();
+  const { user } = useRequireMember(); // P39：记忆属登录后解锁面，游客导去 /login
   const [facts, setFacts] = useState<Fact[] | null>(null);
   const [err, setErr] = useState<string | null>(null);
   // 行内编辑

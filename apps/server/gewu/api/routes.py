@@ -18,7 +18,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Body, HTTPException, Request
 
-from gewu.api.auth import require_admin, require_user
+from gewu.api.auth import require_admin, require_member, require_user
 
 router = APIRouter()
 
@@ -75,7 +75,7 @@ def health(request: Request):
 
 @router.get("/api/docs")
 def list_docs(request: Request):
-    require_user(request)  # P36 收紧：语料清单枚举与 search 同口径
+    require_member(request)  # P36 收紧：语料清单枚举与 search 同口径；P39 起非游客（控制台面）
     try:
         docs = request.app.state.store.list_docs()
     except Exception as e:
@@ -94,7 +94,7 @@ def list_docs(request: Request):
 
 @router.post("/api/search")
 def search(request: Request, payload: Annotated[dict, Body(...)]):
-    require_user(request)  # console 检索调试：登录即可
+    require_member(request)  # console 检索调试：正式成员（P39 游客 403）
     query = _body_param(payload, "query", str)
     if query is None:
         query = ""

@@ -2,6 +2,7 @@
 
 长期记忆从「黑盒增强」变「透明资产」：查看 / 新增(覆盖) / 删除。
 防越权由 user_id=登录 email 保证（store 复合主键含 user_id）。
+P39 起属「登录后解锁」面：游客 403（游客侧 chat 也不写记忆，见 chat.py）。
 """
 
 from __future__ import annotations
@@ -10,7 +11,7 @@ from typing import Annotated
 
 from fastapi import APIRouter, Body, HTTPException, Request
 
-from gewu.api.auth import require_user
+from gewu.api.auth import require_member
 from gewu.memory import Fact
 
 router = APIRouter()
@@ -24,13 +25,13 @@ def _fact_payload(f) -> dict:
 
 @router.get("/api/memory/facts")
 def list_facts(request: Request):
-    user = require_user(request)
+    user = require_member(request)
     return [_fact_payload(f) for f in request.app.state.memory.all_facts(user.email)]
 
 
 @router.post("/api/memory/facts")
 def upsert_fact(request: Request, payload: Annotated[dict, Body(...)]):
-    user = require_user(request)
+    user = require_member(request)
     fact = _parse_fact(payload)
     request.app.state.memory.upsert_facts(user.email, [fact])
     return {"status": "ok"}
@@ -38,7 +39,7 @@ def upsert_fact(request: Request, payload: Annotated[dict, Body(...)]):
 
 @router.delete("/api/memory/facts")
 def delete_fact(request: Request, kind: str, key: str):
-    user = require_user(request)
+    user = require_member(request)
     if not _valid_kind(kind):
         raise HTTPException(status_code=422, detail=f"kind 必须为 {'/'.join(VALID_FACT_KINDS)}")
     if not request.app.state.memory.delete_fact(user.email, kind, key):

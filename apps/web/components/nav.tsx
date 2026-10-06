@@ -23,9 +23,10 @@ const SYSTEM_ITEMS = [
   { href: "/memory", label: "记忆" },
 ];
 
-/** 「管理」仅 admin 渲染（P23）。 */
+/** 「管理」仅 admin 渲染（P23）；游客隐藏系统观察面（P39：记忆/控制台登录后解锁）。 */
 function useNavGroups() {
   const { user } = useUser();
+  if (user?.role === "guest") return { userItems: USER_ITEMS, systemItems: [] };
   const system =
     user?.role === "admin" ? [...SYSTEM_ITEMS, { href: "/admin", label: "管理" }] : SYSTEM_ITEMS;
   return { userItems: USER_ITEMS, systemItems: system };
@@ -58,8 +59,12 @@ export function NavRow() {
   return (
     <nav className="flex items-center gap-0.5" aria-label="页面导航">
       {userItems.map((it) => item(it))}
-      <span className="mx-1.5 h-4 w-px bg-border" aria-hidden />
-      {systemItems.map((it) => item(it, true))}
+      {systemItems.length > 0 && (
+        <>
+          <span className="mx-1.5 h-4 w-px bg-border" aria-hidden />
+          {systemItems.map((it) => item(it, true))}
+        </>
+      )}
     </nav>
   );
 }
@@ -89,9 +94,13 @@ export function NavColumn() {
   return (
     <nav className="flex flex-col" aria-label="页面导航">
       <div className="flex flex-col gap-0.5">{userItems.map(row)}</div>
-      {/* 系统观察面：与用户功能分层，不抢主航位置 */}
-      <p className="t-meta mt-4 px-3 pb-1 font-semibold text-muted-foreground/70">系统</p>
-      <div className="flex flex-col gap-0.5">{systemItems.map(row)}</div>
+      {/* 系统观察面：与用户功能分层，不抢主航位置（游客隐藏，P39） */}
+      {systemItems.length > 0 && (
+        <>
+          <p className="t-meta mt-4 px-3 pb-1 font-semibold text-muted-foreground/70">系统</p>
+          <div className="flex flex-col gap-0.5">{systemItems.map(row)}</div>
+        </>
+      )}
     </nav>
   );
 }

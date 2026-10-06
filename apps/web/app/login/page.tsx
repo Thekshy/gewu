@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Loader2, LogIn, TriangleAlert, UserPlus } from "lucide-react";
 import { login, register } from "@/lib/api";
@@ -11,6 +12,8 @@ import { Input } from "@/components/ui/input";
 
 // 登录/注册（P21 邀请码封闭注册·内测）：同源代理链路，cookie 会话由服务端下发。
 // 单卡单层容器 + hairline 分隔（DESIGN.md：无嵌套卡片、无光斑、无冷色）。
+// P39 游客可达：游客是合法登录态但需登录升级，故只把「正式成员」顶回 /（否则游客
+// 永远进不了登录页）；游客停留时给「返回对话」出口。
 
 type Mode = "login" | "register";
 
@@ -23,10 +26,11 @@ export default function LoginPage() {
   const [inviteCode, setInviteCode] = useState("");
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
+  const isGuest = user?.role === "guest";
 
   useEffect(() => {
-    if (!loading && user) router.replace("/"); // 已登录直达对话页
-  }, [loading, user, router]);
+    if (!loading && user && !isGuest) router.replace("/"); // 正式成员已登录直达对话页
+  }, [loading, user, isGuest, router]);
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -153,7 +157,16 @@ export default function LoginPage() {
         </form>
 
         <p className="text-center text-xs text-muted-foreground">
-          演示语料与业务系统均为虚构的「钱塘大学」合成数据
+          {isGuest ? (
+            <>
+              当前为游客身份，登录后可延续更完整的功能 ·{" "}
+              <Link href="/" className="underline underline-offset-2">
+                返回对话
+              </Link>
+            </>
+          ) : (
+            "游客可直接体验 · 演示语料与业务系统均为虚构的「钱塘大学」合成数据"
+          )}
         </p>
       </div>
     </main>

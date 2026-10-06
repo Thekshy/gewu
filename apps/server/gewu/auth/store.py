@@ -22,6 +22,9 @@ SESSION_TTL = timedelta(days=30)
 SESSION_REFRESH_AHEAD = timedelta(days=15)  # 剩余不足 15d 时滑动续期
 
 VALID_ROLES = ("student", "counselor", "admin")
+# P39 游客影子用户：不在 VALID_ROLES（admin 改角色面不可设），仅签发/清理例程使用
+GUEST_ROLE = "guest"
+GUEST_EMAIL_DOMAIN = "guest.local"  # 游客 email 域特征（prune 清理例程的圈定口径）
 
 _SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
@@ -55,8 +58,12 @@ CREATE TABLE IF NOT EXISTS invite_codes (
 """
 # P23：per-user token 限额（NULL=用 DAILY_USER_BUDGET 全局缺省）；CREATE TABLE
 # IF NOT EXISTS 对已有表不生效，幂等加列单独走 ALTER。
+# P39：users.role CHECK 约束重建加 'guest'（幂等：先 DROP 再 ADD，存量行合法）。
 _MIGRATE = """
 ALTER TABLE users ADD COLUMN IF NOT EXISTS daily_token_limit BIGINT;
+ALTER TABLE users DROP CONSTRAINT IF EXISTS users_role_check;
+ALTER TABLE users ADD CONSTRAINT users_role_check
+    CHECK (role IN ('student', 'counselor', 'admin', 'guest'));
 """
 
 
@@ -211,6 +218,29 @@ class AuthStore:
             )
         return user, token
 
+    def create_guest(self, *, ttl: timedelta, daily_token_limit: int) -> tuple[User, str]:
+        """P39 游客影子用户：随机 email + 受限限额 + 短 TTL 会话；返回 (user, 原始 token)。
+
+        密码哈希存随机不可用串（游客永不经密码登录）；display_name 固定「游客」。
+        全链路身份锚点是 email 字符串（下游表无 FK），故一个 users 行即贯通
+        会话/用量/台账/反馈；过期清理由 maintenance.prune_guests 负责。
+        email 用小写 hex——login/daily_limit 等按 lower(email) 查询，大写会失配。
+        """
+        email = f"guest-{secrets.token_hex(6)}@{GUEST_EMAIL_DOMAIN}"
+        token = secrets.token_urlsafe(32)
+        with self._pool.connection() as conn:  # 上下文 = 事务边界
+            urow = conn.execute(
+                "INSERT INTO users (email, password_hash, display_name, role, daily_token_limit)"
+                f" VALUES (%s, %s, '游客', '{GUEST_ROLE}', %s) RETURNING " + _USER_COLS,
+                (email, hash_password(secrets.token_urlsafe(24)), int(daily_token_limit)),
+            ).fetchone()
+            conn.execute(
+                "INSERT INTO auth_sessions (token_hash, user_id, expires_at)"
+                " VALUES (%s, %s, now() + %s)",
+                (_token_hash(token), urow[0], ttl),
+            )
+        return _user_row(urow), token
+
     def user_for_token(self, token: str) -> User | None:
         """cookie token → 登录用户（过期/停用 → None）；剩余 <15d 时滑动续期。"""
         if not token:
@@ -225,12 +255,14 @@ class AuthStore:
             ).fetchone()
             if row is None:
                 return None
-            conn.execute(
-                "UPDATE auth_sessions SET last_seen_at = now(),"
-                " expires_at = now() + %s WHERE token_hash = %s AND expires_at < now() + %s",
-                (SESSION_TTL, th, SESSION_REFRESH_AHEAD),
-            )
-        return _user_row(row)
+            user = _user_row(row)
+            if user.role != GUEST_ROLE:  # 游客短 TTL 硬过期，不滑动续期
+                conn.execute(
+                    "UPDATE auth_sessions SET last_seen_at = now(),"
+                    " expires_at = now() + %s WHERE token_hash = %s AND expires_at < now() + %s",
+                    (SESSION_TTL, th, SESSION_REFRESH_AHEAD),
+                )
+        return user
 
     def delete_session(self, token: str) -> None:
         if not token:

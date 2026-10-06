@@ -15,7 +15,7 @@ import {
   type HealthInfo,
   type SearchHit,
 } from "@/lib/api";
-import { useRequireUser } from "@/lib/auth";
+import { useRequireMember } from "@/lib/auth";
 import {
   AlertDialog,
   AlertDialogCancel,
@@ -356,7 +356,7 @@ function Corpus() {
 }
 
 export default function Console() {
-  const { user } = useRequireUser(); // P21：登录守卫；台账本人视图，admin 全量+重置
+  const { user } = useRequireMember(); // P39 起正式成员守卫（游客 403 面）；台账本人视图，admin 全量+重置
   const [health, setHealth] = useState<HealthInfo | null>(null);
   const [tab, setTab] = useState<TabKey>("evidence");
 

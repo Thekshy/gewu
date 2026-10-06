@@ -221,7 +221,10 @@ make run                                # 宿主直跑 :8000（systemd 托管）
   请确保 `proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for`；
 - HTTPS 上线后生产 `.env` 加 `COOKIE_SECURE=1`（会话 cookie 带 Secure 标志）；
 - FastAPI 框架文档面（`/docs` / `/redoc` / `/openapi.json`）缺省关闭，
-  本地调试加 `API_DOCS=1`。
+  本地调试加 `API_DOCS=1`；
+- 游客开放通道（P39）：生产 `.env` 加 `GUEST_MODE=1` 后访客免登录直接用
+  （学生同集能力 + 50k/天配额 + 7 天短会话），过期游客 `make guest-prune`
+  定期回收；缺省关闭=仅注册用户可用。
 
 ## 文档地图
 
@@ -230,7 +233,7 @@ make run                                # 宿主直跑 :8000（systemd 托管）
 | 架构文档系列：总览 / 编排图 / 各领域 / 横切 / 评测（01~11） | [docs/architecture/](./docs/architecture/) |
 | 设计讲解系列：链路 / 路由 / 执行 / 记忆 / 工程防线 / 演进史（含取舍与已知短板；Go 时代视角，历史留档） | [docs/walkthrough/](./docs/walkthrough/) |
 | 单点决策记录（10 篇，含 LangGraph 迁移） | [docs/ADR/](./docs/ADR/) |
-| 任务执行留档：P 系列任务书（P6~P36，全真跑门禁） | [docs/runbooks/](./docs/runbooks/)（P31 = 单循环终态 · P32 = 记忆层 · P34 = 前端设计工作流） |
+| 任务执行留档：P 系列任务书（P6~P39，全真跑门禁） | [docs/runbooks/](./docs/runbooks/)（P31 = 单循环终态 · P32 = 记忆层 · P34 = 前端设计工作流 · P39 = 游客开放通道） |
 | 竞品深研：8 个开源 Agent 项目源码级对照 | [docs/research/](./docs/research/) |
 | 行为规格与 SSE 事件契约 | [docs/PARITY.md](./docs/PARITY.md) |
 | 前端设计契约 | [DESIGN.md](./DESIGN.md) |
