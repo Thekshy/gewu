@@ -72,6 +72,7 @@ def load_cases(dataset: Path, extra: Path | None) -> list[dict]:
                     "type": row["type"],
                     "question": row["question"],
                     "gold": set(row["expected_docs"]),
+                    "tier": row.get("tier", "must_pass"),  # P40-2 三层分化，缺省必过
                 }
             )
     if extra is not None and extra.is_file():
@@ -86,6 +87,7 @@ def load_cases(dataset: Path, extra: Path | None) -> list[dict]:
                         "type": "variant",
                         "question": row["query"],
                         "gold": set(row["gold"]),
+                        "tier": "must_pass",
                     }
                 )
     return cases
@@ -142,6 +144,7 @@ def main() -> int:
                     {
                         "id": case["id"],
                         "type": case["type"],
+                        "tier": case["tier"],
                         "gold": sorted(case["gold"]),
                         "ranked_docs": ranked,
                         "recall": round(rec, 4),
@@ -156,6 +159,19 @@ def main() -> int:
         name: sum(r[name] for r in rounds_metrics) / args.rounds
         for name in ("recall", "mrr", "ndcg")
     }
+    # P40-2 分 tier 汇总（第一轮的逐题结果聚合）
+    tiers: dict[str, dict] = {}
+    for pq in per_query:
+        t = tiers.setdefault(
+            pq["tier"], {"cases": 0, "recall": 0.0, "mrr": 0.0, "ndcg": 0.0}
+        )
+        t["cases"] += 1
+        t["recall"] += pq["recall"]
+        t["mrr"] += pq["mrr"]
+        t["ndcg"] += pq["ndcg"]
+    for t in tiers.values():
+        for m in ("recall", "mrr", "ndcg"):
+            t[m] = round(t[m] / t["cases"], 4)
     stamp = time.strftime("%Y%m%d-%H%M%S")
     report = {
         "tag": args.tag,
@@ -168,6 +184,7 @@ def main() -> int:
         "extra": str(args.extra) if args.extra else "",
         "metrics": {f"{name}@{k}" if name != "mrr" else "mrr": round(v, 4)
                     for name, v in avg.items()},
+        "by_tier": tiers,
         "per_round": [{name: round(v, 4) for name, v in r.items()} for r in rounds_metrics],
         "per_query": per_query,
     }
@@ -178,6 +195,8 @@ def main() -> int:
     print(f"{label}检索评测：{n_cases} 题 × {args.rounds} 轮  k={k}"
           f"  rewrite={'off' if args.no_rewrite else 'on'}  rerank={'off' if args.no_rerank else 'on'}")
     print(f"  Recall@{k}={avg['recall']:.4f}  MRR={avg['mrr']:.4f}  NDCG@{k}={avg['ndcg']:.4f}")
+    for tname, t in sorted(tiers.items()):
+        print(f"  [{tname}] n={t['cases']}  R={t['recall']:.4f}  MRR={t['mrr']:.4f}  NDCG={t['ndcg']:.4f}")
     print(f"  报告：{out}")
     store.close()
     return 0

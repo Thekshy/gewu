@@ -1,7 +1,7 @@
-{"id": "fact-001", "type": "factual", "question": "图书馆工作日几点开门几点闭馆？", "mode": "auto", "expected_docs": ["0007-library"], "gold_keywords": ["7:30", "22:30"]}
-{"id": "fact-002", "type": "factual", "question": "校园卡丢了怎么挂失？补办要多少钱？", "mode": "auto", "expected_docs": ["0009-campus-card"], "gold_keywords": ["15元"]}
+{"id": "fact-001", "type": "factual", "question": "图书馆工作日几点开门几点闭馆？", "mode": "auto", "expected_docs": ["0007-library", "0203-library-faq"], "gold_keywords": ["7:30", "22:30"], "gold_note": "P40-2 gold 复核增补：新 FAQ 逐题复述答案，多文档皆正确"}
+{"id": "fact-002", "type": "factual", "question": "校园卡丢了怎么挂失？补办要多少钱？", "mode": "auto", "expected_docs": ["0009-campus-card", "0212-campus-card-faq"], "gold_keywords": ["15元"], "gold_note": "P40-2 gold 复核增补：新 FAQ 逐题复述答案，多文档皆正确"}
 {"id": "fact-003", "type": "factual", "question": "我请假一周需要找谁审批？", "mode": "auto", "expected_docs": ["0010-leave"], "gold_keywords": ["学院"]}
-{"id": "fact-004", "type": "factual", "question": "本科生一次最多能借几本书？借多久？", "mode": "auto", "expected_docs": ["0007-library"], "gold_keywords": ["10", "30"]}
+{"id": "fact-004", "type": "factual", "question": "本科生一次最多能借几本书？借多久？", "mode": "auto", "expected_docs": ["0007-library", "0203-library-faq"], "gold_keywords": ["10", "30"], "gold_note": "P40-2 gold 复核增补：新 FAQ 逐题复述答案，多文档皆正确"}
 {"id": "fact-005", "type": "factual", "question": "春季学期什么时候开学？", "mode": "auto", "expected_docs": ["0006-calendar"], "gold_keywords": ["2月22"]}
 {"id": "fact-006", "type": "factual", "question": "在校医院看病门诊报销比例是多少？", "mode": "auto", "expected_docs": ["0015-medical"], "gold_keywords": ["80"]}
 {"id": "fact-007", "type": "factual", "question": "宿舍门禁是几点？晚归会怎么样？", "mode": "auto", "expected_docs": ["0008-dormitory"], "gold_keywords": ["23:00"]}
@@ -9,7 +9,7 @@
 {"id": "multi-002", "type": "multi_hop", "question": "转专业之后原来修的课程成绩会算进新专业绩点吗？会不会影响之后保研排名？", "mode": "auto", "expected_docs": ["0001-transfer", "0002-credit-recognition"], "gold_keywords": ["通过/不通过", "不计入"]}
 {"id": "multi-003", "type": "multi_hop", "question": "想申请国家奖学金但去年体测没合格，有影响吗？有什么补救办法？", "mode": "auto", "expected_docs": ["0004-scholarship", "0005-fitness-test"], "gold_keywords": ["补测"]}
 {"id": "multi-004", "type": "multi_hop", "question": "申请国际交换需要什么条件？去交换修的学分能转回来多少？", "mode": "auto", "expected_docs": ["0011-exchange"], "gold_keywords": ["3.2", "25"]}
-{"id": "multi-005", "type": "multi_hop", "question": "保研对英语成绩有什么要求？六级没过的话托福雅思可以替代吗？", "mode": "auto", "expected_docs": ["0003-postgraduate-recommendation"], "gold_keywords": ["425", "80", "6.0"]}
+{"id": "multi-005", "type": "multi_hop", "question": "保研对英语成绩有什么要求？六级没过的话托福雅思可以替代吗？", "mode": "auto", "expected_docs": ["0003-postgraduate-recommendation", "0094-recommendation-faq"], "gold_keywords": ["425", "80", "6.0"], "gold_note": "P40-2 gold 复核增补：新 FAQ 逐题复述答案，多文档皆正确"}
 {"id": "multi-006", "type": "multi_hop", "question": "一学期修不够多少学分会被学业预警？什么情况会被退学？", "mode": "auto", "expected_docs": ["0014-academic-warning"], "gold_keywords": ["12"]}
 {"id": "multi-007", "type": "multi_hop", "question": "修辅修专业需要什么绩点条件？总共要修多少学分、大概花多少钱？", "mode": "auto", "expected_docs": ["0012-minor"], "gold_keywords": ["2.8", "25", "100"]}
 {"id": "multi-008", "type": "multi_hop", "question": "毕业论文什么时候开题？查重率要求是多少？超了会怎样？", "mode": "auto", "expected_docs": ["0013-thesis"], "gold_keywords": ["15%", "15%以内", "取消"]}
@@ -26,3 +26,78 @@
 {"id": "tx-008", "type": "transaction", "role": "student", "turns": ["现在有哪些场馆可以预约"], "expect": {"success": true, "answer_contains": ["羽毛球馆"]}}
 {"id": "mtfact-001", "type": "factual", "role": "student", "turns": ["转专业有哪些申请条件？", "那第二条具体是什么？"], "expect": {"route": "factual", "citations_include": ["0001-transfer"], "answer_contains": ["3.0"]}}
 {"id": "mtfact-002", "type": "factual", "role": "student", "turns": ["我是计算机专业的学生，绩点3.8", "我的情况符合转专业申请条件吗？"], "expect": {"route": "factual", "citations_include": ["0001-transfer"], "answer_contains": ["3.0"]}}
+{"id": "ch-nb-001", "type": "factual", "question": "学生证丢了补办要多少工本费？", "mode": "auto", "expected_docs": ["0076-student-id-card", "0077-student-id-faq"], "gold_keywords": ["5"], "tier": "challenge"}
+{"id": "ch-nb-002", "type": "factual", "question": "中文成绩单加印一份多少钱？", "mode": "auto", "expected_docs": ["0038-transcript-guide"], "gold_keywords": ["10"], "tier": "challenge"}
+{"id": "ch-nb-003", "type": "factual", "question": "中英文成绩单（含密封）怎么收费？", "mode": "auto", "expected_docs": ["0038-transcript-guide"], "gold_keywords": ["30"], "tier": "challenge"}
+{"id": "ch-nb-004", "type": "factual", "question": "休学一次最长能休多久？", "mode": "auto", "expected_docs": ["0064-suspension-resumption", "0067-suspension-faq"], "gold_keywords": ["一年"], "tier": "challenge"}
+{"id": "ch-nb-005", "type": "factual", "question": "参军入伍学籍保留到什么时候？", "mode": "auto", "expected_docs": ["0065-leave-of-absence"], "gold_keywords": ["退役后两年"], "tier": "challenge"}
+{"id": "ch-nb-006", "type": "factual", "question": "想申请走读需要办什么手续？", "mode": "auto", "expected_docs": ["0008-dormitory", "0155-dormitory-faq"], "gold_keywords": ["承诺书"], "tier": "challenge"}
+{"id": "ch-nb-007", "type": "factual", "question": "宿舍楼几点以后必须保持安静？", "mode": "auto", "expected_docs": ["0008-dormitory", "0155-dormitory-faq"], "gold_keywords": ["23:30"], "tier": "challenge"}
+{"id": "ch-nb-008", "type": "factual", "question": "调整宿舍的申请窗口是什么时候？", "mode": "auto", "expected_docs": ["0008-dormitory", "0155-dormitory-faq"], "gold_keywords": ["2—4", "第 2"], "tier": "challenge"}
+{"id": "ch-nb-009", "type": "factual", "question": "词典年鉴这类工具书能借走吗？", "mode": "auto", "expected_docs": ["0210-special-collections"], "gold_keywords": ["不"], "tier": "challenge"}
+{"id": "ch-nb-010", "type": "factual", "question": "研究生一次能借几本书？", "mode": "auto", "expected_docs": ["0007-library", "0203-library-faq"], "gold_keywords": ["20"], "tier": "challenge"}
+{"id": "ch-nb-011", "type": "factual", "question": "图书馆研修间使用人数有什么要求？", "mode": "auto", "expected_docs": ["0007-library", "0204-library-rooms"], "gold_keywords": ["50%"], "tier": "challenge"}
+{"id": "ch-nb-012", "type": "factual", "question": "图书逾期费标准是多少？", "mode": "auto", "expected_docs": ["0007-library", "0209-overdue-compensation"], "gold_keywords": ["0.10"], "tier": "challenge"}
+{"id": "ch-nb-013", "type": "factual", "question": "保研对六级分数的要求是多少？", "mode": "auto", "expected_docs": ["0003-postgraduate-recommendation", "0094-recommendation-faq"], "gold_keywords": ["425"], "tier": "challenge"}
+{"id": "ch-nb-014", "type": "factual", "question": "申请国际交换的绩点门槛是多少？", "mode": "auto", "expected_docs": ["0011-exchange", "0176-exchange-faq"], "gold_keywords": ["3.2"], "tier": "challenge"}
+{"id": "ch-nb-015", "type": "factual", "question": "修辅修专业对绩点有什么要求？", "mode": "auto", "expected_docs": ["0012-minor", "0023-minor-faq"], "gold_keywords": ["2.8"], "tier": "challenge"}
+{"id": "ch-nb-016", "type": "factual", "question": "现在转专业要求绩点不低于多少？", "mode": "auto", "expected_docs": ["0001-transfer", "0017-transfer-faq"], "gold_keywords": ["3.0"], "tier": "challenge"}
+{"id": "ch-nb-017", "type": "factual", "question": "缓考最晚什么时候申请？", "mode": "auto", "expected_docs": ["0034-deferred-exam"], "gold_keywords": ["3"], "tier": "challenge"}
+{"id": "ch-nb-018", "type": "factual", "question": "补考一般安排在什么时间？", "mode": "auto", "expected_docs": ["0034-deferred-exam", "0029-retake-faq"], "gold_keywords": ["第 1—2"], "tier": "challenge"}
+{"id": "ch-nb-019", "type": "factual", "question": "一门课旷课达到多少会取消考核资格？", "mode": "auto", "expected_docs": ["0042-classroom-attendance"], "gold_keywords": ["三分之一"], "tier": "challenge"}
+{"id": "ch-nb-020", "type": "factual", "question": "考试作弊会受什么档次的处分？", "mode": "auto", "expected_docs": ["0031-exam-violation", "0134-discipline-faq"], "gold_keywords": ["留校察看"], "tier": "challenge"}
+{"id": "ch-nb-021", "type": "factual", "question": "替别人考试会被开除学籍吗？", "mode": "auto", "expected_docs": ["0031-exam-violation", "0131-discipline-rules"], "gold_keywords": ["开除"], "tier": "challenge"}
+{"id": "ch-nb-022", "type": "factual", "question": "打架斗殴按什么规定处理？", "mode": "auto", "expected_docs": ["0131-discipline-rules"], "gold_keywords": ["违纪"], "tier": "challenge"}
+{"id": "ch-nb-023", "type": "factual", "question": "处分解除后评奖学金还算无违纪吗？", "mode": "auto", "expected_docs": ["0134-discipline-faq", "0135-discipline-removal-rules"], "gold_keywords": ["学年"], "tier": "challenge"}
+{"id": "ch-nb-024", "type": "factual", "question": "特别困难学生对应国家助学金哪一档？", "mode": "auto", "expected_docs": ["0111-grant-management"], "gold_keywords": ["一等", "4500"], "tier": "challenge"}
+{"id": "ch-nb-025", "type": "factual", "question": "孤儿学生学费可以全免吗？", "mode": "auto", "expected_docs": ["0122-tuition-waiver"], "gold_keywords": ["全免"], "tier": "challenge"}
+{"id": "ch-nb-026", "type": "factual", "question": "勤工助学现在的时薪是多少？", "mode": "auto", "expected_docs": ["0118-work-study", "0120-work-study-faq"], "gold_keywords": ["20"], "tier": "challenge"}
+{"id": "ch-nb-027", "type": "factual", "question": "本科生国家助学贷款一年最多多少？", "mode": "auto", "expected_docs": ["0115-campus-loan-guide", "0117-loan-faq"], "gold_keywords": ["16000"], "tier": "challenge"}
+{"id": "ch-nb-028", "type": "factual", "question": "新生绿色通道什么时候申请？", "mode": "auto", "expected_docs": ["0125-green-channel-guide", "0074-tuition-payment"], "gold_keywords": ["预报到", "报到"], "tier": "challenge"}
+{"id": "ch-nb-029", "type": "factual", "question": "学校心理咨询单独收费吗？", "mode": "auto", "expected_docs": ["0162-mental-health", "0163-counseling-guide"], "gold_keywords": ["免费", "8"], "tier": "challenge"}
+{"id": "ch-nb-030", "type": "factual", "question": "心理咨询记录会进学籍档案吗？", "mode": "auto", "expected_docs": ["0162-mental-health", "0163-counseling-guide"], "gold_keywords": ["不"], "tier": "challenge"}
+{"id": "ch-nb-031", "type": "factual", "question": "游泳馆深水区要什么资格？", "mode": "auto", "expected_docs": ["0160-swimming-pool"], "gold_keywords": ["200"], "tier": "challenge"}
+{"id": "ch-nb-032", "type": "factual", "question": "考研自习室怎么预约？", "mode": "auto", "expected_docs": ["0204-library-rooms", "0096-postgraduate-exam-support"], "gold_keywords": ["学号", "预约"], "tier": "challenge"}
+{"id": "ch-nb-033", "type": "factual", "question": "食堂饭菜吃出异物怎么处理？", "mode": "auto", "expected_docs": ["0151-canteen-management", "0152-canteen-guide"], "gold_keywords": ["免单", "留证"], "tier": "challenge"}
+{"id": "ch-nb-034", "type": "factual", "question": "三方协议违约后还能换新的吗？", "mode": "auto", "expected_docs": ["0186-employment-procedures-guide", "0188-tripartite-agreement-guide"], "gold_keywords": ["一次"], "tier": "challenge"}
+{"id": "ch-nb-035", "type": "factual", "question": "同版新书赔偿要交加工费吗？", "mode": "auto", "expected_docs": ["0209-overdue-compensation"], "gold_keywords": ["5"], "tier": "challenge"}
+{"id": "ch-vt-001", "type": "factual", "question": "2024 版办法里转专业申请还要求什么记录？", "mode": "auto", "expected_docs": ["0019-transfer-rules-2024"], "gold_keywords": ["补考"], "tier": "challenge"}
+{"id": "ch-vt-002", "type": "factual", "question": "2024 年勤工助学的时薪标准是多少？", "mode": "auto", "expected_docs": ["0119-work-study-2024"], "gold_keywords": ["15"], "tier": "challenge"}
+{"id": "ch-vt-003", "type": "factual", "question": "2024 版国家助学金分几档？", "mode": "auto", "expected_docs": ["0114-grant-2024"], "gold_keywords": ["两档", "2"], "tier": "challenge"}
+{"id": "ch-vt-004", "type": "factual", "question": "旧版规定本科生一次能借几册书？", "mode": "auto", "expected_docs": ["0202-library-2024"], "gold_keywords": ["8"], "tier": "challenge"}
+{"id": "ch-vt-005", "type": "factual", "question": "以前校园卡补办工本费是多少？", "mode": "auto", "expected_docs": ["0217-campus-card-2024"], "gold_keywords": ["20"], "tier": "challenge"}
+{"id": "ch-vt-006", "type": "factual", "question": "2024 版毕业论文查重线是多少？", "mode": "auto", "expected_docs": ["0218-thesis-2024"], "gold_keywords": ["20%", "20"], "tier": "challenge"}
+{"id": "ch-vt-007", "type": "factual", "question": "旧版请假办法里辅导员最多能批几天？", "mode": "auto", "expected_docs": ["0219-leave-2024"], "gold_keywords": ["2"], "tier": "challenge"}
+{"id": "ch-vt-008", "type": "factual", "question": "旧版学业预警一学期的学分线是多少？", "mode": "auto", "expected_docs": ["0216-academic-warning-2024"], "gold_keywords": ["10"], "tier": "challenge"}
+{"id": "ch-vt-009", "type": "factual", "question": "2024 版考试作弊的处分起点是什么？", "mode": "auto", "expected_docs": ["0032-exam-violation-2024"], "gold_keywords": ["记过"], "tier": "challenge"}
+{"id": "ch-vt-010", "type": "multi_hop", "question": "论文查重线从旧标准的多少收紧到了 15%？", "mode": "auto", "expected_docs": ["0013-thesis", "0218-thesis-2024"], "gold_keywords": ["20%", "20", "15%"], "tier": "challenge"}
+{"id": "ch-xd-001", "type": "multi_hop", "question": "被学业预警了还能申请转专业吗？预警学生有什么帮扶？", "mode": "auto", "expected_docs": ["0014-academic-warning", "0016-transfer-detailed-rules"], "gold_keywords": ["不得", "帮扶"], "tier": "challenge"}
+{"id": "ch-xd-002", "type": "multi_hop", "question": "退役复学能免修体育课吗？学费有什么资助？", "mode": "auto", "expected_docs": ["0065-leave-of-absence", "0123-military-aid"], "gold_keywords": ["免修", "12000"], "tier": "challenge"}
+{"id": "ch-xd-003", "type": "multi_hop", "question": "体测免测要什么证明？评奖学金认免测吗？", "mode": "auto", "expected_docs": ["0005-fitness-test", "0004-scholarship"], "gold_keywords": ["三级甲等", "视同"], "tier": "challenge"}
+{"id": "ch-xd-004", "type": "multi_hop", "question": "缓考和补考的成绩记载方式有什么区别？", "mode": "auto", "expected_docs": ["0034-deferred-exam", "0036-grade-management"], "gold_keywords": ["正常", "实际"], "tier": "challenge"}
+{"id": "ch-xd-005", "type": "multi_hop", "question": "重修课不及格还能补考吗？GPA 怎么算？", "mode": "auto", "expected_docs": ["0028-retake", "0036-grade-management"], "gold_keywords": ["最高"], "tier": "challenge"}
+{"id": "ch-xd-006", "type": "multi_hop", "question": "宿舍晚归累计很多次会受纪律处分吗？依据什么？", "mode": "auto", "expected_docs": ["0008-dormitory", "0131-discipline-rules"], "gold_keywords": ["5", "违纪"], "tier": "challenge"}
+{"id": "ch-xd-007", "type": "multi_hop", "question": "考试作弊会取消学位授予资格吗？之后还有补救吗？", "mode": "auto", "expected_docs": ["0031-exam-violation", "0086-graduation-degree-rules", "0088-certificate-exchange-guide"], "gold_keywords": ["取消", "补授"], "tier": "challenge"}
+{"id": "ch-xd-008", "type": "multi_hop", "question": "转专业后原专业课程怎么认定？什么时限内申请？", "mode": "auto", "expected_docs": ["0002-credit-recognition", "0079-transfer-enrollment-guide"], "gold_keywords": ["两周"], "tier": "challenge"}
+{"id": "ch-xd-009", "type": "multi_hop", "question": "辅修挂科影响主修绩点吗？中途放弃学分怎么处理？", "mode": "auto", "expected_docs": ["0012-minor", "0002-credit-recognition"], "gold_keywords": ["不", "任意选修"], "tier": "challenge"}
+{"id": "ch-xd-010", "type": "multi_hop", "question": "家庭经济困难缴不上学费有哪些渠道？", "mode": "auto", "expected_docs": ["0074-tuition-payment", "0124-aid-system-table"], "gold_keywords": ["缓缴", "绿色通道"], "tier": "challenge"}
+{"id": "ch-xd-011", "type": "multi_hop", "question": "生源地贷款回执什么时候录入？钱到账后怎么冲抵？", "mode": "auto", "expected_docs": ["0116-origin-loan-guide", "0074-tuition-payment"], "gold_keywords": ["10 月", "冲抵"], "tier": "challenge"}
+{"id": "ch-xd-012", "type": "multi_hop", "question": "交换回来的学分怎么转换认定？", "mode": "auto", "expected_docs": ["0180-exchange-credit-guide", "0011-exchange"], "gold_keywords": ["25", "两周"], "tier": "challenge"}
+{"id": "ch-xd-013", "type": "multi_hop", "question": "保研竞赛加分上限是多少？按什么目录认定？", "mode": "auto", "expected_docs": ["0003-postgraduate-recommendation", "0095-recommendation-bonus-rules"], "gold_keywords": ["3", "目录"], "tier": "challenge"}
+{"id": "ch-xd-014", "type": "multi_hop", "question": "论文查重超标了当次还能答辩吗？什么时候重新检测？", "mode": "auto", "expected_docs": ["0013-thesis", "0100-thesis-plagiarism-rules"], "gold_keywords": ["取消", "下一届"], "tier": "challenge"}
+{"id": "ch-xd-015", "type": "multi_hop", "question": "结业后还能换毕业证吗？学位可以补授吗？", "mode": "auto", "expected_docs": ["0086-graduation-degree-rules", "0088-certificate-exchange-guide"], "gold_keywords": ["一年", "补授"], "tier": "challenge"}
+{"id": "golden-001", "type": "multi_hop", "question": "大一挂科拿到黄色预警后，还能在第二学期申请转专业吗？绩点条件怎么判断？", "mode": "auto", "expected_docs": ["0014-academic-warning", "0001-transfer"], "gold_keywords": ["不得", "3.0"], "tier": "golden"}
+{"id": "golden-002", "type": "multi_hop", "question": "受留校察看处分的学生毕业前处分解除不了怎么办？影响学位吗？", "mode": "auto", "expected_docs": ["0131-discipline-rules", "0135-discipline-removal-rules", "0086-graduation-degree-rules"], "gold_keywords": ["不予解除", "鉴定"], "tier": "golden"}
+{"id": "golden-003", "type": "multi_hop", "question": "休学创业两年后复学，学习年限还够吗？最多还能休多久？", "mode": "auto", "expected_docs": ["0063-student-status-rules", "0064-suspension-resumption", "0065-leave-of-absence"], "gold_keywords": ["六年", "两年"], "tier": "golden"}
+{"id": "golden-004", "type": "multi_hop", "question": "退役复学学生想转专业，和普通学生有什么不同政策？", "mode": "auto", "expected_docs": ["0083-military-service-guide", "0065-leave-of-absence", "0001-transfer"], "gold_keywords": ["不受", "单独"], "tier": "golden"}
+{"id": "golden-005", "type": "multi_hop", "question": "红色预警后下学期学分还是不够会被退学吗？对决定不服怎么办？", "mode": "auto", "expected_docs": ["0014-academic-warning", "0133-appeal-rules"], "gold_keywords": ["退学", "10"], "tier": "golden"}
+{"id": "golden-006", "type": "multi_hop", "question": "家庭经济困难新生怎么先入学？入学后还能申请哪些资助？", "mode": "auto", "expected_docs": ["0125-green-channel-guide", "0124-aid-system-table", "0112-poverty-determination"], "gold_keywords": ["绿色通道", "困难"], "tier": "golden"}
+{"id": "golden-007", "type": "multi_hop", "question": "转进中外合作办学专业后学费怎么变？原课程学分怎么处理？", "mode": "auto", "expected_docs": ["0001-transfer", "0079-transfer-enrollment-guide", "0002-credit-recognition"], "gold_keywords": ["28000", "通过/不通过"], "tier": "golden"}
+{"id": "golden-008", "type": "multi_hop", "question": "只有雅思 6.0 想保研够吗？科研加分最多能加多少？", "mode": "auto", "expected_docs": ["0003-postgraduate-recommendation", "0095-recommendation-bonus-rules"], "gold_keywords": ["6.0", "3"], "tier": "golden"}
+{"id": "golden-009", "type": "multi_hop", "question": "正在修辅修又想转专业，辅修资格和已修学分怎么办？", "mode": "auto", "expected_docs": ["0012-minor", "0017-transfer-faq"], "gold_keywords": ["终止", "任意选修"], "tier": "golden"}
+{"id": "golden-010", "type": "multi_hop", "question": "体测不合格对学生毕业、评奖学金分别有什么影响？", "mode": "auto", "expected_docs": ["0005-fitness-test", "0004-scholarship", "0086-graduation-degree-rules"], "gold_keywords": ["合格", "毕业"], "tier": "golden"}
+{"id": "golden-011", "type": "multi_hop", "question": "考试违纪和考试作弊的处理与学位后果分别是什么？", "mode": "auto", "expected_docs": ["0031-exam-violation", "0086-graduation-degree-rules"], "gold_keywords": ["严重警告", "留校察看"], "tier": "golden"}
+{"id": "golden-012", "type": "multi_hop", "question": "欠着学费的毕业生能领毕业证吗？有哪些正规渠道解决？", "mode": "auto", "expected_docs": ["0074-tuition-payment", "0086-graduation-degree-rules"], "gold_keywords": ["暂缓", "缓缴"], "tier": "golden"}
+{"id": "golden-013", "type": "multi_hop", "question": "交换一学期修了 30 学分回来怎么认定？多余的算什么？", "mode": "auto", "expected_docs": ["0011-exchange", "0002-credit-recognition"], "gold_keywords": ["25", "任意选修"], "tier": "golden"}
+{"id": "golden-014", "type": "multi_hop", "question": "论文查重 18% 会怎么样？还有机会按期毕业吗？", "mode": "auto", "expected_docs": ["0013-thesis", "0100-thesis-plagiarism-rules", "0087-graduation-precheck"], "gold_keywords": ["取消", "下一届"], "tier": "golden"}
+{"id": "golden-015", "type": "multi_hop", "question": "宿舍违规用电引发火情会受什么处分？影响评奖学金吗？", "mode": "auto", "expected_docs": ["0008-dormitory", "0131-discipline-rules"], "gold_keywords": ["严重警告", "记过"], "tier": "golden"}

@@ -1,15 +1,15 @@
 {"query": "图书馆平时啥时候开门啊，几点关门？", "gold": ["0007-library"], "src_id": "fact-001"}
 {"query": "图书室工作日开放时间是什么？", "gold": ["0007-library"], "src_id": "fact-001"}
 {"query": "图书馆开门闭馆时间", "gold": ["0007-library"], "src_id": "fact-001"}
-{"query": "卡丢了咋挂失？补办收多少钱？", "gold": ["0009-campus-card"], "src_id": "fact-002"}
-{"query": "饭卡遗失如何挂失，补办费用多少？", "gold": ["0009-campus-card"], "src_id": "fact-002"}
-{"query": "校园卡挂失 补办费用", "gold": ["0009-campus-card"], "src_id": "fact-002"}
+{"query": "卡丢了咋挂失？补办收多少钱？", "gold": ["0009-campus-card", "0212-campus-card-faq"], "src_id": "fact-002"}
+{"query": "饭卡遗失如何挂失，补办费用多少？", "gold": ["0009-campus-card", "0212-campus-card-faq"], "src_id": "fact-002"}
+{"query": "校园卡挂失 补办费用", "gold": ["0009-campus-card", "0212-campus-card-faq"], "src_id": "fact-002"}
 {"query": "请假一个星期该找谁签字啊", "gold": ["0010-leave"], "src_id": "fact-003"}
 {"query": "我要休假七天由谁负责批准？", "gold": ["0010-leave"], "src_id": "fact-003"}
 {"query": "请假审批人是谁", "gold": ["0010-leave"], "src_id": "fact-003"}
-{"query": "本科生一次能借几本啊？能借多久？", "gold": ["0007-library"], "src_id": "fact-004"}
-{"query": "一次最多可以借阅多少册书？期限多长？", "gold": ["0007-library"], "src_id": "fact-004"}
-{"query": "借书上限和借期", "gold": ["0007-library"], "src_id": "fact-004"}
+{"query": "本科生一次能借几本啊？能借多久？", "gold": ["0007-library", "0203-library-faq"], "src_id": "fact-004"}
+{"query": "一次最多可以借阅多少册书？期限多长？", "gold": ["0007-library", "0203-library-faq"], "src_id": "fact-004"}
+{"query": "借书上限和借期", "gold": ["0007-library", "0203-library-faq"], "src_id": "fact-004"}
 {"query": "春季学期啥时候开学啊？", "gold": ["0006-calendar"], "src_id": "fact-005"}
 {"query": "春季学期几号开学？", "gold": ["0006-calendar"], "src_id": "fact-005"}
 {"query": "春季开学时间", "gold": ["0006-calendar"], "src_id": "fact-005"}
@@ -19,27 +19,27 @@
 {"query": "寝室门禁几点，回来晚了咋办", "gold": ["0008-dormitory"], "src_id": "fact-007"}
 {"query": "宿舍晚上关门时间是啥，晚归有啥后果", "gold": ["0008-dormitory"], "src_id": "fact-007"}
 {"query": "门禁时间+晚归处理", "gold": ["0008-dormitory"], "src_id": "fact-007"}
-{"query": "大一挂科了一门还能转专业不？", "gold": ["0001-transfer"], "src_id": "multi-001"}
-{"query": "大一有一门课没过是否可以申请换专业？", "gold": ["0001-transfer"], "src_id": "multi-001"}
-{"query": "大一挂一门转专业", "gold": ["0001-transfer"], "src_id": "multi-001"}
-{"query": "转专业后以前的成绩算新专业GPA吗，影响保研排名不", "gold": ["0001-transfer", "0002-credit-recognition"], "src_id": "multi-002"}
-{"query": "转了专业，原来课程成绩会计入新专业绩点和保研排名吗", "gold": ["0001-transfer", "0002-credit-recognition"], "src_id": "multi-002"}
-{"query": "转专业 旧成绩 新专业绩点 保研排名", "gold": ["0001-transfer", "0002-credit-recognition"], "src_id": "multi-002"}
-{"query": "去年体测不合格还能申请国奖吗，咋补救？", "gold": ["0004-scholarship", "0005-fitness-test"], "src_id": "multi-003"}
-{"query": "国家助学金评定体测没过有影响吗，怎么补救？", "gold": ["0004-scholarship", "0005-fitness-test"], "src_id": "multi-003"}
-{"query": "体测不合格影响国奖申请吗？", "gold": ["0004-scholarship", "0005-fitness-test"], "src_id": "multi-003"}
-{"query": "想出国交换得满足啥要求？交换时修的学分能转多少回来？", "gold": ["0011-exchange"], "src_id": "multi-004"}
-{"query": "申请海外交流项目需要什么资格？外面修的学分怎么转回学校？", "gold": ["0011-exchange"], "src_id": "multi-004"}
-{"query": "国际交换申请条件？学分转换上限？", "gold": ["0011-exchange"], "src_id": "multi-004"}
-{"query": "推免对英语有啥要求，六级没过能用托福雅思顶吗", "gold": ["0003-postgraduate-recommendation"], "src_id": "multi-005"}
-{"query": "保研英语条件，四六级不过托福雅思可以代替吗", "gold": ["0003-postgraduate-recommendation"], "src_id": "multi-005"}
-{"query": "保研英语要求 六级替代", "gold": ["0003-postgraduate-recommendation"], "src_id": "multi-005"}
+{"query": "大一挂科了一门还能转专业不？", "gold": ["0001-transfer", "0017-transfer-faq"], "src_id": "multi-001"}
+{"query": "大一有一门课没过是否可以申请换专业？", "gold": ["0001-transfer", "0017-transfer-faq"], "src_id": "multi-001"}
+{"query": "大一挂一门转专业", "gold": ["0001-transfer", "0017-transfer-faq"], "src_id": "multi-001"}
+{"query": "转专业后以前的成绩算新专业GPA吗，影响保研排名不", "gold": ["0001-transfer", "0002-credit-recognition", "0017-transfer-faq"], "src_id": "multi-002"}
+{"query": "转了专业，原来课程成绩会计入新专业绩点和保研排名吗", "gold": ["0001-transfer", "0002-credit-recognition", "0017-transfer-faq"], "src_id": "multi-002"}
+{"query": "转专业 旧成绩 新专业绩点 保研排名", "gold": ["0001-transfer", "0002-credit-recognition", "0017-transfer-faq"], "src_id": "multi-002"}
+{"query": "去年体测不合格还能申请国奖吗，咋补救？", "gold": ["0004-scholarship", "0005-fitness-test", "0107-scholarship-faq"], "src_id": "multi-003"}
+{"query": "国家助学金评定体测没过有影响吗，怎么补救？", "gold": ["0004-scholarship", "0005-fitness-test", "0107-scholarship-faq"], "src_id": "multi-003"}
+{"query": "体测不合格影响国奖申请吗？", "gold": ["0004-scholarship", "0005-fitness-test", "0107-scholarship-faq"], "src_id": "multi-003"}
+{"query": "想出国交换得满足啥要求？交换时修的学分能转多少回来？", "gold": ["0011-exchange", "0185-intl-faq"], "src_id": "multi-004"}
+{"query": "申请海外交流项目需要什么资格？外面修的学分怎么转回学校？", "gold": ["0011-exchange", "0185-intl-faq"], "src_id": "multi-004"}
+{"query": "国际交换申请条件？学分转换上限？", "gold": ["0011-exchange", "0185-intl-faq"], "src_id": "multi-004"}
+{"query": "推免对英语有啥要求，六级没过能用托福雅思顶吗", "gold": ["0003-postgraduate-recommendation", "0094-recommendation-faq"], "src_id": "multi-005"}
+{"query": "保研英语条件，四六级不过托福雅思可以代替吗", "gold": ["0003-postgraduate-recommendation", "0094-recommendation-faq"], "src_id": "multi-005"}
+{"query": "保研英语要求 六级替代", "gold": ["0003-postgraduate-recommendation", "0094-recommendation-faq"], "src_id": "multi-005"}
 {"query": "一学期学分不够多少会学业预警啊，啥情况得退学？", "gold": ["0014-academic-warning"], "src_id": "multi-006"}
 {"query": "一学期修不满多少学分会收到学业警告？哪些情况会遭退学处理？", "gold": ["0014-academic-warning"], "src_id": "multi-006"}
 {"query": "学业预警学分线 退学条件", "gold": ["0014-academic-warning"], "src_id": "multi-006"}
 {"query": "读辅修对GPA有啥要求？学分和费用大概多少？", "gold": ["0012-minor"], "src_id": "multi-007"}
 {"query": "修双学位要什么绩点？要修几个学分、收多少钱？", "gold": ["0012-minor"], "src_id": "multi-007"}
 {"query": "辅修绩点要求、学分和费用", "gold": ["0012-minor"], "src_id": "multi-007"}
-{"query": "论文啥时候开题啊？查重超了咋办？", "gold": ["0013-thesis"], "src_id": "multi-008"}
-{"query": "毕业论文开题时间？重复率标准及超标后果？", "gold": ["0013-thesis"], "src_id": "multi-008"}
-{"query": "开题时间、查重率、超标处理", "gold": ["0013-thesis"], "src_id": "multi-008"}
+{"query": "论文啥时候开题啊？查重超了咋办？", "gold": ["0013-thesis", "0089-thesis-writing-guide"], "src_id": "multi-008"}
+{"query": "毕业论文开题时间？重复率标准及超标后果？", "gold": ["0013-thesis", "0089-thesis-writing-guide"], "src_id": "multi-008"}
+{"query": "开题时间、查重率、超标处理", "gold": ["0013-thesis", "0089-thesis-writing-guide"], "src_id": "multi-008"}
