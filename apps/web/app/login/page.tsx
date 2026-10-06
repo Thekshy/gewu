@@ -116,6 +116,11 @@ export default function LoginPage() {
               onChange={(e) => setEmail(e.target.value)}
               required
             />
+            {mode === "register" && (
+              <p className="t-meta text-muted-foreground">
+                邮箱仅作账号唯一标识：只校验格式，不验证真实性，无需真实收件箱，也不用于找回密码。
+              </p>
+            )}
           </div>
 
           <div className="space-y-1.5">
