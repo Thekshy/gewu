@@ -100,6 +100,9 @@ class Settings:
     guest_mode: bool = False
     guest_daily_token_limit: int = 50_000  # 游客日 token 限额（≈ 全局 per-user 的 1/4）
     guest_session_ttl_days: int = 7  # 游客会话硬过期（不滑动续期）
+    # 开放注册（P39 二段）：=1 时注册免邀请码（纯邮箱+密码）；缺省关=邀请码内测制
+    # （P21 语义不动，随时可收回）。开放态防滥用靠 register 端点 IP 限速。
+    open_registration: bool = False
 
     @classmethod
     def load(cls, env: Mapping[str, str] | None = None) -> Settings:
@@ -145,4 +148,6 @@ class Settings:
             guest_mode=env.get("GUEST_MODE", "").lower() in ("1", "true", "yes", "on"),
             guest_daily_token_limit=int(env.get("GUEST_DAILY_TOKEN_LIMIT", "50000")),
             guest_session_ttl_days=int(env.get("GUEST_SESSION_TTL_DAYS", "7")),
+            open_registration=env.get("OPEN_REGISTRATION", "").lower()
+            in ("1", "true", "yes", "on"),
         )

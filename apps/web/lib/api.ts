@@ -40,6 +40,7 @@ export interface HealthInfo {
   docs: number;
   chunks: number;
   budget: { used: number; limit: number };
+  open_registration: boolean; // P39：注册模式（true=免邀请码，登录页隐藏邀请码框）
 }
 
 /** GET /api/docs：已入库文档元信息。 */
@@ -155,7 +156,7 @@ export async function login(email: string, password: string): Promise<User> {
 export async function register(
   email: string,
   password: string,
-  inviteCode: string,
+  inviteCode?: string,
 ): Promise<User> {
   const res = await fetch(`${API_BASE}/api/auth/register`, {
     method: "POST",

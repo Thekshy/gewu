@@ -1,9 +1,10 @@
-"""游客开放通道测试（P39）：影子用户签发 / 权限边界 / 限流 / 清理级联。
+"""游客开放通道测试（P39）：影子用户签发 / 权限边界 / 限流 / 清理级联 / 开放注册。
 
 口径（runbook P39）：
 - GUEST_MODE 缺省关 → /api/auth/guest 404（与未开通道不可区分）；
 - 开 → 免登签发 guest 影子用户（学生同集工具面 + 低配额 + 短 TTL 不续期）；
-- 记忆/控制台面 require_member：游客 403；会话/台账/反馈照常（email 锚点贯通）。
+- 记忆/控制台面 require_member：游客 403；会话/台账/反馈照常（email 锚点贯通）；
+- OPEN_REGISTRATION 缺省关=邀请码内测制（P21 语义不动）；开=纯邮箱+密码注册。
 """
 
 from __future__ import annotations
@@ -20,6 +21,7 @@ from gewu.auth.store import GUEST_EMAIL_DOMAIN, InvalidCredentials
 from gewu.config import Settings
 from gewu.maintenance import prune_guests
 from gewu.middleware import RateLimiter
+from gewu.rag.store import Stats
 from tests.conftest import make_logged_client
 from tests.test_api import FakeRetriever, FakeStore, make_client
 
@@ -28,9 +30,10 @@ PWD = "password123"
 
 @pytest.fixture(autouse=True)
 def _reset_guest_limiters():
-    """模块级游客限流器跨用例复位（与 login 限速测试同隔离模式）。"""
+    """模块级限流器跨用例复位（与 login 限速测试同隔离模式）。"""
     auth_api._GUEST_MINUTE_LIMITER.reset()
     auth_api._GUEST_DAY_LIMITER.reset()
+    auth_api._REGISTER_IP_LIMITER.reset()
     yield
 
 
@@ -44,6 +47,7 @@ def make_guest_client(
     guest_mode: bool = True,
     ttl_days: int = 7,
     limit: int = 50_000,
+    open_reg: bool = False,
 ) -> TestClient:
     settings = Settings(
         llm_api_key="lk",
@@ -52,10 +56,11 @@ def make_guest_client(
         guest_mode=guest_mode,
         guest_session_ttl_days=ttl_days,
         guest_daily_token_limit=limit,
+        open_registration=open_reg,
     )
     app = create_app(
         settings,
-        store=FakeStore(stats=None, docs=[]),  # type: ignore[arg-type]  # 契约测试不触语料
+        store=FakeStore(stats=Stats(docs=1, chunks=1, embedded=True), docs=[]),
         business=biz,
         memory=mem,
         auth=auth,
@@ -242,3 +247,35 @@ def test_prune_guests_cascade(pg_dsn, pg_lock, auth, sess, mem, usage, fb, biz):
     # 对照组完好
     assert sess.get(member.email, ms.session_id) is not None
     assert len(mem.all_facts(member.email)) == 1
+
+
+# ---------- 开放注册（P39 二段：OPEN_REGISTRATION） ----------
+
+
+def test_open_registration_email_password_only(tmp_path, biz, mem, auth, sess):
+    """开放态：免邀请码注册成功即登录；health 暴露 open_registration=true。"""
+    c = make_guest_client(tmp_path, biz, mem, auth, sess, open_reg=True)
+    assert c.get("/api/health").json()["open_registration"] is True
+    r = c.post("/api/auth/register", json={"email": "new@qtu.edu.cn", "password": PWD})
+    assert r.status_code == 200, r.text
+    assert r.json()["role"] == "student"
+    assert c.get("/api/auth/me").json()["email"] == "new@qtu.edu.cn"
+
+
+def test_registration_invite_mode_default(tmp_path, biz, mem, auth, sess):
+    """缺省关=邀请码内测制：无邀请码 422；health 报 false（P21 语义不动）。"""
+    c = make_client(tmp_path, biz, mem, auth, sess)
+    assert c.get("/api/health").json()["open_registration"] is False
+    r = c.post("/api/auth/register", json={"email": "x@qtu.edu.cn", "password": PWD})
+    assert r.status_code == 422
+    assert r.json()["detail"] == "邀请码不能为空"
+
+
+def test_register_ip_throttle(tmp_path, biz, mem, auth, sess):
+    """开放态防滥用：单 IP 5 次/分钟，第 6 次 429。"""
+    c = make_guest_client(tmp_path, biz, mem, auth, sess, open_reg=True)
+    for i in range(5):
+        r = c.post("/api/auth/register", json={"email": f"u{i}@qtu.edu.cn", "password": PWD})
+        assert r.status_code == 200, r.text
+    r = c.post("/api/auth/register", json={"email": "u9@qtu.edu.cn", "password": PWD})
+    assert r.status_code == 429

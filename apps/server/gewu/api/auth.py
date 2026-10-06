@@ -47,6 +47,14 @@ _LOGIN_IP_LIMITER = RateLimiter(per_minute=30)
 _GUEST_MINUTE_LIMITER = RateLimiter(per_minute=5)
 _GUEST_DAY_LIMITER = RateLimiter(per_minute=20, window_sec=86400)
 
+# 开放注册态的防滥用闸（邀请码制下注册受邀请码门槛保护，限速恒加无害）
+_REGISTER_IP_LIMITER = RateLimiter(per_minute=5)
+
+
+def _register_throttle(request: Request) -> None:
+    if not _REGISTER_IP_LIMITER.allow(f"ip:{client_ip(request)}"):
+        raise HTTPException(status_code=429, detail="注册过于频繁，请稍后再试")
+
 
 def _guest_throttle(request: Request) -> None:
     key = f"ip:{client_ip(request)}"
@@ -122,12 +130,18 @@ def _parse_credentials(payload: dict) -> tuple[str, str]:
 @router.post("/api/auth/register")
 def register(request: Request, response: Response, payload: Annotated[dict, Body(...)]):
     email, password = _parse_credentials(payload)
-    invite_code = payload.get("invite_code")
-    if not isinstance(invite_code, str) or not invite_code.strip():
-        raise HTTPException(status_code=422, detail="邀请码不能为空")
+    _register_throttle(request)
+    # P39 二段：OPEN_REGISTRATION=1 免邀请码（纯邮箱+密码）；缺省关=邀请码内测制
+    if request.app.state.settings.open_registration:
+        invite_code = None
+    else:
+        invite_code = payload.get("invite_code")
+        if not isinstance(invite_code, str) or not invite_code.strip():
+            raise HTTPException(status_code=422, detail="邀请码不能为空")
+        invite_code = invite_code.strip()
     try:
         user, token = _auth(request).register(
-            email, password, invite_code.strip(), display_name=email.split("@", 1)[0]
+            email, password, invite_code, display_name=email.split("@", 1)[0]
         )
     except InviteInvalid as e:
         raise HTTPException(status_code=400, detail=str(e)) from e

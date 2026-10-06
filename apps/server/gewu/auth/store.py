@@ -159,25 +159,31 @@ class AuthStore:
     # ---------- 注册 / 登录 ----------
 
     def register(
-        self, email: str, password: str, invite_code: str, display_name: str = ""
+        self,
+        email: str,
+        password: str,
+        invite_code: str | None = None,
+        display_name: str = "",
     ) -> tuple[User, str]:
         """邀请码核销 + 建 user + 建 session，同一事务；返回 (user, 原始 token)。
 
         核销用单条 UPDATE ... RETURNING 原子完成（并发只有一个成功）；
-        邮箱冲突时整个事务回滚（核销不占用）。
+        邮箱冲突时整个事务回滚（核销不占用）。invite_code=None 跳过核销
+        （P39 开放注册态，由 API 层开关决定，此层不感知模式）。
         """
         email = email.strip().lower()
         token = secrets.token_urlsafe(32)
         with self._pool.connection() as conn:  # 上下文 = 事务边界
-            row = conn.execute(
-                "UPDATE invite_codes SET used_count = used_count + 1"
-                " WHERE code = %s AND used_count < max_uses"
-                " AND (expires_at IS NULL OR expires_at > now())"
-                " RETURNING used_count",
-                (invite_code,),
-            ).fetchone()
-            if row is None:
-                raise InviteInvalid("邀请码无效、已用尽或已过期")
+            if invite_code is not None:
+                row = conn.execute(
+                    "UPDATE invite_codes SET used_count = used_count + 1"
+                    " WHERE code = %s AND used_count < max_uses"
+                    " AND (expires_at IS NULL OR expires_at > now())"
+                    " RETURNING used_count",
+                    (invite_code,),
+                ).fetchone()
+                if row is None:
+                    raise InviteInvalid("邀请码无效、已用尽或已过期")
             try:
                 urow = conn.execute(
                     "INSERT INTO users (email, password_hash, display_name)"

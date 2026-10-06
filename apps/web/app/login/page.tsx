@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { Loader2, LogIn, TriangleAlert, UserPlus } from "lucide-react";
-import { login, register } from "@/lib/api";
+import { fetchHealth, login, register } from "@/lib/api";
 import { useUser } from "@/lib/auth";
 import { Alert, AlertDescription } from "@/components/ui/alert";
 import { Button } from "@/components/ui/button";
@@ -26,7 +26,14 @@ export default function LoginPage() {
   const [inviteCode, setInviteCode] = useState("");
   const [err, setErr] = useState("");
   const [busy, setBusy] = useState(false);
+  const [openReg, setOpenReg] = useState(false); // 注册模式：true=免邀请码（P39 OPEN_REGISTRATION）
   const isGuest = user?.role === "guest";
+
+  useEffect(() => {
+    fetchHealth().then((h) => {
+      if (h) setOpenReg(h.open_registration);
+    });
+  }, []);
 
   useEffect(() => {
     if (!loading && user && !isGuest) router.replace("/"); // 正式成员已登录直达对话页
@@ -41,7 +48,7 @@ export default function LoginPage() {
       if (mode === "login") {
         await login(email.trim(), password);
       } else {
-        await register(email.trim(), password, inviteCode.trim());
+        await register(email.trim(), password, openReg ? undefined : inviteCode.trim());
       }
       router.replace("/");
     } catch (e2) {
@@ -55,11 +62,15 @@ export default function LoginPage() {
     <main className="flex h-full items-center justify-center overflow-y-auto px-4">
       <div className="w-full max-w-sm space-y-6 py-10">
         <div className="space-y-1.5 text-center">
-          <h1 className="text-xl font-semibold">{mode === "login" ? "登录格物" : "注册内测账号"}</h1>
+          <h1 className="text-xl font-semibold">
+            {mode === "login" ? "登录格物" : openReg ? "注册账号" : "注册内测账号"}
+          </h1>
           <p className="text-sm text-muted-foreground">
             {mode === "login"
               ? "校园制度问答 · 场馆预约 · 请假办理"
-              : "内测采用邀请码封闭注册，请联系管理员获取"}
+              : openReg
+                ? "邮箱 + 密码即可注册，无需邀请码"
+                : "内测采用邀请码封闭注册，请联系管理员获取"}
           </p>
         </div>
 
@@ -122,7 +133,7 @@ export default function LoginPage() {
             />
           </div>
 
-          {mode === "register" && (
+          {mode === "register" && !openReg && (
             <div className="space-y-1.5">
               <label htmlFor="invite" className="text-sm font-medium">
                 邀请码

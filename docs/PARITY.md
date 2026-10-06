@@ -194,6 +194,13 @@ classic 28 题历史报告见 eval/reports/orchestration-*.md；tag
 - **过期清理**：`make guest-prune [DAYS=N]` 按 sessions 删除端点同序
   （checkpointer → episodic → 业务行 → 会话行）批量回收游客全部数据
   （`gewu/maintenance.py`）；`users.role` CHECK 幂等重建加 `guest`。
+- **开放注册（P39 二段，2026-10-06）**：`OPEN_REGISTRATION=1` 时
+  `POST /api/auth/register` 免邀请码（纯邮箱+密码，body 携带 invite_code
+  也忽略），并叠加 register 端点 IP 键 5 次/分钟限速（429「注册过于频繁，
+  请稍后再试」）；`/api/health` 新增 `open_registration` 布尔（login 页
+  据此隐藏邀请码输入框）。缺省关=邀请码内测制（P21 语义零变化，
+  invite_codes 表/CLI/admin 面保留）。store 层 `register(invite_code=None)`
+  跳过核销，模式判定只在 API 层。
 
 ## 1. 服务总览
 
@@ -707,6 +714,7 @@ Settings）；下表为契约面摘要：
 | API_DOCS | false | FastAPI 框架文档面 `/docs` 等（P36；本地调试 =1 打开） |
 | GUEST_MODE | false | 游客开放通道（P39 §0.11）：=1 开 `POST /api/auth/guest` 免登签发；关=现状 |
 | GUEST_DAILY_TOKEN_LIMIT / GUEST_SESSION_TTL_DAYS | 50000 / 7 | 游客日 token 限额 / 会话硬过期天数（不滑动续期） |
+| OPEN_REGISTRATION | false | 开放注册（P39 §0.11 二段）：=1 免邀请码（register IP 5 次/分）；关=邀请码内测制 |
 
 已退役开关：ROUTER_MODE、SESSION_STORE（checkpointer 接管）、CHUNK_MODE
 （`CHUNK_STRATEGY` 面向入库侧）、QUERY_REWRITE（P31-2 随 classic 退役）、

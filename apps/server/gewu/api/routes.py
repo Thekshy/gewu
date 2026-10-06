@@ -70,6 +70,8 @@ def health(request: Request):
         "docs": stats.docs,
         "chunks": stats.chunks,
         "budget": {"used": used, "limit": limit},
+        # P39：注册模式（login 页据此决定是否渲染邀请码输入框；公开端点，无敏感性）
+        "open_registration": settings.open_registration,
     }
 
 

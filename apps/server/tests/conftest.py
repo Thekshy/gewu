@@ -29,6 +29,16 @@ DEFAULT_TEST_DSN = "postgres://gewu:gewu@127.0.0.1:5433/gewu_test?sslmode=disabl
 _lock_conn: psycopg.Connection | None = None
 
 
+@pytest.fixture(autouse=True)
+def _reset_register_limiter():
+    """register 端点 IP 限速器跨用例复位（P39 二段）：make_logged_client 每用例
+    都走注册，模块级 5 次/分闸会被整轮 pytest 打满殃及全部用例。"""
+    import gewu.api.auth as auth_api
+
+    auth_api._REGISTER_IP_LIMITER.reset()
+    yield
+
+
 def test_dsn() -> str:
     """PG_TEST_DSN > PG_DSN（OS 环境变量或仓库 .env）推导 <db>_test > 缺省。"""
     load_dotenv()
