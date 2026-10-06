@@ -444,7 +444,7 @@ export default function Home() {
               <Alert className="py-2.5">
                 <Info className="size-4" aria-hidden />
                 <AlertDescription>
-                  游客模式：免登录直接体验，数据短期保留。（内测期暂不开放注册）
+                  游客模式：免登录直接体验，数据短期保留；长期记忆与控制台暂不可用。
                 </AlertDescription>
               </Alert>
             </div>
