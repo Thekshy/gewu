@@ -41,6 +41,7 @@ import { ROLE_LABEL } from "@/lib/labels";
 import { cn } from "@/lib/utils";
 import { NavColumn } from "@/components/nav";
 import ThemeToggle from "@/components/theme-toggle";
+import GithubLink from "@/components/github-link";
 import UserMenu from "@/components/user-menu";
 import Answer from "@/components/answer";
 import SessionList from "@/components/session-list";
@@ -431,7 +432,10 @@ export default function Home() {
           <div className="min-h-0 flex-1">{sessionList}</div>
           <div className="flex shrink-0 items-center justify-between gap-2 border-t px-3 py-2">
             <UserMenu />
-            <ThemeToggle />
+            <div className="flex items-center gap-0.5">
+              <GithubLink />
+              <ThemeToggle />
+            </div>
           </div>
         </aside>
         <div className="flex min-h-0 min-w-0 flex-1 flex-col">
@@ -815,7 +819,10 @@ export default function Home() {
             </div>
             <div className="flex items-center justify-between gap-2 px-3 pt-2 md:hidden">
               <UserMenu />
-              <ThemeToggle />
+              <div className="flex items-center gap-0.5">
+                <GithubLink />
+                <ThemeToggle />
+              </div>
             </div>
             <div className="mt-2 min-h-0 flex-1 overflow-y-auto border-t pt-2">
               {sessionList}
