@@ -366,7 +366,7 @@ export default function Console() {
 
   // P37 受众拆分：这一页原来把「给人看的证据」和「给开发看的运行指标」平铺在
   // 同一个网格里，于是第一次点进来的人分不清该看什么。按意图分两栏：
-  //   证据 = 办理真落库 + 检索命中（求职展示最该被看到的东西）
+  //   证据 = 办理真落库 + 检索命中（演示时最该被看到的东西）
   //   运行 = 服务健康 + 语料清单（引擎指标与数据口径）
   const tabs: { key: TabKey; label: string; hint: string }[] = [
     { key: "evidence", label: "证据", hint: "办理真实落库 · 检索命中" },
@@ -460,7 +460,7 @@ export default function Console() {
         </div>
 
         <footer className="t-meta pb-4 pt-10 text-center text-muted-foreground/80">
-          全部数据来自只读/调试 API · 格物 Gewu 求职展示项目
+          全部数据来自只读/调试 API · 格物 Gewu 毕业设计项目
         </footer>
       </div>
     </main>

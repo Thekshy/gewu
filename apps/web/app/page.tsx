@@ -773,7 +773,7 @@ export default function Home() {
 
           <footer className="t-meta shrink-0 px-4 pb-2.5 text-center text-muted-foreground/80">
             {health ? `${health.docs} 篇文档 / ${health.chunks} chunks · ` : ""}
-            演示语料与业务系统均为虚构的「钱塘大学」合成数据 · 格物 Gewu 是开源的个人求职展示项目
+            演示语料与业务系统均为虚构的「钱塘大学」合成数据 · 格物 Gewu 是开源的个人毕业设计项目
           </footer>
         </div>
       </div>

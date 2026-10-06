@@ -125,7 +125,7 @@ export default function RecordsPage() {
         )}
 
         <footer className="t-meta rule-t mt-12 pt-4 text-muted-foreground/80">
-          数据来自业务库本人视图，仅显示当前账号的办理记录 · 格物 Gewu 求职展示项目
+          数据来自业务库本人视图，仅显示当前账号的办理记录 · 格物 Gewu 毕业设计项目
         </footer>
       </div>
     </main>
