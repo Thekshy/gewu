@@ -5,7 +5,9 @@
 gold，零重标）。进程内构建 Retriever 直打（不起服务）：
   cd apps/server && uv run python ../../eval/run_retrieval_eval.py --tag before
 开关 --no-rewrite / --no-rerank 用于分离改写与精排的方差（GLM 温度 0 仍非确定，
-归因须可分离）。报告落 eval/reports/retrieval-<时间戳>-<tag>.json。
+归因须可分离）；--rerank-mode 选择精排引擎（P41：flash / bailian，缺省跟随
+RERANK_MODE），并统计 rerank 跳延迟 p50/p95 与降级次数。报告落
+eval/reports/retrieval-<时间戳>-<tag>.json。
 """
 
 from __future__ import annotations
@@ -21,10 +23,38 @@ sys.path.insert(0, str(REPO_ROOT / "apps" / "server"))
 
 from gewu.config import Settings, load_dotenv  # noqa: E402
 from gewu.llm.service import LLMService  # noqa: E402
-from gewu.rag.retrieve import LLMReranker, Retriever  # noqa: E402
+from gewu.rag.retrieve import Retriever, build_reranker  # noqa: E402
 from gewu.rag.store import Store  # noqa: E402
 
 EVAL_TYPES = ("factual", "multi_hop")
+
+
+class TimedReranker:
+    """评测包装：统计 rerank 跳墙钟与降级次数（只计打分，不含召回/改写）。"""
+
+    def __init__(self, inner) -> None:
+        self.inner = inner
+        self.lat_ms: list[float] = []
+        self.fallbacks = 0
+
+    def rerank(self, query: str, texts: list[str]) -> list[float]:
+        t0 = time.perf_counter()
+        try:
+            return self.inner.rerank(query, texts)
+        except Exception:
+            self.fallbacks += 1
+            raise
+        finally:
+            self.lat_ms.append((time.perf_counter() - t0) * 1000)
+
+    def latency_summary(self) -> dict | None:
+        if not self.lat_ms:
+            return None
+        lat = sorted(self.lat_ms)
+        return {
+            "p50": round(lat[len(lat) // 2]),
+            "p95": round(lat[min(int(len(lat) * 0.95), len(lat) - 1)]),
+        }
 
 
 # ---------- 指标（doc 级、二值相关；WeKnora metric 的 Python 重写） ----------
@@ -98,7 +128,13 @@ def main() -> int:
     ap.add_argument("--tag", default="", help="报告标注（如 before / after）")
     ap.add_argument("--k", type=int, default=0, help="检索条数（缺省 RETRIEVAL_K）")
     ap.add_argument("--no-rewrite", action="store_true", help="跳过查询改写（分离方差）")
-    ap.add_argument("--no-rerank", action="store_true", help="关闭 LLM 精排")
+    ap.add_argument("--no-rerank", action="store_true", help="关闭精排")
+    ap.add_argument(
+        "--rerank-mode",
+        choices=("flash", "bailian"),
+        default=None,
+        help="精排引擎（P41；缺省跟随 .env 的 RERANK_MODE，非法/无 key 时实际退 off）",
+    )
     ap.add_argument("--rounds", type=int, default=1, help="重复轮数（非确定性方差观测）")
     ap.add_argument(
         "--extra",
@@ -113,12 +149,17 @@ def main() -> int:
     k = args.k or settings.retrieval_k
     store = Store(settings.pg_dsn)
     llm = LLMService(settings)
-    retriever = Retriever(
-        store,
-        k,
+    mode = "off" if args.no_rerank else (args.rerank_mode or settings.rerank_mode)
+    reranker = build_reranker(
+        mode,
         llm,
-        reranker=(None if args.no_rerank else LLMReranker(llm)),
+        api_key=settings.dashscope_api_key,
+        endpoint=settings.bailian_rerank_endpoint,
+        model=settings.bailian_rerank_model,
     )
+    timed = TimedReranker(reranker) if reranker is not None else None
+    engine = mode if reranker is not None else "off"
+    retriever = Retriever(store, k, llm, reranker=timed, rerank_passage=settings.rerank_passage)
     retriever.rewriter._enabled = not args.no_rewrite  # noqa: SLF001 - 评测开关
 
     cases = load_cases(REPO_ROOT / "eval" / "dataset.jsonl", args.extra)
@@ -181,6 +222,10 @@ def main() -> int:
         "rounds": args.rounds,
         "no_rewrite": args.no_rewrite,
         "no_rerank": args.no_rerank,
+        "rerank_engine": engine,
+        "rerank_passage": settings.rerank_passage,
+        "rerank_latency_ms": timed.latency_summary() if timed else None,
+        "rerank_fallbacks": timed.fallbacks if timed else 0,
         "extra": str(args.extra) if args.extra else "",
         "metrics": {f"{name}@{k}" if name != "mrr" else "mrr": round(v, 4)
                     for name, v in avg.items()},
@@ -193,10 +238,13 @@ def main() -> int:
 
     label = f"[{args.tag}] " if args.tag else ""
     print(f"{label}检索评测：{n_cases} 题 × {args.rounds} 轮  k={k}"
-          f"  rewrite={'off' if args.no_rewrite else 'on'}  rerank={'off' if args.no_rerank else 'on'}")
+          f"  rewrite={'off' if args.no_rewrite else 'on'}  rerank={engine}"
+          f"  passage={settings.rerank_passage}")
     print(f"  Recall@{k}={avg['recall']:.4f}  MRR={avg['mrr']:.4f}  NDCG@{k}={avg['ndcg']:.4f}")
     for tname, t in sorted(tiers.items()):
         print(f"  [{tname}] n={t['cases']}  R={t['recall']:.4f}  MRR={t['mrr']:.4f}  NDCG={t['ndcg']:.4f}")
+    if timed:
+        print(f"  rerank 跳延迟：{timed.latency_summary()}  fallbacks={timed.fallbacks}")
     print(f"  报告：{out}")
     store.close()
     return 0
