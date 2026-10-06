@@ -26,6 +26,15 @@ def test_settings_defaults():
     assert s.web_search_daily_limit == 200
 
 
+# ---------- P42：内容审查兜底开关 ----------
+
+
+def test_content_filter_fallback_default_on_and_off():
+    assert Settings.load(env={}).content_filter_fallback is True  # 缺省开
+    for v in ("0", "false", "no", "off"):
+        assert Settings.load(env={"CONTENT_FILTER_FALLBACK": v}).content_filter_fallback is False
+
+
 def test_settings_reads_iqs_env_mapping():
     s = Settings.load(env={"IQS_API_KEY": "k3", "WEB_SEARCH_DAILY_LIMIT": "50"})
     assert s.iqs_api_key == "k3"

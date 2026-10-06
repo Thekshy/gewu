@@ -30,7 +30,9 @@ from langchain_core.messages import HumanMessage
 
 from gewu.agent import events as ev
 from gewu.agent.followups import generate_follow_ups, should_generate
+from gewu.agent.prompts import PROVIDER_FILTER_ANSWER
 from gewu.api.auth import require_user
+from gewu.llm.safety import is_content_filter_error
 from gewu.obs import Tracer, set_current_tracer
 from gewu.usage import current_user
 
@@ -172,6 +174,7 @@ def chat(request: Request, payload: Annotated[dict, Body(...)]):
         answer = ""
         citations: list[dict] = []
         hitl_paused = False
+        answer_seen = False  # 本轮是否已流出 answer_delta（P42 拒答撤回判定）
         trace = {"route": "", "route_layer": "", "steps": 0, "tool": 0}
         # P27：本轮观测聚合器（store 软降级时全程 no-op；print [chat] 行与
         # trace 行在此同源产出，双写不漂移）
@@ -241,6 +244,8 @@ def chat(request: Request, payload: Annotated[dict, Body(...)]):
                     trace["steps"] += 1
                 elif t in ("pending_action", "action_result"):
                     trace["tool"] += 1
+                elif t == "answer_delta":
+                    answer_seen = True
                 yield _sse(evt)
             # 终态读取（interrupt 悬停时为当前值）：answer/truncated 单点真相；
             # snap.next 非空 = HITL 确认门悬停（follow_ups 的 Q5 门输入之一）。
@@ -255,7 +260,31 @@ def chat(request: Request, payload: Annotated[dict, Body(...)]):
         except GeneratorExit:
             turn_log("aborted")
             raise  # 客户端断开：done 已无法送达（语义上记 aborted）
-        except Exception as e:  # noqa: BLE001 - 链路错误 → error 事件 + done(error)
+        except Exception as e:  # noqa: BLE001 - 先分类再收口（P42 审查拒绝 ≠ 通用错误）
+            # P42 provider 内容审查拒绝 → 优雅拒答（WeKnora 同款「按正常完成
+            # 流关闭」形态）：refusal/provider 标签进 trace 可统计，拒答文案走
+            # 正常回答流，done(completed)。SSE 契约零变化；流中途被拒时已流出
+            # 的部分文本先 answer_reset 转存为 step（P30 既有语义）再发拒答全文。
+            if request.app.state.settings.content_filter_fallback and is_content_filter_error(e):
+                print(f"[chat] provider 内容审查拒绝，转优雅拒答：{type(e).__name__}", flush=True)
+                trace["route"], trace["route_layer"] = "refusal", "provider"
+                if answer_seen:
+                    yield _sse(ev.answer_reset_evt())
+                yield _sse(
+                    ev.route_decision_evt(
+                        {
+                            "route": "refusal",
+                            "reason": "provider 内容审查拒绝",
+                            "layer": "provider",
+                            "confidence": 1.0,
+                            "by_llm": False,
+                        }
+                    )
+                )
+                yield _sse(ev.answer_evt(PROVIDER_FILTER_ANSWER))
+                turn_log("completed")
+                yield _sse(ev.done_evt(int((time.monotonic() - t0) * 1000), "completed"))
+                return
             turn_log("error", err=str(e))  # 原文只进日志/trace，SSE 对外笼统文案（P36）
             yield _sse(ev.error_evt("服务内部错误，请稍后再试"))
             yield _sse(ev.done_evt(int((time.monotonic() - t0) * 1000), "error"))

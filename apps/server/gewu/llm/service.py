@@ -16,6 +16,7 @@ from langchain_core.messages import AIMessage, BaseMessage, HumanMessage, System
 # lazy-import 机制劫持成空壳（P23 撞坑，详见任务书 §6.4）——module-form 稳定。
 import gewu.llm.embed as llm_embed
 from gewu.llm.chat import Usage, make_chat_model, parse_finish_reason, parse_usage
+from gewu.llm.safety import ContentFilterError, is_blocked_completion
 from gewu.obs import current_tracer
 from gewu.usage import current_user
 
@@ -117,15 +118,28 @@ class LLMService:
         if tracer is None:
             resp = model.invoke(lc_msgs)
             self._record(getattr(resp, "usage_metadata", None))
-            return _content_text(resp)
+            return self._text_guarded(resp)
         with tracer.span("llm", self._model_name(small), input=profile) as sp:
             resp = model.invoke(lc_msgs)
             usage = getattr(resp, "usage_metadata", None)
             self._record(usage)
-            text = _content_text(resp)
+            text = self._text_guarded(resp)
             sp.tokens = int(usage.get("total_tokens", 0) or 0) if usage else None
             sp.output = {"chars": len(text)}
             return text
+
+    def _text_guarded(self, resp) -> str:
+        """200 形态审查拦截（P42）：finish=sensitive|content_filter 或 content
+        为错误文案 → 抛 ContentFilterError，由各调用点既有 except 降级接住
+        （改写回原查询/精排退 RRF/追问弃用——P40 rewriter 污染的根治点）。
+        开关=0 时原样返回文本（回退改前行为）。"""
+        text = _content_text(resp)
+        if self._s.content_filter_fallback and is_blocked_completion(
+            parse_finish_reason(resp), text
+        ):
+            print("[llm] 内容审查拒绝（200 形态拦截）", flush=True)
+            raise ContentFilterError("provider 内容审查拒绝（200 形态）")
+        return text
 
     def _model_name(self, small: bool) -> str:
         return self._s.llm_small_model if small else self._s.llm_model

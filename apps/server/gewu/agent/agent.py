@@ -118,7 +118,9 @@ def build_agent(
         WriteSlotGateMiddleware(business),
         ResearchLimitMiddleware(),
         query_guard,
-        AgentDoneMiddleware(),  # after_agent 倒序→在 RouteEvent 前执行：保 route→answer 序
+        AgentDoneMiddleware(  # after_agent 倒序→在 RouteEvent 前执行：保 route→answer 序
+            finish_guard=settings.content_filter_fallback
+        ),
         RouteEventMiddleware(),
         SummarizationMiddleware(
             model=small_model,

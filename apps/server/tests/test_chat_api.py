@@ -8,8 +8,10 @@ P31-2 起：mode 枚举收窄 auto/react，direct 链路用例改写为 agent �
 from __future__ import annotations
 
 import json
+from dataclasses import replace
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 from langchain_core.messages import AIMessage
 
@@ -253,6 +255,86 @@ def test_chat_error_path_emits_error_and_done(tmp_path: Path, biz, mem, auth, se
     assert "链路炸了" not in r.text
     assert events[-1]["type"] == "done"
     assert events[-1]["reason"] == "error"
+
+
+# ---------- P42：provider 内容审查拒绝兜底 ----------
+
+
+class FakeProviderFilterError(Exception):
+    """形状仿 openai.APIStatusError（P42 分类器 duck-typing 契约），不引真 SDK。"""
+
+    def __init__(self) -> None:
+        super().__init__("（审查类提示语）")
+        self.status_code = 400
+        self.body = {"error": {"code": "1301", "message": "（审查类提示语）"}}
+
+
+class ExceptionGraph:
+    def __init__(self, exc: Exception) -> None:
+        self._exc = exc
+
+    def stream(self, *_a, **_k):
+        raise self._exc
+        yield  # pragma: no cover
+
+
+def test_chat_provider_filter_refuses_gracefully(tmp_path, biz, mem, auth, sess):
+    """审查拒绝走优雅拒答：refusal/provider 标签 + 拒答文案 + done(completed)。"""
+    c = make_client(tmp_path, biz, mem, auth, sess, graph=ExceptionGraph(FakeProviderFilterError()))
+    r = c.post("/api/chat", json={"question": "q", "mode": "auto", "session_id": "e"})
+    events = _parse_sse(r.text)
+    routes = [e for e in events if e["type"] == "route"]
+    assert routes and routes[-1]["route"] == "refusal" and routes[-1]["layer"] == "provider"
+    answer = "".join(e["text"] for e in events if e["type"] == "answer_delta")
+    assert "内容安全检查" in answer  # PROVIDER_FILTER_ANSWER（正常回答流，非 error 事件）
+    assert events[-1]["type"] == "done" and events[-1]["reason"] == "completed"
+    assert not any(e["type"] == "error" for e in events)
+    assert not any(e["type"] == "follow_ups" for e in events)  # refusal 轮不生成追问
+
+
+def test_chat_provider_filter_resets_partial_stream(tmp_path, biz, mem, auth, sess):
+    """流中途被拒：已流出文本先 answer_reset 转存为 step，再发拒答全文。"""
+
+    class PartialFilterGraph:
+        def stream(self, *_a, **_k):
+            from gewu.agent import events as ev  # noqa: PLC0415
+
+            yield ev.answer_evt("回答写到一半")  # P31-3 起 custom 事件为裸 dict
+            raise FakeProviderFilterError()
+
+    c = make_client(tmp_path, biz, mem, auth, sess, graph=PartialFilterGraph())
+    r = c.post("/api/chat", json={"question": "q", "mode": "auto", "session_id": "u"})
+    events = _parse_sse(r.text)
+    types = [e["type"] for e in events]
+    assert "answer_reset" in types
+    assert types[-1] == "done" and events[-1]["reason"] == "completed"
+    assert not any(e["type"] == "error" for e in events)
+
+
+def test_chat_provider_filter_switch_off_keeps_error_path(tmp_path, biz, mem, auth, sess):
+    """开关=0 回退改前行为：拒绝异常走通用 error 路径（PARITY 回归点）。"""
+    c = make_client(tmp_path, biz, mem, auth, sess, graph=ExceptionGraph(FakeProviderFilterError()))
+    c.app.state.settings = replace(c.app.state.settings, content_filter_fallback=False)
+    r = c.post("/api/chat", json={"question": "q", "mode": "auto", "session_id": "e"})
+    events = _parse_sse(r.text)
+    assert events[-2]["type"] == "error"
+    assert events[-2]["message"] == "服务内部错误，请稍后再试"
+    assert events[-1]["reason"] == "error"
+
+
+@pytest.mark.parametrize("finish", ["sensitive", "content_filter"])
+def test_chat_filter_finish_marks_truncated_with_status(tmp_path, biz, mem, auth, sess, finish):
+    """④ finish 收口：sensitive/content_filter → status 行 + 截断语义（P10 契约零变化）。"""
+    llm = FakeAgentLLM(
+        script=[AIMessage(content="", response_metadata={"finish_reason": finish})],
+        has_key=True,
+    )
+    c = make_client(tmp_path, biz, mem, auth, sess, llm=llm)
+    r = c.post("/api/chat", json={"question": "讲讲校历", "mode": "auto", "session_id": "t"})
+    events = _parse_sse(r.text)
+    assert any(e["type"] == "status" and "安全策略中断" in e["text"] for e in events)
+    assert events[-1]["reason"] == "max_tokens"  # truncated 既有映射，done 契约不变
+    assert not any(e["type"] == "error" for e in events)
 
 
 class FollowUpLLM(FakeAgentLLM):

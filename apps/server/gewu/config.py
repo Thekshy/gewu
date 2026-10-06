@@ -126,6 +126,10 @@ class Settings:
     # 开放注册（P39 二段）：=1 时注册免邀请码（纯邮箱+密码）；缺省关=邀请码内测制
     # （P21 语义不动，随时可收回）。开放态防滥用靠 register 端点 IP 限速。
     open_registration: bool = False
+    # P42 provider 内容审查拒绝兜底（缺省开；=0 紧急回退：拒绝一律走通用
+    # 错误路径=改前行为）。覆盖：分类器 / LLMService 200 形态拦截 / 主循环
+    # 优雅拒答 / finish 收口四处。
+    content_filter_fallback: bool = True
 
     @classmethod
     def load(cls, env: Mapping[str, str] | None = None) -> Settings:
@@ -186,4 +190,6 @@ class Settings:
             guest_session_ttl_days=int(env.get("GUEST_SESSION_TTL_DAYS", "7")),
             open_registration=env.get("OPEN_REGISTRATION", "").lower()
             in ("1", "true", "yes", "on"),
+            content_filter_fallback=env.get("CONTENT_FILTER_FALLBACK", "1").lower()
+            not in ("0", "false", "no", "off"),
         )

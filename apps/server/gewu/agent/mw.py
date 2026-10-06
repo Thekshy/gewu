@@ -46,6 +46,7 @@ from gewu.agent.prompts import agent_system_prompt
 from gewu.agent.tools import flow_args, resolve_flow, write_tools
 from gewu.agent.txmeta import build_confirm, normalize_slot, slot_meta
 from gewu.dates import today_iso
+from gewu.llm.safety import is_filter_finish
 from gewu.llm.service import ctx_profile
 from gewu.obs import current_tracer
 
@@ -509,7 +510,14 @@ class AgentDoneMiddleware(AgentMiddleware):
     轮次耗尽兜底/错误轮与流式文本不等价 → 照发，天然兜住漏发。
     栈位置在 RouteEventMiddleware 之前（after_* 链倒序执行 → route 事件
     先于 answer/citations，SSE 事件序与外壳节点时代一致）。
+    finish_guard（P42）：finish=sensitive|content_filter 时按截断语义收口
+    （truncated=True + status 行说明成因）——P10 契约的 content_filter 位
+    补齐，done reason 沿用 max_tokens 既有映射（契约零变化）。
     """
+
+    def __init__(self, finish_guard: bool = True) -> None:
+        super().__init__()
+        self._finish_guard = finish_guard
 
     def after_agent(self, state, runtime) -> dict[str, Any] | None:
         msgs = state.get("messages") or []
@@ -524,9 +532,14 @@ class AgentDoneMiddleware(AgentMiddleware):
         truncated = False
         if ai is not None:
             meta = getattr(ai, "response_metadata", None) or {}
-            if str(meta.get("finish_reason", "") or "") == "length":
+            finish = str(meta.get("finish_reason", "") or "")
+            if finish == "length":
                 truncated = True
                 emit(ev.status_evt("回答已达长度上限，可能被截断"))
+            elif self._finish_guard and is_filter_finish(finish):
+                truncated = True
+                print(f"[agent] 内容审查中断（finish={finish}），按截断收口", flush=True)
+                emit(ev.status_evt("回答被安全策略中断，内容可能不完整"))
         citations = state.get("citations") or []
         streamed = state.get("answer_streamed") or ""
         if streamed.strip() != answer.strip():

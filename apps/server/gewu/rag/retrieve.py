@@ -15,6 +15,7 @@ from typing import Protocol
 
 import httpx
 
+from gewu.llm.safety import is_content_filter_error
 from gewu.rag.store import ChunkRow, DocMeta, Hit, MissingVectorsError, Scored, rrf_fuse
 
 POOL_N = 20
@@ -187,8 +188,11 @@ class Retriever:
             texts = [rows[s.id].text if s.id in rows else "" for s in fused]
         try:
             llm_scores = self.reranker.rerank(query, texts)
-        except Exception as e:  # noqa: BLE001
-            print(f"[rag] rerank 失败，退回 RRF 粗排顺序：{e}")
+        except Exception as e:  # noqa: BLE001 - 降级单点收口（审查拒绝只区分文案）
+            if is_content_filter_error(e):
+                print(f"[rag] rerank 被内容审查拒绝，退回 RRF 粗排顺序：{e}")
+            else:
+                print(f"[rag] rerank 失败，退回 RRF 粗排顺序：{e}")
             return fused[:k]
         composite = [
             RERANK_MODEL_WEIGHT * (llm_scores[i] / 10.0)
@@ -289,8 +293,11 @@ class Rewriter:
                 temperature=0.0,
                 max_tokens=80,
             )
-        except Exception as e:  # noqa: BLE001 - 改写失败用原查询
-            print(f"[rag] 查询改写失败，使用原查询：{e}")
+        except Exception as e:  # noqa: BLE001 - 改写失败用原查询（审查拒绝同路降级）
+            if is_content_filter_error(e):
+                print(f"[rag] 查询改写被内容审查拒绝，使用原查询：{e}")
+            else:
+                print(f"[rag] 查询改写失败，使用原查询：{e}")
             return query
         rewritten = rewritten.strip('"“” \n\t')
         result = f"{query} {rewritten}" if rewritten else query
