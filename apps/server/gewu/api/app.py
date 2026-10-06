@@ -27,7 +27,7 @@ from gewu.llm.service import LLMService
 from gewu.memory import MemoryStore
 from gewu.middleware import RateLimitMiddleware, TraceIDMiddleware
 from gewu.obs import make_trace_store
-from gewu.rag.retrieve import LLMReranker, Retriever
+from gewu.rag.retrieve import Retriever, build_reranker
 from gewu.rag.store import DocStore, Store
 from gewu.session.store import SessionStore, make_feedback_store
 from gewu.usage import make_usage_store
@@ -56,7 +56,13 @@ def _make_checkpointer(settings: Settings):
 
 
 def _build_retriever(settings: Settings, store: Store, llm: LLMService) -> Retriever:
-    reranker = LLMReranker(llm) if settings.rerank_mode != "off" else None
+    reranker = build_reranker(
+        settings.rerank_mode,
+        llm,
+        api_key=settings.dashscope_api_key,
+        endpoint=settings.bailian_rerank_endpoint,
+        model=settings.bailian_rerank_model,
+    )
     return Retriever(
         store,
         settings.retrieval_k,
@@ -67,6 +73,7 @@ def _build_retriever(settings: Settings, store: Store, llm: LLMService) -> Retri
         vector_weight=settings.rrf_vector_weight,
         keyword_weight=settings.rrf_keyword_weight,
         rerank_threshold=settings.rerank_threshold,
+        rerank_passage=settings.rerank_passage,
     )
 
 

@@ -4,6 +4,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from gewu.config import (
     DEFAULT_DAILY_TOKEN_BUDGET,
     DEFAULT_PG_DSN,
@@ -28,6 +30,39 @@ def test_settings_reads_iqs_env_mapping():
     s = Settings.load(env={"IQS_API_KEY": "k3", "WEB_SEARCH_DAILY_LIMIT": "50"})
     assert s.iqs_api_key == "k3"
     assert s.web_search_daily_limit == 50
+
+
+# ---------- P41：精排引擎配置 ----------
+
+
+def test_rerank_mode_on_alias_and_fail_fast():
+    assert Settings.load(env={"RERANK_MODE": "on"}).rerank_mode == "flash"  # 历史别名
+    assert Settings.load(env={"RERANK_MODE": "Bailian"}).rerank_mode == "bailian"  # 大小写归一
+    assert Settings.load(env={}).rerank_mode == "flash"  # 缺省零行为变化
+    with pytest.raises(ValueError, match="flash"):
+        Settings.load(env={"RERANK_MODE": "weird"})  # fail-fast：拼错不静默当缺省
+
+
+def test_bailian_settings_defaults_and_env_mapping():
+    s = Settings.load(env={})
+    assert s.dashscope_api_key == ""  # 空 = bailian 模式关断
+    assert s.bailian_rerank_endpoint.startswith("https://")
+    assert s.bailian_rerank_model == "qwen3.7-text-rerank"
+    assert s.rerank_passage == "body"
+    s2 = Settings.load(
+        env={
+            "DASHSCOPE_API_KEY": "bk",
+            "BAILIAN_RERANK_ENDPOINT": "https://x.example",
+            "BAILIAN_RERANK_MODEL": "gte-rerank-v2",
+            "RERANK_PASSAGE": "titled",
+        }
+    )
+    assert s2.dashscope_api_key == "bk"
+    assert s2.bailian_rerank_endpoint == "https://x.example"
+    assert s2.bailian_rerank_model == "gte-rerank-v2"
+    assert s2.rerank_passage == "titled"
+    with pytest.raises(ValueError, match="RERANK_PASSAGE"):
+        Settings.load(env={"RERANK_PASSAGE": "nope"})
 
 
 def test_settings_reads_env_mapping(tmp_path: Path):

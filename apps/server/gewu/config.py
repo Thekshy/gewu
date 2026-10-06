@@ -17,6 +17,24 @@ DEFAULT_PG_DSN = "postgres://gewu:gewu@127.0.0.1:5433/gewu?sslmode=disable"
 DEFAULT_DAILY_TOKEN_BUDGET = 2_000_000
 DEFAULT_DAILY_USER_BUDGET = 200_000  # P23：per-user 限额缺省（users.daily_token_limit NULL 时用）
 
+# P41 精排引擎：flash（LLM 精排）| bailian（百炼专用 rerank）| off；
+# on 为 flash 的历史别名（P41 前的取值，存量 .env 不断链）。
+RERANK_MODES = ("flash", "bailian", "off")
+# 百炼工作空间域名（冒烟验证值；公网 https://dashscope.aliyuncs.com 同路径可替换）
+DEFAULT_BAILIAN_RERANK_ENDPOINT = "https://llm-wu8666v3ftxa4dsf.cn-beijing.maas.aliyuncs.com"
+
+
+def _parse_choice(
+    raw: str, choices: tuple[str, ...], what: str, *, aliases: dict[str, str] | None = None
+) -> str:
+    """枚举解析：别名归一 + 非法值 fail-fast（拼错值静默当缺省是配置事故温床）。"""
+    val = raw.strip().lower()
+    val = (aliases or {}).get(val, val)
+    if val not in choices:
+        legal = "|".join(choices) + (f"（{'/'.join(aliases)} 为别名）" if aliases else "")
+        raise ValueError(f"{what} 非法值 {raw!r}，合法：{legal}")
+    return val
+
 
 def find_dotenv(start: Path | None = None) -> Path | None:
     """从 start（缺省 cwd）向上逐级找 .env，到文件系统顶为止。"""
@@ -74,8 +92,13 @@ class Settings:
     rrf_k: int = 60
     rrf_vector_weight: float = 0.7  # 向量路权重（关键词路 = 1 - 向量权重比照配置）
     rrf_keyword_weight: float = 0.3
-    rerank_threshold: float = 2.0  # LLM 精排模型分阈值（0~10）；全滤空自动退化
-    rerank_mode: str = "on"  # on（默认，LLM 精排）| off
+    rerank_threshold: float = 2.0  # 精排模型分阈值（0~10）；全滤空自动退化
+    rerank_mode: str = "flash"  # flash（LLM 精排）| bailian（百炼 rerank）| off（on=flash 别名）
+    # P41 百炼精排：key 空 = bailian 模式关断（告警后退化为不精排，RRF 直跑）
+    dashscope_api_key: str = ""
+    bailian_rerank_endpoint: str = DEFAULT_BAILIAN_RERANK_ENDPOINT
+    bailian_rerank_model: str = "qwen3.7-text-rerank"
+    rerank_passage: str = "body"  # body（裸正文）| titled（title+面包屑+正文，对齐嵌入拼装）
     rate_limit_per_minute: int = 600
     # 切片策略链（P15：入库侧，make ingest 生效；换策略/参数后须 REBUILD=1 重建）
     chunk_strategy: str = "auto"  # auto（画像选型）| heading（父子双层）| recursive（扁平兜底）
@@ -131,7 +154,20 @@ class Settings:
             rrf_vector_weight=float(env.get("RRF_VECTOR_WEIGHT", "0.7")),
             rrf_keyword_weight=float(env.get("RRF_KEYWORD_WEIGHT", "0.3")),
             rerank_threshold=float(env.get("RERANK_THRESHOLD", "2.0")),
-            rerank_mode=env.get("RERANK_MODE", "on"),
+            rerank_mode=_parse_choice(
+                env.get("RERANK_MODE", "flash"),
+                RERANK_MODES,
+                "RERANK_MODE",
+                aliases={"on": "flash"},
+            ),
+            dashscope_api_key=env.get("DASHSCOPE_API_KEY", ""),
+            bailian_rerank_endpoint=env.get(
+                "BAILIAN_RERANK_ENDPOINT", DEFAULT_BAILIAN_RERANK_ENDPOINT
+            ),
+            bailian_rerank_model=env.get("BAILIAN_RERANK_MODEL", "qwen3.7-text-rerank"),
+            rerank_passage=_parse_choice(
+                env.get("RERANK_PASSAGE", "body"), ("body", "titled"), "RERANK_PASSAGE"
+            ),
             rate_limit_per_minute=int(env.get("RATE_LIMIT_PER_MINUTE", "600")),
             chunk_strategy=env.get("CHUNK_STRATEGY", "auto"),
             chunk_parent_limit=int(env.get("CHUNK_PARENT_LIMIT", "800")),

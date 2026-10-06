@@ -1,7 +1,8 @@
 """混合检索管线（P15 起对齐 WeKnora：加权 RRF 融合 + 精排阈值容错）。
 
 漏斗：BM25/向量各取 pool_n → 加权 RRF（向量 0.7/关键词 0.3，归一 [0,1]）→
-（有 key 且开启 rerank）LLM 精排（复合分排序 + 阈值过滤，全滤空自动退化）→
+（有 key 且开启 rerank）精排（复合分排序 + 阈值过滤，全滤空自动退化；P41 起
+引擎可换：flash=LLM 打分 / bailian=百炼专用 rerank，见 build_reranker）→
 按 parent_id 回取父块去重。查询侧口语→术语改写（有 key 即启用）。
 向量路瞬时失败退化为纯关键词：FTS 分按列表最大值归一，分数标尺不失效。
 """
@@ -11,6 +12,8 @@ from __future__ import annotations
 import json
 import threading
 from typing import Protocol
+
+import httpx
 
 from gewu.rag.store import ChunkRow, DocMeta, Hit, MissingVectorsError, Scored, rrf_fuse
 
@@ -64,6 +67,20 @@ def _normalize_by_max(scored: list[Scored]) -> list[Scored]:
     return [Scored(s.id, s.score / m) for s in scored]
 
 
+def _titled_passage(meta: DocMeta | None, row: ChunkRow | None) -> str:
+    """titled 精排口径（P41）：title + 标题面包屑 + 正文，与 ingest.embed_content
+    同形状——嵌入吃到标题上下文而裸正文打分认不出，等于精排在撤销向量侧的标题
+    匹配（WeKnora ModelPassage 的原教训）。行缺失返空串（后续换空格送 API）。"""
+    if row is None:
+        return ""
+    title = meta.title if meta and meta.title else row.doc_id
+    lines = [title]
+    if row.section_path:
+        lines.append(row.section_path)
+    lines.append(row.text)
+    return "\n".join(lines)
+
+
 class Retriever:
     """混合检索器：BM25 + 向量 → 加权 RRF 融合 →（可选）LLM 精排 → 父子扩展。"""
 
@@ -73,12 +90,13 @@ class Retriever:
         k: int,
         client: RagLLM | None,
         *,
-        reranker: LLMReranker | None = None,
+        reranker: LLMReranker | BailianReranker | None = None,
         pool_n: int = POOL_N,
         rrf_k: int = RRF_K,
         vector_weight: float = 0.7,
         keyword_weight: float = 0.3,
         rerank_threshold: float = 2.0,
+        rerank_passage: str = "body",
     ) -> None:
         self.store = store
         self.k = k
@@ -90,6 +108,7 @@ class Retriever:
         self.vector_weight = vector_weight
         self.keyword_weight = keyword_weight
         self.rerank_threshold = rerank_threshold
+        self.rerank_passage = rerank_passage
 
     def search(self, query: str, k: int = 0, *, expand: bool = True) -> list[Hit]:
         """expand=False 供工具路径跳过二次改写——query 已是 LLM 提炼的关键词串，
@@ -156,7 +175,16 @@ class Retriever:
         ):
             return fused[:k]
         rows: dict[int, ChunkRow] = self.store.chunk_rows([s.id for s in fused])
-        texts = [rows[s.id].text if s.id in rows else "" for s in fused]
+        if self.rerank_passage == "titled":
+            metas = self.store.doc_meta_map([r.doc_id for r in rows.values()])
+            texts = [
+                _titled_passage(
+                    metas.get(rows[s.id].doc_id) if s.id in rows else None, rows.get(s.id)
+                )
+                for s in fused
+            ]
+        else:
+            texts = [rows[s.id].text if s.id in rows else "" for s in fused]
         try:
             llm_scores = self.reranker.rerank(query, texts)
         except Exception as e:  # noqa: BLE001
@@ -346,3 +374,112 @@ def _to_float(v: object) -> float | None:
         except ValueError:
             return None
     return None
+
+
+BAILIAN_RERANK_TIMEOUT = 5.0  # 冻结池实测 p95 414ms，>10x 余量；超时即异常走降级
+BAILIAN_RERANK_PATH = "/api/v1/services/rerank/text-rerank/text-rerank"
+
+# 与 RERANK_SYSTEM 的 10/5/0 锚点语义对齐（评测口径含此 instruct，省略会分数漂移）
+BAILIAN_INSTRUCT = (
+    "为校园制度查询评估候选段落相关性：直接包含回答查询所需核心条款/数字/流程"
+    "的段落给最高分，主题相关但仅为背景信息的居中，与查询无关的给零分。"
+)
+
+
+class BailianReranker:
+    """百炼 text-rerank 精排器（P41）：专用 rerank 替换 LLM 打分头。
+
+    嵌套契约（qwen3.7-text-rerank / gte-rerank-v2；qwen3-rerank 才是平铺契约，
+    用混即 404）。relevance_score ∈ [0,1] 且是请求内相对分（官方声明不可跨请求
+    比较），×10 对齐 0-10 消费标尺。异常一律抛出交 _rerank_or_keep 现有降级链
+    兜底；单次调用不重试——重试只拉长关键路径（flash_hard 教训：p95 8s→9.7s）。
+    """
+
+    def __init__(
+        self,
+        api_key: str,
+        *,
+        endpoint: str,
+        model: str = "qwen3.7-text-rerank",
+        client: httpx.Client | None = None,
+        timeout: float = BAILIAN_RERANK_TIMEOUT,
+    ) -> None:
+        self._api_key = api_key
+        self._endpoint = endpoint.rstrip("/")
+        self._model = model
+        self._client = client  # 注入缝：测试传 MockTransport 包装的 Client（websearch 同款）
+        self._timeout = timeout
+
+    def rerank(self, query: str, candidates: list[str]) -> list[float]:
+        if not candidates:
+            return []
+        docs = [t or " " for t in candidates]  # 空串候选会被 API 拒，换空格
+        body = {
+            "model": self._model,
+            "input": {"query": query, "documents": docs},
+            "parameters": {
+                # top_n 必须全量：截断会丢候选使 index 对位缺项（WeKnora 同注释）
+                "top_n": len(docs),
+                "return_documents": False,
+                "instruct": BAILIAN_INSTRUCT,
+            },
+        }
+        hc = self._client or httpx
+        resp = hc.post(
+            f"{self._endpoint}{BAILIAN_RERANK_PATH}",
+            json=body,
+            headers={"Authorization": f"Bearer {self._api_key}"},
+            timeout=self._timeout,
+        )
+        resp.raise_for_status()
+        data = resp.json()
+        if data.get("code"):
+            # DashScope 部分失败以 HTTP 200 + 顶层 code/message 返回（WeKnora 同款检查）
+            raise ValueError(f"bailian rerank code={data['code']}: {data.get('message', '')}")
+        results = (data.get("output") or {}).get("results") or []
+        return _parse_bailian_scores(results, len(docs))
+
+
+def _parse_bailian_scores(results: list, n: int) -> list[float]:
+    """results 按 index 对位映射为 0-10 分数；数量/越界/重复/分数非法即抛错。
+
+    从严不补 0：补 0 会让缺失候选被阈值静默滤掉，掩盖契约漂移（对齐
+    parse_scores 的严格惯例，异常走 RRF 降级链）。
+    """
+    if len(results) != n:
+        raise ValueError(f"bailian results 数量 {len(results)} 与候选数 {n} 不符")
+    scores: list[float | None] = [None] * n
+    for r in results:
+        i = r.get("index")
+        if not isinstance(i, int) or isinstance(i, bool) or not 0 <= i < n or scores[i] is not None:
+            raise ValueError(f"bailian results index 非法或重复: {i!r}")
+        v = r.get("relevance_score")
+        if not isinstance(v, (int, float)) or isinstance(v, bool) or not 0.0 <= v <= 1.0:
+            raise ValueError(f"bailian relevance_score 非法: {v!r}")
+        scores[i] = float(v) * 10.0
+    return scores  # type: ignore[return-value]  # 数量已校验，无 None 残留
+
+
+def build_reranker(
+    mode: str,
+    llm: RagLLM | None,
+    *,
+    api_key: str = "",
+    endpoint: str = "",
+    model: str = "qwen3.7-text-rerank",
+) -> LLMReranker | BailianReranker | None:
+    """RERANK_MODE → 精排器（app 装配与评测脚本共用收口，别各写一份）。
+
+    off / 缺凭证返 None（= 不精排）；bailian 缺 key 告警后退化为 RRF 直跑——
+    不崩不偷换 flash（对齐 IQS_API_KEY 空值关断惯例）。
+    """
+    if mode == "off":
+        return None
+    if mode == "flash":
+        return LLMReranker(llm) if llm is not None else None
+    if mode == "bailian":
+        if not api_key:
+            print("[rag] RERANK_MODE=bailian 但 DASHSCOPE_API_KEY 为空，退化为不精排（RRF 直跑）")
+            return None
+        return BailianReranker(api_key, endpoint=endpoint, model=model)
+    raise ValueError(f"未知 RERANK_MODE {mode!r}（合法：flash|bailian|off，on=flash 别名）")

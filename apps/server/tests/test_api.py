@@ -191,3 +191,27 @@ def test_business_reset_admin_only(tmp_path: Path, biz, mem, auth, sess):
 def test_search_requires_login(tmp_path: Path, biz, mem, auth, sess):
     c = make_client(tmp_path, biz, mem, auth, sess)
     assert c.post("/api/search", json={"query": "图书馆", "k": 3}).status_code == 401
+
+
+# ---------- P41：_build_retriever 精排引擎接线 ----------
+
+
+def test_build_retriever_selects_rerank_engine(tmp_path: Path):
+    from gewu.api.app import _build_retriever
+    from gewu.rag.retrieve import BailianReranker, LLMReranker
+
+    class _LLM:
+        def has_key(self) -> bool:
+            return True
+
+    base = dict(data_dir=tmp_path)
+    s_flash = Settings.load(env={"RERANK_MODE": "on", **base})  # 别名走通装配路径
+    assert isinstance(_build_retriever(s_flash, None, _LLM()).reranker, LLMReranker)
+    s_bailian = Settings.load(
+        env={"RERANK_MODE": "bailian", "DASHSCOPE_API_KEY": "k", "RERANK_PASSAGE": "titled", **base}
+    )
+    retriever = _build_retriever(s_bailian, None, _LLM())
+    assert isinstance(retriever.reranker, BailianReranker)
+    assert retriever.rerank_passage == "titled"  # 口径随 settings 进 Retriever
+    s_nokey = Settings.load(env={"RERANK_MODE": "bailian", **base})
+    assert _build_retriever(s_nokey, None, _LLM()).reranker is None  # 缺 key 关断

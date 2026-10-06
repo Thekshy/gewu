@@ -2,9 +2,20 @@
 
 from __future__ import annotations
 
+import json
+
+import httpx
 import pytest
 
-from gewu.rag.retrieve import LLMReranker, Retriever, parse_scores
+from gewu.rag.retrieve import (
+    BAILIAN_INSTRUCT,
+    BAILIAN_RERANK_PATH,
+    BailianReranker,
+    LLMReranker,
+    Retriever,
+    build_reranker,
+    parse_scores,
+)
 from gewu.rag.store import ChunkRow, DocMeta, MissingVectorsError, Scored, rrf_fuse
 
 
@@ -310,3 +321,161 @@ def test_rewriter_expand_dedupes_repeated_tokens():
     rr = Retriever(_store_two_ways(), k=3, client=llm)
     out = rr.rewriter.expand("食堂位置 就餐指南")
     assert out == "食堂位置 就餐指南 用餐安排"
+
+
+# ---------- P41：百炼 rerank（httpx.MockTransport 回放，不打真网） ----------
+
+
+# 官方文档响应示例形状（WeKnora golden test 做法，钉住解析器不漂移）：
+# document.text 回显可缺省、index 乱序、relevance_score 4 位小数
+def _bailian_response(items: list[dict]) -> dict:
+    return {"output": {"results": items}, "usage": {"total_tokens": 24}, "request_id": "r-1"}
+
+
+def _bailian(handler) -> BailianReranker:
+    return BailianReranker(
+        "k-test",
+        endpoint="https://rerank.example",
+        client=httpx.Client(transport=httpx.MockTransport(handler)),
+    )
+
+
+def test_bailian_request_shape_and_score_mapping():
+    captured: dict = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        captured["path"] = request.url.path
+        captured["auth"] = request.headers["Authorization"]
+        captured["body"] = json.loads(request.content.decode("utf-8"))
+        return httpx.Response(
+            200,
+            json=_bailian_response(
+                [
+                    {"document": {"text": "上海气候"}, "index": 1, "relevance_score": 0.7314},
+                    {"document": {"text": "北京美食"}, "index": 0, "relevance_score": 0.0002},
+                    {"index": 2, "relevance_score": 0.5},
+                ]
+            ),
+        )
+
+    scores = _bailian(handler).rerank("上海 的 天气", ["北京美食介绍", "上海气候概述", ""])
+    assert scores == [pytest.approx(0.002), pytest.approx(7.314), pytest.approx(5.0)]
+    assert captured["path"] == BAILIAN_RERANK_PATH
+    assert captured["auth"] == "Bearer k-test"
+    body = captured["body"]
+    assert body["model"] == "qwen3.7-text-rerank"
+    # 空串候选换空格；query/documents 走嵌套契约
+    assert body["input"] == {
+        "query": "上海 的 天气",
+        "documents": ["北京美食介绍", "上海气候概述", " "],
+    }
+    assert body["parameters"] == {
+        "top_n": 3,
+        "return_documents": False,
+        "instruct": BAILIAN_INSTRUCT,
+    }
+
+
+def test_bailian_timeout_propagates_and_retriever_falls_back():
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise httpx.ConnectTimeout("connect timed out")
+
+    rr = Retriever(_store_two_ways(), k=3, client=FakeLLM(), reranker=_bailian(handler))
+    # 超时异常不吞、整链退 RRF 粗排（[2,4,1] → 1/2 同父去重 → [9,8]）
+    assert [h.chunk_id for h in rr.search("q", 3)] == [9, 8]
+
+
+@pytest.mark.parametrize(
+    "resp_factory",
+    [
+        lambda: httpx.Response(500, json={"code": "InternalError"}),  # HTTP 非 2xx
+        lambda: httpx.Response(
+            200, json={"code": "InvalidParameter", "message": "空串"}
+        ),  # 200+code
+        lambda: httpx.Response(200, json={}),  # 缺 output.results
+        lambda: httpx.Response(
+            200, json=_bailian_response([{"index": 0, "relevance_score": 0.5}])
+        ),  # 短一个
+        lambda: httpx.Response(
+            200, json=_bailian_response([{"index": 3, "relevance_score": 0.5}])
+        ),  # index 越界
+        lambda: httpx.Response(
+            200,
+            json=_bailian_response(
+                [{"index": 0, "relevance_score": 0.5}, {"index": 0, "relevance_score": 0.6}]
+            ),
+        ),  # 重复
+        lambda: httpx.Response(
+            200,
+            json=_bailian_response(
+                [{"index": 0, "relevance_score": 1.5}, {"index": 1, "relevance_score": 0.1}]
+            ),
+        ),  # 分数超界
+    ],
+)
+def test_bailian_rejects_bad_responses(resp_factory):
+    def handler(request: httpx.Request) -> httpx.Response:
+        return resp_factory()
+
+    with pytest.raises((ValueError, httpx.HTTPError)):
+        _bailian(handler).rerank("q", ["a", "b"])
+
+
+def test_bailian_code_message_surfaced():
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json={"code": "InvalidApiKey", "message": "key 无效"})
+
+    with pytest.raises(ValueError, match="InvalidApiKey.*key 无效"):
+        _bailian(handler).rerank("q", ["a"])
+
+
+def test_bailian_empty_candidates_skips_request():
+    def handler(request: httpx.Request) -> httpx.Response:
+        raise AssertionError("空候选不应发请求")
+
+    assert _bailian(handler).rerank("q", []) == []
+
+
+# ---------- P41：build_reranker 收口与 passage 口径 ----------
+
+
+def test_build_reranker_modes():
+    llm = FakeLLM()
+    assert build_reranker("off", llm) is None
+    assert isinstance(build_reranker("flash", llm), LLMReranker)
+    assert build_reranker("flash", None) is None
+    r = build_reranker("bailian", llm, api_key="k", endpoint="https://x")
+    assert isinstance(r, BailianReranker)
+    with pytest.raises(ValueError, match="flash"):
+        build_reranker("weird", llm)
+
+
+def test_build_reranker_bailian_without_key_degrades(capsys):
+    assert build_reranker("bailian", FakeLLM()) is None
+    assert "DASHSCOPE_API_KEY" in capsys.readouterr().out
+
+
+class RecordingReranker:
+    """捕获精排输入的替身（验 passage 拼装口径）。"""
+
+    def __init__(self) -> None:
+        self.calls: list[list[str]] = []
+
+    def rerank(self, query: str, texts: list[str]) -> list[float]:
+        self.calls.append(texts)
+        return [5.0] * len(texts)
+
+
+def test_rerank_passage_body_default():
+    rec = RecordingReranker()
+    rr = Retriever(_store_two_ways(), k=3, client=FakeLLM(), reranker=rec)
+    rr.search("q", 3)
+    assert rec.calls == [["文本2", "文本4", "文本1", "文本3"]]
+
+
+def test_rerank_passage_titled_aligns_with_embed_content():
+    rec = RecordingReranker()
+    rr = Retriever(_store_two_ways(), k=3, client=FakeLLM(), reranker=rec, rerank_passage="titled")
+    rr.search("q", 3)
+    # 与 ingest.embed_content 同形状：标题 + 面包屑(P) + 正文；FakeStore 标题为「标题d1」
+    assert rec.calls == [[f"标题d1\nP\n文本{i}" for i in (2, 4, 1, 3)]]
