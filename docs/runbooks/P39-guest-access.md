@@ -84,7 +84,10 @@ daily_token_limit=50k)` → set-cookie（max_age 对齐 TTL）→ 返回体同
 - login 页顶回条件改「非 guest 才顶回」+ 游客态文案与「返回对话」出口；
   UserMenu 游客态=徽章+「登录」升级入口（登出对一次性身份无意义）。
 - nav 游客隐藏「系统」组（console/memory/admin）；聊天页游客提示条
-  （静音 Alert，含登录链接）+ composer「游客身份」徽章（ROLE_LABEL 加
+  （静音 Alert；**10-06 降噪**：封闭内测访客无法注册，「登录解锁」引导对访客
+  是死路——文案只留身份感知+数据短期保留+「内测期暂不开放注册」，
+  登录入口收到侧栏角落的静音图标钮，服务站点主人评测登录）+
+  composer「游客身份」徽章（ROLE_LABEL 加
   guest）。
 
 ### 2.5 清理（maintenance）

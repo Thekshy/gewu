@@ -7,7 +7,8 @@ import { ROLE_LABEL } from "@/lib/labels";
 import { Button, buttonVariants } from "@/components/ui/button";
 
 /** 侧栏底部登录态：未登录=登录入口；已登录=昵称+角色徽章+登出。
- *  游客（P39）=徽章 + 登录升级入口——一次性身份，登出无意义，引导转正。 */
+ *  游客（P39）=徽章 + 静音登录图标钮——封闭内测期访客不注册不登录，
+ *  此入口实际服务站点主人的评测/管理登录，刻意做成角落安静图标。 */
 export default function UserMenu() {
   const { user, loading } = useUser();
   if (loading) {
@@ -31,11 +32,15 @@ export default function UserMenu() {
         </span>
         <Link
           href="/login"
-          className={buttonVariants({ variant: "outline", size: "sm" })}
-          title="登录后解锁长期记忆等完整功能"
+          className={buttonVariants({
+            variant: "ghost",
+            size: "icon-sm",
+            className: "text-muted-foreground",
+          })}
+          aria-label="登录"
+          title="登录"
         >
           <LogIn className="size-4" aria-hidden />
-          登录
         </Link>
       </div>
     );

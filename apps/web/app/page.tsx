@@ -444,11 +444,7 @@ export default function Home() {
               <Alert className="py-2.5">
                 <Info className="size-4" aria-hidden />
                 <AlertDescription>
-                  游客模式：免登录直接体验，数据短期保留；部分功能（长期记忆、控制台）需
-                  <Link href="/login" className="mx-1 underline underline-offset-2">
-                    登录
-                  </Link>
-                  后使用。
+                  游客模式：免登录直接体验，数据短期保留。（内测期暂不开放注册）
                 </AlertDescription>
               </Alert>
             </div>
