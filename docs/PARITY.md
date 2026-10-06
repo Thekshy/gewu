@@ -202,6 +202,30 @@ classic 28 题历史报告见 eval/reports/orchestration-*.md；tag
   invite_codes 表/CLI/admin 面保留）。store 层 `register(invite_code=None)`
   跳过核销，模式判定只在 API 层。
 
+## 0.12 P41 精排引擎切换契约（百炼 rerank 接入，2026-10-06）
+
+- **`RERANK_MODE` 枚举**：`flash`（LLM 精排，缺省）| `bailian`（百炼专用
+  rerank）| `off`；**`on` 为 flash 的历史别名**（P41 前取值，归一后存储）。
+  非法值 `Settings.load` 即抛错（fail-fast，报错文案含合法枚举）。装配收口
+  `build_reranker(mode, llm, *, api_key, endpoint, model)`（app 与评测共用）。
+- **`bailian` 模式**：`BailianReranker` 走百炼 text-rerank 嵌套契约
+  （`qwen3.7-text-rerank`；qwen3-rerank 才是平铺契约），`relevance_score∈[0,1]`
+  为**请求内相对分**（不可跨请求比较），消费分 = `relevance_score × 10` 对齐
+  0-10 标尺；请求携带 `instruct`（与 RERANK_SYSTEM 的 10/5/0 锚点对齐，勿省略）；
+  `top_n=候选全量`、空串候选换空格、HTTP 超时 5s、单次不重试。
+- **降级链不变**：rerank 异常/非法响应（含 HTTP 200+顶层 code 失败、results
+  数量不符、index 越界/重复、分数超界）→ `_rerank_or_keep` 现有 except 兜底
+  退 RRF 原序；**bailian 失败直落 RRF，不中间垫 flash**。
+- **凭证关断**：`DASHSCOPE_API_KEY` 空 = bailian 模式告警后不精排（RRF 直跑），
+  不崩不偷换 flash（IQS 空值关断同款）。端点/模型可配
+  （`BAILIAN_RERANK_ENDPOINT` / `BAILIAN_RERANK_MODEL`）。
+- **`RERANK_PASSAGE`**：`body`（裸正文，缺省）| `titled`（title+面包屑+正文，
+  与 `ingest.embed_content` 嵌入拼装同形状）。实验口径：titled 牺牲少量
+  Recall 换 MRR/NDCG（135 题：R −0.74pp / MRR +2.04pp / 挑战 NDCG +2.08pp），
+  未达翻缺省门槛（R@6 ≥ +1pp），留开关。
+- **消费逻辑零改动**：复合分 0.7×(模型分/10)+0.3×融合分、阈值 2.0、×0.7
+  退化、保底 top1 ≥1.5 语义不变（§7.5 管线；切换仅换打分头）。
+
 ## 1. 服务总览
 
 - 监听端口 `:8000`(HTTP)。
@@ -704,7 +728,9 @@ Settings）；下表为契约面摘要：
 | DAILY_TOKEN_BUDGET / DAILY_USER_BUDGET | 2000000 / 200000 | 全局闸 / 个人闸（P23） |
 | RETRIEVAL_K / RETRIEVAL_POOL_N | 6 / 20 | 检索返回数 / 双路候选池（P15） |
 | RRF_K / RRF_VECTOR_WEIGHT / RRF_KEYWORD_WEIGHT | 60 / 0.7 / 0.3 | 加权 RRF 融合（P15） |
-| RERANK_MODE / RERANK_THRESHOLD | on / 2.0 | LLM 精排与模型分阈值（全滤空自动退化） |
+| RERANK_MODE / RERANK_THRESHOLD | flash / 2.0 | 精排引擎选择（P41：flash=LLM / bailian=百炼 / off；on=flash 别名）与模型分阈值（全滤空自动退化） |
+| RERANK_PASSAGE | body | 精排候选拼装口径（P41：body=裸正文 / titled=title+面包屑+正文，实验开关） |
+| DASHSCOPE_API_KEY / BAILIAN_RERANK_ENDPOINT / BAILIAN_RERANK_MODEL | 空 / 工作空间域名 / qwen3.7-text-rerank | 百炼精排凭证与端点（P41；key 空=关断退 RRF，§0.12） |
 | CHUNK_STRATEGY / CHUNK_PARENT_LIMIT / CHUNK_CHILD_LIMIT / CHUNK_OVERLAP | auto / 800 / 200 / 40 | 入库切片策略链（P15；换策略须 REBUILD=1 重建） |
 | RATE_LIMIT_PER_MINUTE | 600 | 全局限流（XFF 末段为键，§0.10） |
 | COOKIE_SECURE / CORS_ORIGINS | false / 空 | https 部署开 cookie Secure；跨域白名单（空=仅同源，P21） |

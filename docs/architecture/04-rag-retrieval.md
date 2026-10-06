@@ -23,7 +23,8 @@ flowchart LR
 | `RRF_K` | 60 | RRF 公式的平滑常数 |
 | `RRF_VECTOR_WEIGHT` / `RRF_KEYWORD_WEIGHT` | 0.7 / 0.3 | 加权 RRF 两路权重 |
 | `retrieval_k` | 6（`RETRIEVAL_K`） | 最终返回条数（factual 与 research 共用） |
-| `RERANK_MODE` | on | LLM 精排开关（off 时跳过精排级） |
+| `RERANK_MODE` | flash | 精排引擎（P41）：flash=LLM 打分 / bailian=百炼专用 rerank / off；on=flash 别名 |
+| `RERANK_PASSAGE` | body | 精排候选拼装（body=裸正文 / titled=title+面包屑+正文，实验口径） |
 | `RERANK_THRESHOLD` | 2.0 | 精排模型分阈值（0~10；全滤空自动退化） |
 | `EmbedDim` | 2048 | 向量维度（与 embedding 模型一致） |
 
@@ -172,9 +173,9 @@ sequenceDiagram
     end
     S-->>R: 两路 Scored id 列表
     R->>R: rrf_fuse（k=60，加权 0.7/0.3，归一 [0,1]，平局按首现序）
-    opt RERANK_MODE=on 且候选>k
-        R->>F: 逐条打 0~10 分
-        F-->>R: {"scores":[...]}
+    opt RERANK_MODE≠off 且候选>k（P41：flash=LLM / bailian=百炼 rerank）
+        R->>F: flash 逐条打 0~10 分 / 百炼 relevance_score×10
+        F-->>R: 0~10 分数列表（失败退 RRF 原序）
         R->>R: 复合分排序 + 阈值过滤（全滤空自动退化）
     end
     R->>S: chunk_rows + parent_rows + doc_meta_map（三批取行）
