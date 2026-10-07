@@ -214,9 +214,16 @@
   P36 拍板挂账，建议 P37）
 - trace TTL 30 天清理、admin trace 可视化页、feedback join（P27 B 期清单）
 - run_eval 认证适配（P21 起全站需登录，评测客户端未带会话；P28 发现）
-- 危险词黑名单丰富化（guardrails.py 首版核心词，P28/P31 延续挂账）
+- 危险词黑名单丰富化（guardrails.py 首版核心词，P28/P31 延续挂账；若做
+  本地词表：pyahocorasick AC 自动机 + 自建归一化层，策略清单参照
+  houbb/sensitive-word（Apache-2.0）；guard 词表外部化候选
+  GUARD_EXTRA_WORDS_FILE 同挂——P42 调研结论）
 - 会话创建配额（登录用户可批量建会话，限流内低危）
 - web_search 全文抓取二期须带 SSRF 校验（拦内网地址）
+- provider 审查兜底二段（P42 挂账）：`user_id` 终端用户隔离进 LLM 请求
+  （平台可封违规终端用户而非企业 key，游客通道下有价值）；主循环 200
+  错误文案形态不逐 delta 巡检；finish=sensitive 带 tool_calls 形态——
+  见 [P42 任务书](runbooks/P42-provider-filter-fallback.md) §6
 - 长程复杂任务支撑（复合 flow / skill 引导 / 任务状态）已推演成文、未立项：
   三缺口诊断、方案与使用场景、立项评测门禁见
   [walkthrough/11](walkthrough/11-long-horizon-tasks.md)（2026-10）

@@ -226,6 +226,32 @@ classic 28 题历史报告见 eval/reports/orchestration-*.md；tag
 - **消费逻辑零改动**：复合分 0.7×(模型分/10)+0.3×融合分、阈值 2.0、×0.7
   退化、保底 top1 ≥1.5 语义不变（§7.5 管线；切换仅换打分头）。
 
+## 0.13 P42 provider 内容审查拒绝兜底契约（2026-10-07）
+
+- **立场**：内容审查由 provider 侧安全策略执行，本系统只做识别与优雅降级，
+  不做、也不需要做任何绕过；识别只按官方错误契约形态与审查类通用词面，
+  任何真实敏感词条不进代码/测试/日志（红线）。
+- **识别口径**（`llm/safety.py`）：异常形态 = HTTP 400/403 上错误码 `1301`
+  或 body 含顶层 `contentFilter` 键（智谱契约）或审查类消息词面（仅
+  400/403 启用）；200 形态 = `finish_reason ∈ {content_filter, sensitive}`
+  （后者为智谱流式非标准值）或 content 为「拒绝动作 × 审查话题」双词面
+  文案 / JSON error 形状。1302-1306 限流、1000-1005 鉴权、429、普通异常
+  永不命中。
+- **归一异常**：`ContentFilterError`——LLMService.chat 200 形态命中即抛，
+  小模型族六调用点既有 except 降级零改动接住（审查类失败不新增任何重试）；
+  降级日志区分「被内容审查拒绝」成因。
+- **主循环被拒**：SSE 端点分类分支 → `route_decision(refusal,
+  layer=provider, by_llm=False)` + 拒答文案走正常回答流 + `done(completed)`
+  （WeKnora observe.go 同款「按正常完成流关闭」）；不发 follow_ups、不固化
+  记忆；部分流出文本先 answer_reset 转存为 step。**SSE 事件集与 done
+  reason 枚举零变化**，refusal 语义由 route 事件与 trace 承载。
+- **finish 收口**：`finish_reason ∈ {content_filter, sensitive}` 按截断
+  语义收口（truncated=True + status 行「回答被安全策略中断」），done
+  reason 沿用 max_tokens 既有映射——P10 契约 content_filter 位补齐。
+- **开关**：`CONTENT_FILTER_FALLBACK` 缺省开，`=0` 紧急回退（LLMService
+  原样返回文本、SSE 走既有通用 error 路径、AgentDone 不认 filter finish
+  ——全部改前行为）。
+
 ## 1. 服务总览
 
 - 监听端口 `:8000`(HTTP)。
@@ -741,6 +767,7 @@ Settings）；下表为契约面摘要：
 | GUEST_MODE | false | 游客开放通道（P39 §0.11）：=1 开 `POST /api/auth/guest` 免登签发；关=现状 |
 | GUEST_DAILY_TOKEN_LIMIT / GUEST_SESSION_TTL_DAYS | 50000 / 7 | 游客日 token 限额 / 会话硬过期天数（不滑动续期） |
 | OPEN_REGISTRATION | false | 开放注册（P39 §0.11 二段）：=1 免邀请码（register IP 5 次/分）；关=邀请码内测制 |
+| CONTENT_FILTER_FALLBACK | 1 | provider 内容审查拒绝兜底（P42 §0.13）：=0 紧急回退改前行为 |
 
 已退役开关：ROUTER_MODE、SESSION_STORE（checkpointer 接管）、CHUNK_MODE
 （`CHUNK_STRATEGY` 面向入库侧）、QUERY_REWRITE（P31-2 随 classic 退役）、

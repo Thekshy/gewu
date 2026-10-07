@@ -265,7 +265,9 @@ WeKnora 的 rerank 分两层：`internal/reranking`（消费层：阈值退化/t
 - 百炼工作空间域名与 key 同生命周期：换工作空间 = endpoint + key 一起换。
 - rerank 计费不进 `DAILY_TOKEN_BUDGET`（只记 LLM 接缝），成本监控靠百炼控制台；
   目录价量级下 219 篇语料场景可忽略。
-- 挂账（不本票）：rewriter fail-open 缺陷（P40 撞坑 #1）；flash 降级为后备开关后的
+- 挂账（不本票）：~~rewriter fail-open 缺陷（P40 撞坑 #1）~~（**P42 已闭线**：
+  `llm/safety.py` 200 文案形态拦截 + `ContentFilterError` 统一异常，见
+  [P42 任务书](P42-provider-filter-fallback.md) §2.2）；flash 降级为后备开关后的
   去留评估；rerank span 级埋点；`qwen3-rerank` 平铺契约支持（真要用再解）；
   MMR 多样性选择（WeKnora SelectMMR——同文档父块挤占 top-6 成为指标瓶颈时再议，
   参见 §2.6 不吸收清单）。
