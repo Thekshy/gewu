@@ -19,9 +19,9 @@ const notoSerif = Noto_Serif_SC({
 });
 
 export const metadata: Metadata = {
-  title: "格物 · 校园智能问答",
+  title: "格物 · 校园智能服务平台",
   description:
-    "格物 Gewu：高校场景 Deep Research 智能问答系统（演示数据为虚构的「钱塘大学」）",
+    "格物 Gewu：面向高校场景的智能体平台——制度问答、业务办理与长期记忆（演示数据为虚构的「钱塘大学」）",
 };
 
 export default function RootLayout({ children }: { children: React.ReactNode }) {

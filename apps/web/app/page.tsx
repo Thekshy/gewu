@@ -423,7 +423,7 @@ export default function Home() {
                 格
               </span>
               <span className="font-display text-[15px] font-semibold">格物</span>
-              <span className="hidden text-xs text-muted-foreground lg:inline">校园智能问答</span>
+              <span className="hidden text-xs text-muted-foreground lg:inline">校园智能服务平台</span>
             </Link>
           </div>
           <div className="px-2 pt-1">
