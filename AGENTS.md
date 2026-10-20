@@ -46,3 +46,11 @@
 
 工作区根目录的 AGENTS.md（Ponytail 懒惰阶梯）管代码级「少写」；本文件管生态级
 「少造」。两者叠加生效：先问要不要造，决定造了再问怎么写得最少。
+
+## Cursor Cloud specific instructions
+
+- 服务端依赖在 `apps/server`：`uv sync --frozen`（Python 3.12）。前端在 `apps/web`：`npm ci`（Node 22）。门禁与 CI 相同：`uv run ruff check .`、`uv run ruff format --check .`、`uv run pytest -q`、`npm run build`。
+- PostgreSQL 17 + pgvector 用 `docker compose up -d --wait pg`，宿主端口 `127.0.0.1:5433`。Cloud VM 里 Docker 需要 `fuse-overlayfs` 存储驱动和 iptables-legacy，由环境 `start` 拉起 dockerd。
+- pytest 从 `PG_DSN`（库名必须是 `gewu`）推导测试库 `gewu_test`。未设置时会去连不存在的 `gewu_test_test`，PG 用例全部跳过。在仓库根 `.env` 写 `PG_DSN=postgres://gewu:gewu@127.0.0.1:5433/gewu?sslmode=disable`（与 CI 一致）。先 `CREATE DATABASE gewu_test OWNER gewu`。
+- 没有 `EMBED_API_KEY` 时，在 `apps/server` 执行 `uv run python ingest_main.py --no-embed` 建表并灌入关键词索引。`/api/health`、注册登录、文档列表可用。向量检索会因缺向量索引失败；对话需要 `LLM_API_KEY`。
+- API：`cd apps/server && uv run uvicorn main:app --host 127.0.0.1 --port 8000`。前端：`cd apps/web && npm run dev`（:3100，`/api` 同源代理到 8000）。
